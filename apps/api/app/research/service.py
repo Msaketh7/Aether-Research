@@ -112,14 +112,18 @@ class ResearchService:
         )
 
         await self._repository.add(run)
+        # Commit before dispatching. Two things depend on this ordering: a
+        # worker can never dequeue an id that does not resolve yet, and a
+        # failure to dispatch leaves a durable `queued` run rather than
+        # discarding what the user asked for.
+        await self._repository.commit()
+
         await self._emit(
             run,
             ResearchEventType.RESEARCH_STARTED,
             {"question": run.question, "mode": run.mode.value},
         )
 
-        # Ordering matters: the run is durable before the job is visible, so a
-        # worker can never dequeue an id that does not resolve.
         try:
             await self._queue.enqueue(run.id)
         except Exception as exc:

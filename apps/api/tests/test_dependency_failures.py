@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
+
 from tests.conftest import API, valid_request
 
 
@@ -31,10 +32,14 @@ class BrokenQueue:
 
 @pytest.fixture
 def broken_queue_client(client: AsyncClient) -> AsyncClient:
-    """Swap the queue on the live app the client is already bound to."""
+    """Swap the queue on the live app the client is already bound to.
+
+    Only ``app.state.queue`` needs replacing: the research service is composed
+    per request from whatever the state holds, so the next request picks this
+    up without any further patching.
+    """
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.queue = BrokenQueue()
-    app.state.research_service._queue = app.state.queue
     return client
 
 

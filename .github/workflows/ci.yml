@@ -58,6 +58,29 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+
+    services:
+      # The pgvector image, not plain postgres: the suite must exercise the
+      # 0002 migration and the embedding column, which a stock server cannot
+      # create. Locally the tests fall back to a throwaway cluster and skip the
+      # vector-specific assertions with an explicit reason.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: aether
+          POSTGRES_PASSWORD: aether
+          POSTGRES_DB: aether_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aether"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AETHER_TEST_DATABASE_URL: postgresql+asyncpg://aether:aether@127.0.0.1:5432/aether_test
+
     steps:
       - uses: actions/checkout@v5
 
@@ -78,9 +101,15 @@ jobs:
       - name: Typecheck
         run: uv run mypy app
 
+      # Reversibility is a deployment property, so it is verified separately
+      # against a clean database rather than inside the suite, which shares one.
+      - name: Migrations round trip
+        run: uv run python scripts/check_migrations.py
+
       # Includes the cross-language contract tests, which read
       # packages/shared-types and fail if the Python and TypeScript
-      # vocabularies have diverged.
+      # vocabularies have diverged, and the schema tests, which run against the
+      # database Alembic actually built.
       - name: Tests
         run: uv run pytest
 

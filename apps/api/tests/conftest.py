@@ -1,43 +1,131 @@
 """Test fixtures.
 
-Every test runs against a real ASGI application through a real HTTP client -
-routing, dependency injection, middleware, validation and the exception
-handlers all execute. Only the process boundaries (Postgres, Redis) are absent,
-which is exactly what ``app_env="test"`` selects.
+Every test runs against a real ASGI application over a real HTTP client and a
+real, migrated Postgres. Routing, dependency injection, middleware, validation,
+the exception handlers, the session-per-request transaction and the SQL all
+execute. Only Redis is substituted, by the in-memory queue that
+``app_env="test"`` selects.
+
+Using a real database is not thoroughness for its own sake: the schema is the
+deliverable of this phase, and ``citext``, ``jsonb``, arrays, generated columns,
+check constraints and keyset pagination behave differently or not at all
+anywhere else.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import os
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
+from alembic import command
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 
 from app.auth.principal import DEV_USER_HEADER, DEV_USER_ID
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
+from app.db.base import Base
 from app.main import create_app
+from tests.support.postgres import SKIP_REASON, ProvisionedDatabase, provision_database
 
 BASE_URL = "http://testserver"
 API = "/api/v1"
+API_ROOT = Path(__file__).resolve().parents[1]
+
+#: The revision to migrate to when pgvector is unavailable. The core schema
+#: stands on its own; only the embedding column needs the extension.
+CORE_SCHEMA_REVISION = "0001_core_schema"
+
+
+def _apply_migrations(database: ProvisionedDatabase) -> None:
+    """Migrate the test database by running the real Alembic pipeline.
+
+    Not ``Base.metadata.create_all``: that would test the models against
+    themselves and prove nothing about the migrations, which are what actually
+    build the schema in every other environment.
+    """
+    config = Config(str(API_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(API_ROOT / "migrations"))
+
+    previous = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database.url
+    get_settings.cache_clear()
+    try:
+        command.upgrade(config, "head" if database.has_pgvector else CORE_SCHEMA_REVISION)
+    finally:
+        if previous is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous
+        get_settings.cache_clear()
+
+
+@pytest.fixture(scope="session")
+def postgres() -> Iterator[ProvisionedDatabase | None]:
+    """A migrated database for the whole session, or ``None`` if unobtainable."""
+    with provision_database() as database:
+        if database is not None:
+            _apply_migrations(database)
+        yield database
 
 
 @pytest.fixture
-def settings() -> Settings:
+def settings(postgres: ProvisionedDatabase | None) -> Settings:
     """Test configuration.
 
     The SSE timings are compressed so a stream test finishes in milliseconds
     instead of waiting on a 15-second production heartbeat.
     """
+    if postgres is None:
+        pytest.skip(SKIP_REASON)
     return Settings(
         app_env="test",
         log_level="warning",
+        database_url=postgres.url,
         sse_heartbeat_seconds=1,
         sse_max_connection_seconds=2,
         max_concurrent_runs_per_user=3,
         default_page_size=20,
         max_page_size=100,
+        # A small pool surfaces a leaked session as a timeout rather than as a
+        # slow, mysterious suite.
+        db_pool_size=5,
+        db_max_overflow=2,
     )
+
+
+#: Built once. The table list only changes when a model is added.
+TRUNCATE_STATEMENT = (
+    "TRUNCATE "
+    + ", ".join(f'"{name}"' for name in Base.metadata.tables)
+    + " RESTART IDENTITY CASCADE"
+)
+
+
+@pytest.fixture(autouse=True)
+async def clean_database(postgres: ProvisionedDatabase | None) -> AsyncIterator[None]:
+    """Empty every table between tests.
+
+    TRUNCATE rather than recreating the schema: it is far faster, and CASCADE
+    means the dependency order does not have to be maintained by hand as tables
+    are added.
+
+    A bare asyncpg connection rather than a SQLAlchemy engine: building a pool
+    for one statement, once per test, was measurably the most expensive thing
+    the suite did.
+    """
+    yield
+    if postgres is None:
+        return
+
+    connection = await asyncpg.connect(postgres.url.replace("+asyncpg", ""))
+    try:
+        await connection.execute(TRUNCATE_STATEMENT)
+    finally:
+        await connection.close()
 
 
 @pytest.fixture

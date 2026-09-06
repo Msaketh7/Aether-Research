@@ -26,8 +26,6 @@ from app.observability.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.research.events import InMemoryEventBroker
-from app.research.repository import InMemoryResearchRepository
-from app.research.service import ResearchService
 from app.workers.queue import InMemoryJobQueue, JobQueue, RedisJobQueue, build_redis
 
 logger = get_logger(__name__)
@@ -36,11 +34,11 @@ DESCRIPTION = """
 Autonomous multi-agent research: decomposition, parallel retrieval, evidence
 extraction, contradiction detection and citation-validated reports.
 
-**This build is Phase 2 (backend foundation).** The API surface, validation,
-authorisation, error contract and progress stream are real. There is no worker
-consuming the queue yet, so a created run stays `queued`, and endpoints for
-data a run has not produced return empty results or `not_implemented` rather
-than fabricated content.
+**This build is Phase 3 (data layer).** The API surface, validation,
+authorisation, error contract, progress stream and Postgres persistence are
+real. There is no worker consuming the queue yet, so a created run stays
+`queued`, and endpoints for data a run has not produced return empty results or
+`not_implemented` rather than fabricated content.
 """.strip()
 
 
@@ -59,16 +57,12 @@ def _build_queue(settings: Settings) -> JobQueue:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
 
+    # Process-lifetime objects only. Repositories and the research service are
+    # request-scoped, because each needs the session that is that request's
+    # transaction (see app/api/deps.py).
     app.state.database = Database(settings)
     app.state.queue = _build_queue(settings)
     app.state.broker = InMemoryEventBroker(buffer_size=settings.sse_replay_buffer_size)
-    app.state.repository = InMemoryResearchRepository()
-    app.state.research_service = ResearchService(
-        repository=app.state.repository,
-        queue=app.state.queue,
-        broker=app.state.broker,
-        settings=settings,
-    )
 
     logger.info(
         "api starting",

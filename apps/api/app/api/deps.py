@@ -1,21 +1,29 @@
 """Dependency injection.
 
-Everything a route needs is resolved here from ``app.state``, which is
-assembled once at startup. Routes therefore have no knowledge of how a
-repository, queue or broker is constructed, which is what lets Phase 3 swap the
-in-memory repository for Postgres without touching a single endpoint.
+Process-lifetime objects (settings, engine, queue, event broker) live on
+``app.state`` and are assembled once at startup. Request-lifetime objects - a
+database session, the repositories bound to it, and the service composed from
+them - are built here, per request.
+
+The split matters: a session is a transaction, and a transaction that outlives
+a request either holds a connection open or silently commits work from an
+unrelated one.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends, Header, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import DEV_USER_HEADER, Principal, resolve_principal
 from app.core.config import Settings
 from app.core.logging import user_id_var
 from app.core.pagination import PageParams
+from app.db.repositories.research import SqlAlchemyResearchRepository
+from app.db.repositories.user import UserRepository
 from app.db.session import Database
 from app.research.events import EventBroker
 from app.research.service import ResearchService
@@ -42,9 +50,19 @@ def get_broker(request: Request) -> EventBroker:
     return broker
 
 
-def get_research_service(request: Request) -> ResearchService:
-    service: ResearchService = request.app.state.research_service
-    return service
+async def get_session(
+    database: Annotated[Database, Depends(get_database)],
+) -> AsyncIterator[AsyncSession]:
+    """One transaction per request.
+
+    Commits when the handler returns, rolls back if it raises. A handler
+    therefore cannot leave a half-written run behind by returning early.
+    """
+    async with database.session() as session:
+        yield session
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 def get_principal(
@@ -55,6 +73,38 @@ def get_principal(
     principal = resolve_principal(settings, x_aether_user)
     user_id_var.set(str(principal.id))
     return principal
+
+
+async def get_current_user(
+    principal: Annotated[Principal, Depends(get_principal)],
+    session: SessionDep,
+) -> Principal:
+    """The principal, guaranteed to have a row in ``users``.
+
+    Every research run has a foreign key to that table, so this is what makes
+    the development principal usable before Phase 20 adds registration. In
+    production the row is created at sign-up and this is a no-op.
+    """
+    await UserRepository(session).ensure(principal.id, principal.email)
+    return principal
+
+
+def get_research_repository(session: SessionDep) -> SqlAlchemyResearchRepository:
+    return SqlAlchemyResearchRepository(session)
+
+
+def get_research_service(
+    repository: Annotated[SqlAlchemyResearchRepository, Depends(get_research_repository)],
+    queue: Annotated[JobQueue, Depends(get_queue)],
+    broker: Annotated[EventBroker, Depends(get_broker)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> ResearchService:
+    """Composed per request, because the repository is session-scoped.
+
+    Cheap: the service holds references, opens no connections and does no work
+    until a method is called.
+    """
+    return ResearchService(repository=repository, queue=queue, broker=broker, settings=settings)
 
 
 def get_page_params(
@@ -77,5 +127,5 @@ DatabaseDep = Annotated[Database, Depends(get_database)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
 BrokerDep = Annotated[EventBroker, Depends(get_broker)]
 ResearchServiceDep = Annotated[ResearchService, Depends(get_research_service)]
-CurrentUser = Annotated[Principal, Depends(get_principal)]
+CurrentUser = Annotated[Principal, Depends(get_current_user)]
 PageParamsDep = Annotated[PageParams, Depends(get_page_params)]

@@ -10,6 +10,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from httpx import AsyncClient
+
 from tests.conftest import API, as_user, valid_request
 
 

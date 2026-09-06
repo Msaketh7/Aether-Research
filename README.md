@@ -367,9 +367,29 @@ so a user-reported `trace_id` can be found in the logs. Internals never reach
 the client; a test asserts a connection string in an exception message does not
 appear in the response.
 
-**Persistence is an interface.** `ResearchRepository` has an in-memory adapter
-today and a Postgres one in Phase 3. Nothing above it changes, because the
-service layer only ever sees the protocol.
+**Persistence is an interface.** `ResearchRepository` is a protocol owned by
+the domain; the SQLAlchemy implementation lives in `app/db/repositories`. When
+Phase 3 replaced the in-memory adapter with Postgres, not one endpoint changed.
+
+**The database enforces what the API also validates.** 19 tables with foreign
+keys, check constraints bounding every enum and every 0-1 score, `citext` so an
+email cannot be registered twice by changing its case, `ON DELETE CASCADE` so
+deleting research leaves no orphans, and `ON DELETE RESTRICT` on citations so a
+cited claim cannot be deleted out from under a report. Validation in the
+application is the fast path; the schema is the backstop that also covers a
+migration, a backfill or a hand-written `UPDATE`.
+
+**Every query is bounded and scoped.** Each one carries a `LIMIT` or addresses a
+single row by key, and `user_id` is in the `WHERE` clause rather than applied in
+Python afterwards. Listing uses keyset pagination on `(created_at DESC, id
+DESC)` - matching the index - so a client paging through history cannot skip or
+repeat a row when two runs share a timestamp.
+
+**A session is a transaction, scoped to one request.** It commits when the
+handler returns and rolls back when it raises. The one deliberate exception is
+documented on the repository interface: a run is committed _before_ its job is
+dispatched, so a queue outage leaves a recoverable `queued` row rather than
+discarding what the user asked for.
 
 **Not-built-yet is distinguishable from empty.** An endpoint whose phase has not
 landed returns `501 not_implemented`, not a plausible-looking empty `200`.
@@ -387,7 +407,7 @@ apps/api/app/
 ├── core/           settings, logging, error taxonomy, enums, pagination
 ├── auth/           principal resolution and ownership
 ├── research/       schemas, repository boundary, event broker, service
-├── db/             engine, session factory, health probe
+├── db/             engine, session factory, ORM models, repositories, migrations
 ├── workers/        JobQueue interface, Redis and in-memory adapters
 ├── observability/  request-id and access-log middleware
 └── agents/ retrieval/ sources/ evidence/ reports/ evaluations/
@@ -428,19 +448,20 @@ aether-research/
 
 ## Current status
 
-**Phases 0-2 are complete.** The repository, documentation and local
-infrastructure exist; the frontend is a working product; and it now talks to a
-real FastAPI backend. Switching between the two data sources is one environment
-variable, with no code change
-([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
+**Phases 0-3 are complete.** The repository, documentation and local
+infrastructure exist; the frontend is a working product; it talks to a real
+FastAPI backend; and that backend persists to PostgreSQL. Switching the
+frontend between fixtures and the live API is one environment variable, with no
+code change ([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
 
-| Phase | Scope                                                                                                              | Status  |
-| ----- | ------------------------------------------------------------------------------------------------------------------ | ------- |
-| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                                    | Done    |
-| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                             | Done    |
-| 2     | Backend foundation: FastAPI, typed settings, error contract, authorisation, health probes, research API, SSE       | Done    |
-| 3     | Database: Postgres schema, Alembic migrations, pgvector, repositories                                              | Next    |
-| 4+    | Storage, model gateway, research tools, RAG, LangGraph agents, evaluation, observability, load testing, deployment | Planned |
+| Phase | Scope                                                                                                        | Status  |
+| ----- | ------------------------------------------------------------------------------------------------------------ | ------- |
+| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                              | Done    |
+| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                       | Done    |
+| 2     | Backend foundation: FastAPI, typed settings, error contract, authorisation, health probes, research API, SSE | Done    |
+| 3     | Data layer: 19-table PostgreSQL schema, Alembic migrations, pgvector, repositories, pooling                  | Done    |
+| 4     | Object storage: S3-compatible abstraction, MinIO locally                                                     | Next    |
+| 5+    | Model gateway, research tools, RAG, LangGraph agents, evaluation, observability, load testing, deployment    | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -449,12 +470,16 @@ recorded rather than resolved, and open a report where every `[n]` resolves to a
 source and the quote behind it. Every figure there is synthetic fixture data,
 and the app says so in a banner on every page.
 
-In **live mode** the same UI runs against the real API: runs are validated,
-authorised, persisted and queued, `POST /research` returns `202`, and the SSE
-stream is real. **There is no worker yet**, so a created run stays `queued` and
-the endpoints for data it has not produced return empty results or an explicit
-`not_implemented`. Nothing is fabricated to fill the gap; that is what Phases 9
-and 13 are for.
+In **live mode** the same UI runs against the real stack: runs are validated,
+authorised, written to Postgres and queued, `POST /research` returns `202`, the
+SSE stream is real, and a run survives a restart of the API process.
+
+**There is no worker yet**, so a created run stays `queued`. The tables for
+sources, evidence, reports and traces exist and are fully constrained, but
+nothing writes to them until Phases 6-12, and the endpoints return empty
+collections rather than inventing content. Capabilities whose phase has not
+landed return `501 not_implemented`, so "not built yet" is always
+distinguishable from "no results".
 
 No benchmark has been executed, and the evaluations page says so.
 

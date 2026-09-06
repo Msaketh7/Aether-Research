@@ -11,9 +11,9 @@ import logging
 
 import pytest
 from httpx import AsyncClient
-from tests.conftest import API
 
 from app.core.logging import JsonFormatter, redact, request_id_var
+from tests.conftest import API
 
 # --- error envelope -------------------------------------------------------
 

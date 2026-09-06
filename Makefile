@@ -41,8 +41,16 @@ api-test: ## Run the API test suite
 	cd $(API) && uv run pytest
 
 .PHONY: migrate
-migrate: ## Apply database migrations (schema arrives in Phase 3)
+migrate: ## Apply database migrations
 	cd $(API) && uv run alembic upgrade head
+
+.PHONY: migration
+migration: ## Autogenerate a migration from the models: make migration m="add x"
+	cd $(API) && uv run alembic revision --autogenerate -m "$(m)"
+
+.PHONY: migrate-check
+migrate-check: ## Verify migrations are reversible against a throwaway database
+	cd $(API) && uv run python scripts/check_migrations.py
 
 # --- frontend --------------------------------------------------------------
 .PHONY: dev
@@ -75,7 +83,7 @@ test-e2e: ## Playwright end-to-end smoke tests
 	npm run test:e2e --workspace $(WEB)
 
 .PHONY: ci
-ci: format-check lint typecheck test api-lint api-test ## Everything a pull request must pass
+ci: format-check lint typecheck test api-lint api-test migrate-check ## Everything a pull request must pass
 
 .PHONY: format-check
 format-check:

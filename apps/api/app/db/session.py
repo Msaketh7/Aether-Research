@@ -1,7 +1,4 @@
-"""Database engine and session management.
-
-Phase 2 establishes the connection machinery and the health probe; the schema
-and repositories arrive in Phase 3 (ADR 0004).
+"""Database engine and session management (ADR 0004).
 
 The engine is created lazily so the API can start, serve ``/health`` and report
 an honest ``/ready`` while Postgres is down, rather than crash-looping at
@@ -21,17 +18,12 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import Settings
 from app.core.errors import DependencyUnavailable
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-class Base(DeclarativeBase):
-    """Declarative base for every ORM model (populated in Phase 3)."""
 
 
 class Database:
