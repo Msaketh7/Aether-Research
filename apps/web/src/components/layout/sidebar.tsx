@@ -4,7 +4,7 @@ import { BarChart3, FlaskConical, LayoutDashboard, Plus, Settings } from 'lucide
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { APP_NAME } from '@/lib/api/config';
+import { API_MODE, APP_NAME } from '@/lib/api/config';
 import { cn } from '@/lib/utils';
 
 const NAV = [
@@ -56,7 +56,9 @@ export function Sidebar() {
 
       <div className="border-t border-sidebar-border px-5 py-3">
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Phase 1 prototype — frontend against the mock API.
+          {API_MODE === 'mock'
+            ? 'Prototype — frontend against the mock API.'
+            : 'Connected to the Aether API. No research worker is running yet, so runs stay queued.'}
         </p>
       </div>
     </aside>

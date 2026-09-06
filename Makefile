@@ -5,6 +5,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 WEB := @aether/web
+API := apps/api
 
 .PHONY: help
 help: ## Show this help
@@ -19,6 +20,29 @@ install: ## Install all JS workspace dependencies
 .PHONY: env
 env: ## Create .env from .env.example if absent
 	@test -f .env || (cp .env.example .env && echo "created .env")
+
+# --- backend ---------------------------------------------------------------
+.PHONY: api-install
+api-install: ## Create the API virtualenv and install locked dependencies
+	cd $(API) && uv sync
+
+.PHONY: api
+api: ## Run the FastAPI service (needs `make up` for Postgres and Redis)
+	cd $(API) && uv run uvicorn app.main:app --reload --port 8000
+
+.PHONY: api-lint
+api-lint: ## Format check, lint and typecheck the API
+	cd $(API) && uv run ruff format --check .
+	cd $(API) && uv run ruff check .
+	cd $(API) && uv run mypy app
+
+.PHONY: api-test
+api-test: ## Run the API test suite
+	cd $(API) && uv run pytest
+
+.PHONY: migrate
+migrate: ## Apply database migrations (schema arrives in Phase 3)
+	cd $(API) && uv run alembic upgrade head
 
 # --- frontend --------------------------------------------------------------
 .PHONY: dev
@@ -51,7 +75,7 @@ test-e2e: ## Playwright end-to-end smoke tests
 	npm run test:e2e --workspace $(WEB)
 
 .PHONY: ci
-ci: format-check lint typecheck test ## Everything a pull request must pass
+ci: format-check lint typecheck test api-lint api-test ## Everything a pull request must pass
 
 .PHONY: format-check
 format-check:

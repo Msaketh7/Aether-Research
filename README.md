@@ -341,6 +341,61 @@ apps/web/src/
 
 ---
 
+## Backend architecture
+
+> Built in Phase 2, against the contract the frontend already consumed. The
+> ordering matters: the API had to satisfy a client that already existed, so
+> "the frontend will adapt" was never available as an escape hatch.
+
+**Stack.** Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2 (async), Alembic,
+Redis, `uv` for locked dependencies. `ruff` and `mypy --strict` in CI.
+
+**The API never runs a research workflow.** `POST /research` validates,
+persists, publishes a started event and pushes a job. That boundary is an
+explicit `JobQueue` interface rather than a function call, so it cannot later be
+"optimised" into an inline await ([ADR 0001](docs/ADRs/0001-modular-monolith.md)).
+
+**Authorisation is enforced before authentication exists.** Every research
+object carries a `user_id`, every repository read is scoped by it, and a run
+belonging to someone else returns the same `run_not_found` as one that never
+existed - a 403 would confirm the id. Real sessions land in Phase 20; the
+ownership rules are tested now rather than retrofitted onto a leaking surface.
+
+**One error envelope.** Every failure - validation, framework 404, dependency
+outage, unhandled exception - leaves as `ApiErrorBody`, carrying the request id
+so a user-reported `trace_id` can be found in the logs. Internals never reach
+the client; a test asserts a connection string in an exception message does not
+appear in the response.
+
+**Persistence is an interface.** `ResearchRepository` has an in-memory adapter
+today and a Postgres one in Phase 3. Nothing above it changes, because the
+service layer only ever sees the protocol.
+
+**Not-built-yet is distinguishable from empty.** An endpoint whose phase has not
+landed returns `501 not_implemented`, not a plausible-looking empty `200`.
+
+**A cross-language contract test** reads `packages/shared-types` and asserts the
+Python enums match the TypeScript ones. Nothing in either compiler can see the
+other, so this is the seam that keeps them honest.
+
+**Key paths**
+
+```
+apps/api/app/
+├── api/            routing, DI, error handlers, SSE relay
+│   └── v1/         health, auth, research, pending
+├── core/           settings, logging, error taxonomy, enums, pagination
+├── auth/           principal resolution and ownership
+├── research/       schemas, repository boundary, event broker, service
+├── db/             engine, session factory, health probe
+├── workers/        JobQueue interface, Redis and in-memory adapters
+├── observability/  request-id and access-log middleware
+└── agents/ retrieval/ sources/ evidence/ reports/ evaluations/
+                    module boundaries, filled by later phases
+```
+
+---
+
 ## Repository structure
 
 ```
@@ -373,35 +428,41 @@ aether-research/
 
 ## Current status
 
-**Phases 0 and 1 are complete.** The repository, documentation and local
-infrastructure exist, and the frontend is a working product that runs against a
-mock API implementing the exact contract the backend will implement
+**Phases 0-2 are complete.** The repository, documentation and local
+infrastructure exist; the frontend is a working product; and it now talks to a
+real FastAPI backend. Switching between the two data sources is one environment
+variable, with no code change
 ([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
 
-| Phase | Scope                                                                                                                 | Status  |
-| ----- | --------------------------------------------------------------------------------------------------------------------- | ------- |
-| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                                       | Done    |
-| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                                | Done    |
-| 2     | Backend foundation: FastAPI, Postgres, Redis, health and research endpoints                                           | Next    |
-| 3+    | Data layer, storage, model gateway, tools, RAG, LangGraph agents, evaluation, observability, load testing, deployment | Planned |
+| Phase | Scope                                                                                                              | Status  |
+| ----- | ------------------------------------------------------------------------------------------------------------------ | ------- |
+| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                                    | Done    |
+| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                             | Done    |
+| 2     | Backend foundation: FastAPI, typed settings, error contract, authorisation, health probes, research API, SSE       | Done    |
+| 3     | Database: Postgres schema, Alembic migrations, pgvector, repositories                                              | Next    |
+| 4+    | Storage, model gateway, research tools, RAG, LangGraph agents, evaluation, observability, load testing, deployment | Planned |
 
-What works today: sign in, browse research history, start a run, watch the agent
-timeline stream live over SSE, inspect discovered sources and duplicate
+In **mock mode** the whole product is explorable: browse research history, start
+a run, watch the agent timeline stream over SSE, inspect sources and duplicate
 clusters, read claims with their verbatim evidence spans, see contradictions
-recorded rather than resolved, open a report where every `[n]` resolves to a
-source and the quote behind it, and view the evaluation and system dashboards.
+recorded rather than resolved, and open a report where every `[n]` resolves to a
+source and the quote behind it. Every figure there is synthetic fixture data,
+and the app says so in a banner on every page.
 
-**Nothing in the running app is real research yet.** In mock mode every run,
-source, claim, report and metric is synthetic fixture data, and the app says so
-in a banner on every page. No benchmark has been executed; the evaluation page
-states that too.
+In **live mode** the same UI runs against the real API: runs are validated,
+authorised, persisted and queued, `POST /research` returns `202`, and the SSE
+stream is real. **There is no worker yet**, so a created run stays `queued` and
+the endpoints for data it has not produced return empty results or an explicit
+`not_implemented`. Nothing is fabricated to fill the gap; that is what Phases 9
+and 13 are for.
+
+No benchmark has been executed, and the evaluations page says so.
 
 ---
 
 ## Quick start
 
-Requires Node 22+. Docker is only needed for the backing services, which the
-frontend does not use yet.
+Requires Node 22+. The backend additionally needs Python 3.12+ and uv.
 
 ```bash
 # 1. clone and configure
@@ -421,7 +482,7 @@ open http://localhost:3000
 ### Verifying it
 
 ```bash
-make ci          # format check, lint, typecheck, unit tests
+make ci          # frontend + backend: format, lint, typecheck, unit tests
 make test-e2e    # Playwright smoke suite (builds and serves the app)
 ```
 
@@ -431,21 +492,26 @@ contract, and the self-consistency of the fixtures (every citation must resolve
 to a claim, an evidence span and a source). The end-to-end suite drives the real
 browser through the whole journey, including a live `text/event-stream`.
 
-### Local infrastructure (needed from Phase 2)
+### Running the backend
+
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-make up          # Postgres + pgvector, Redis, MinIO, Prometheus, Grafana
-make down
+make up            # Postgres + pgvector, Redis, MinIO, Prometheus, Grafana
+make api-install   # create apps/api/.venv from the lockfile
+make api           # uvicorn on :8000, OpenAPI UI at /docs
 ```
 
-### Switching to the real backend
-
-One variable, no code change:
+Point the frontend at it. This is the only change required:
 
 ```bash
 NEXT_PUBLIC_API_MODE=live
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
+
+Outside the test environment the API requires Redis and reports itself unready
+without it. That is deliberate: silently dropping research jobs is worse than
+failing loudly.
 
 ---
 

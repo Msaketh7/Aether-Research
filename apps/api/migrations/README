@@ -1,0 +1,9 @@
+Alembic migrations for Aether Research.
+
+Empty until Phase 3, which creates the schema in docs/TDD.md section 7.2.
+
+  uv run alembic revision --autogenerate -m "create research schema"
+  uv run alembic upgrade head
+
+The database URL comes from the application settings (see env.py), not from
+alembic.ini.

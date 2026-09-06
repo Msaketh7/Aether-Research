@@ -1,9 +1,10 @@
 name: CI
 
 # Runs on every pull request and on main. Scope grows with the build: today it
-# covers the frontend and the shared contract, which is what exists. Python
-# lint/test, integration tests, the evaluation gate and container scanning are
-# added by the phases that introduce them (docs/TDD.md section 20).
+# covers the frontend, the backend and the cross-language contract between
+# them. Integration tests against real Postgres and Redis, the evaluation gate
+# and container scanning are added by the phases that introduce them
+# (docs/TDD.md section 20).
 
 on:
   push:
@@ -49,6 +50,39 @@ jobs:
 
       - name: Build
         run: npm run build --workspace @aether/web
+
+  backend:
+    name: Backend (lint, typecheck, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Typecheck
+        run: uv run mypy app
+
+      # Includes the cross-language contract tests, which read
+      # packages/shared-types and fail if the Python and TypeScript
+      # vocabularies have diverged.
+      - name: Tests
+        run: uv run pytest
 
   e2e:
     name: End-to-end smoke tests
