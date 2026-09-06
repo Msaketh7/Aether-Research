@@ -6,14 +6,14 @@
 
 ## 1. Assets
 
-| Asset | Why it matters |
-|---|---|
-| User credentials and sessions | account takeover |
-| Research runs, sources, evidence, reports | user's proprietary research |
-| Provider API keys (LLM, search, GitHub) | direct financial loss |
-| Per-run budget | denial of wallet |
-| Report integrity (citations) | the product's entire value proposition |
-| Infrastructure credentials (DB, Redis, S3) | full compromise |
+| Asset                                      | Why it matters                         |
+| ------------------------------------------ | -------------------------------------- |
+| User credentials and sessions              | account takeover                       |
+| Research runs, sources, evidence, reports  | user's proprietary research            |
+| Provider API keys (LLM, search, GitHub)    | direct financial loss                  |
+| Per-run budget                             | denial of wallet                       |
+| Report integrity (citations)               | the product's entire value proposition |
+| Infrastructure credentials (DB, Redis, S3) | full compromise                        |
 
 ## 2. Trust boundaries
 
@@ -57,7 +57,7 @@ threat in the system, because ingesting hostile text is the product's core loop.
   document text, so injected assertions with no supporting span are dropped by
   citation validation.
 
-**Residual risk.** A sufficiently plausible injected *claim* can still enter the
+**Residual risk.** A sufficiently plausible injected _claim_ can still enter the
 evidence base with a real span behind it. Mitigation is corroboration scoring
 and source credibility, not prevention. Accepted and documented.
 
@@ -84,7 +84,7 @@ private RFC 1918 address.
 **Controls.** Per-run ceilings on iterations, sources, search queries, runtime
 and estimated cost; per-user rate limits and concurrent-run limits; cost is
 accumulated per LLM call and checked at every node boundary; exceeding a ceiling
-ends the run *safely* with a partial report rather than by crashing.
+ends the run _safely_ with a partial report rather than by crashing.
 
 ### 3.4 Broken object-level authorization (boundary 2)
 
@@ -121,14 +121,14 @@ HSTS, CSP, `X-Content-Type-Options`, and a strict CORS origin allowlist.
 
 ## 4. STRIDE summary
 
-| Threat | Primary control |
-|---|---|
-| **S**poofing | Auth.js sessions, hashed tokens, ownership checks |
-| **T**ampering | Content hashes on every document; append-only evidence trail |
-| **R**epudiation | Audit log of auth and research mutations; full agent trace |
-| **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side |
-| **D**enial of service | Rate limits, run ceilings, bounded queues, timeouts |
-| **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles |
+| Threat                     | Primary control                                              |
+| -------------------------- | ------------------------------------------------------------ |
+| **S**poofing               | Auth.js sessions, hashed tokens, ownership checks            |
+| **T**ampering              | Content hashes on every document; append-only evidence trail |
+| **R**epudiation            | Audit log of auth and research mutations; full agent trace   |
+| **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side     |
+| **D**enial of service      | Rate limits, run ceilings, bounded queues, timeouts          |
+| **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles         |
 
 ## 5. What is explicitly out of scope for v1
 

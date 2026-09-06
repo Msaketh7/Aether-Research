@@ -14,11 +14,11 @@ progress events from a worker to whichever API process holds the SSE connection.
 A single **Redis** deployment serves all three, with distinct key namespaces and
 eviction policies.
 
-| Use | Mechanism | Namespace | Eviction |
-|---|---|---|---|
-| Job queue | Reliable list/stream with visibility timeout | `queue:research` | none |
-| Cache | Keys hashed on content | `cache:{kind}:{sha256}` | TTL + LRU |
-| Progress bus | Pub/Sub channel plus bounded replay buffer | `run:{id}:events` | capped list |
+| Use          | Mechanism                                    | Namespace               | Eviction    |
+| ------------ | -------------------------------------------- | ----------------------- | ----------- |
+| Job queue    | Reliable list/stream with visibility timeout | `queue:research`        | none        |
+| Cache        | Keys hashed on content                       | `cache:{kind}:{sha256}` | TTL + LRU   |
+| Progress bus | Pub/Sub channel plus bounded replay buffer   | `run:{id}:events`       | capped list |
 
 Job payloads carry only a `run_id`; all state lives in Postgres, so a redelivered
 job is idempotent.

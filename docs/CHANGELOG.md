@@ -3,10 +3,10 @@
 Combined version index for the two master design documents. Each master keeps its
 own detailed change log; this file is the at-a-glance cross-reference.
 
-| Document | Master (always current) | Word render | Versioned snapshots |
-|---|---|---|---|
-| Product Requirements | [`PRD.md`](PRD.md) | `PRD.docx` | `versions/PRD-v<x.y>.md` + `.docx` |
-| Technical Design | [`TDD.md`](TDD.md) | `TDD.docx` | `versions/TDD-v<x.y>.md` + `.docx` |
+| Document             | Master (always current) | Word render | Versioned snapshots                |
+| -------------------- | ----------------------- | ----------- | ---------------------------------- |
+| Product Requirements | [`PRD.md`](PRD.md)      | `PRD.docx`  | `versions/PRD-v<x.y>.md` + `.docx` |
+| Technical Design     | [`TDD.md`](TDD.md)      | `TDD.docx`  | `versions/TDD-v<x.y>.md` + `.docx` |
 
 ## How versioning works
 
@@ -49,15 +49,15 @@ it: `NODE_PATH=/path/to/node_modules node scripts/build-docs.js`.
 
 ## PRD versions
 
-| Version | Date | Status | Summary |
-|---|---|---|---|
-| 1.0 | 2026-09-05 | Current | Initial PRD from the staged specification: FR-1 to FR-10, 3 product modes, 10-phase roadmap, metrics, risks. |
+| Version | Date       | Status  | Summary                                                                                                      |
+| ------- | ---------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| 1.0     | 2026-09-05 | Current | Initial PRD from the staged specification: FR-1 to FR-10, 3 product modes, 10-phase roadmap, metrics, risks. |
 
 ## TDD versions
 
-| Version | Date | Status | Summary |
-|---|---|---|---|
-| 1.0 | 2026-09-05 | Current | Initial TDD from the staged specification: topology, agent graph, ~20-table schema, RAG + web pipelines, durability, security, observability, evaluation, CI/CD, deployment, 9 ADRs. |
+| Version | Date       | Status  | Summary                                                                                                                                                                              |
+| ------- | ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1.0     | 2026-09-05 | Current | Initial TDD from the staged specification: topology, agent graph, ~20-table schema, RAG + web pipelines, durability, security, observability, evaluation, CI/CD, deployment, 9 ADRs. |
 
 > The plain-language layer, the document-control sections, and a styling cleanup
 > were applied after v1.0 as editorial revisions. They changed no requirement and
@@ -72,21 +72,21 @@ lost.
 
 ### Product (PRD)
 
-| Item | Reason deferred | Status |
-|---|---|---|
-| Source connectors beyond Web / SEC / arXiv / GitHub / uploaded PDFs (other gov APIs, news/RSS, internal KB) | Keep v1 scope shippable; additive, not on the critical path | Open |
-| Non-English research corpora | Detected and deprioritised for v1 | Open |
-| Mobile apps | Responsive web only for v1 | Open |
-| Real-time collaborative report editing | Not needed for the core value | Open |
-| Fine-tuned / self-hosted frontier models | Local Ollama kept for comparison only | Open |
-| LLM provider per role; web-search vendor; deploy host/region; first build increment; embedding model + size | Pending measurement / a product call | Open |
+| Item                                                                                                        | Reason deferred                                             | Status |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
+| Source connectors beyond Web / SEC / arXiv / GitHub / uploaded PDFs (other gov APIs, news/RSS, internal KB) | Keep v1 scope shippable; additive, not on the critical path | Open   |
+| Non-English research corpora                                                                                | Detected and deprioritised for v1                           | Open   |
+| Mobile apps                                                                                                 | Responsive web only for v1                                  | Open   |
+| Real-time collaborative report editing                                                                      | Not needed for the core value                               | Open   |
+| Fine-tuned / self-hosted frontier models                                                                    | Local Ollama kept for comparison only                       | Open   |
+| LLM provider per role; web-search vendor; deploy host/region; first build increment; embedding model + size | Pending measurement / a product call                        | Open   |
 
 ### Technical (TDD)
 
-| Item | Reason deferred | Status |
-|---|---|---|
-| Split worker into dedicated ingestion / evaluation pools | Avoid premature infra; single worker suffices at demo scale | Open (ADR-0007) |
-| Dedicated vector DB separate from Postgres | pgvector sufficient at v1 scale | Open (ADR-0003) |
-| Standalone knowledge-graph store | Kept as a projection of `claims` for now | Open |
-| Kafka for the queue | Redis + Celery/ARQ sufficient for v1 | Open |
-| Embedding model + dimension; reranker; Celery vs ARQ; pgvector index type (HNSW vs IVFFlat) | Pending benchmarking | Open |
+| Item                                                                                        | Reason deferred                                             | Status          |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------- |
+| Split worker into dedicated ingestion / evaluation pools                                    | Avoid premature infra; single worker suffices at demo scale | Open (ADR-0007) |
+| Dedicated vector DB separate from Postgres                                                  | pgvector sufficient at v1 scale                             | Open (ADR-0003) |
+| Standalone knowledge-graph store                                                            | Kept as a projection of `claims` for now                    | Open            |
+| Kafka for the queue                                                                         | Redis + Celery/ARQ sufficient for v1                        | Open            |
+| Embedding model + dimension; reranker; Celery vs ARQ; pgvector index type (HNSW vs IVFFlat) | Pending benchmarking                                        | Open            |

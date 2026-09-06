@@ -1,0 +1,68 @@
+import { expect, test } from '@playwright/test';
+
+/**
+ * Structural accessibility and responsive checks.
+ *
+ * Not a substitute for an audit - these pin the properties that regress most
+ * easily as a page grows: one h1 per page, reachable navigation, labelled
+ * controls, and no horizontal scroll on a phone.
+ */
+
+const PAGES = ['/dashboard', '/research/new', '/evaluations', '/settings'] as const;
+
+for (const path of PAGES) {
+  test(`${path} has exactly one level-1 heading`, async ({ page }) => {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+  });
+}
+
+test('the new-research form labels every control', async ({ page }) => {
+  await page.goto('/research/new');
+
+  await expect(page.getByLabel('Research question')).toBeVisible();
+  await expect(page.getByRole('radiogroup', { name: 'Research mode' })).toBeVisible();
+  await expect(page.getByLabel('Domains')).toBeVisible();
+  await expect(page.getByLabel('Published after')).toBeVisible();
+});
+
+test('the form is operable by keyboard alone', async ({ page }) => {
+  await page.goto('/research/new');
+
+  await page.getByTestId('question-input').focus();
+  await page.keyboard.type('Compare inference providers on pricing and latency guarantees.');
+  await page.getByTestId('mode-quick').press('Enter');
+
+  await expect(page.getByTestId('mode-quick')).toHaveAttribute('aria-checked', 'true');
+});
+
+test('mobile layout does not scroll horizontally', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/dashboard');
+  await expect(page.getByTestId('run-row').first()).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  // A couple of pixels of rounding is tolerable; a scrolling page is not.
+  expect(overflow).toBeLessThanOrEqual(2);
+});
+
+test('the progress checklist is a named list with one entry per stage', async ({ page }) => {
+  await page.goto('/dashboard');
+  await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();
+
+  const checklist = page.getByRole('list', { name: 'Research progress' }).first();
+  await expect(checklist).toBeVisible();
+  await expect(checklist.getByRole('listitem')).toHaveCount(7);
+});
+
+test('a finished run explains an empty feed instead of showing a stale live region', async ({
+  page,
+}) => {
+  await page.goto('/dashboard');
+  await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();
+
+  await expect(page.getByText(/This run has finished/)).toBeVisible();
+  await expect(page.getByRole('log', { name: 'Research activity' })).toHaveCount(0);
+});

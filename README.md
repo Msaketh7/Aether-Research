@@ -26,16 +26,16 @@ and the trail from "claim" back to "proof" usually gets lost.
 **What Aether does.** You type one question. Aether acts like a **small team of
 research analysts** that works for you:
 
-| Role on a human research team | The equivalent part of Aether |
-|---|---|
-| Lead analyst who breaks the big question into smaller ones and hands them out | **Planner** |
-| Several junior analysts, each researching one sub-topic **at the same time** | **Researchers** (run in parallel) |
-| Someone who highlights the exact sentence that proves each point and notes the source | **Evidence Extractor** |
-| A checker who confirms each fact appears in more than one trustworthy place | **Verification Agent** |
-| A checker who flags "these two sources disagree" instead of quietly picking one | **Contradiction Check** |
-| A demanding manager who asks "is this good enough?" and sends people back for more | **Critic** |
-| The writer who turns all the findings into a clean, structured report | **Synthesizer** |
-| The fact-checker who makes sure every sentence in the report has a real source attached before it goes out | **Citation Validator** |
+| Role on a human research team                                                                              | The equivalent part of Aether     |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| Lead analyst who breaks the big question into smaller ones and hands them out                              | **Planner**                       |
+| Several junior analysts, each researching one sub-topic **at the same time**                               | **Researchers** (run in parallel) |
+| Someone who highlights the exact sentence that proves each point and notes the source                      | **Evidence Extractor**            |
+| A checker who confirms each fact appears in more than one trustworthy place                                | **Verification Agent**            |
+| A checker who flags "these two sources disagree" instead of quietly picking one                            | **Contradiction Check**           |
+| A demanding manager who asks "is this good enough?" and sends people back for more                         | **Critic**                        |
+| The writer who turns all the findings into a clean, structured report                                      | **Synthesizer**                   |
+| The fact-checker who makes sure every sentence in the report has a real source attached before it goes out | **Citation Validator**            |
 
 **What you get back.** A structured report (executive summary, key findings,
 detailed analysis, competitive landscape, risks, opportunities) in which
@@ -153,11 +153,11 @@ Each feature below has a one-line plain explanation.
 > **In plain terms:** sometimes you want a fast answer, sometimes a thorough
 > report, and sometimes you want to keep digging into an answer you already got.
 
-| Mode | Target speed | What it does |
-|---|---|---|
-| **Quick** | under ~30 seconds | Plan → search → rank → write a short cited answer |
-| **Deep** | ~1-5 minutes | The full pipeline above: parallel research, verification, contradiction checks, a critique loop, then a full report |
-| **Conversational** | follow-ups | "Go deeper on competitor X", reuses everything already gathered instead of starting over |
+| Mode               | Target speed      | What it does                                                                                                        |
+| ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Quick**          | under ~30 seconds | Plan → search → rank → write a short cited answer                                                                   |
+| **Deep**           | ~1-5 minutes      | The full pipeline above: parallel research, verification, contradiction checks, a critique loop, then a full report |
+| **Conversational** | follow-ups        | "Go deeper on competitor X", reuses everything already gathered instead of starting over                            |
 
 ---
 
@@ -167,15 +167,15 @@ Each feature below has a one-line plain explanation.
 > about any outside service. The "Measured" column stays blank until we have run
 > the real benchmark, we do not publish numbers we have not measured.
 
-| Metric | Target | Measured |
-|---|---|---|
-| Quick research, P50 latency (typical time) |, | `[benchmark]` |
-| Quick research, P95 latency (slowest 1 in 20) | < 30 s | `[benchmark]` |
-| Deep research, P50 latency |, | `[benchmark]` |
-| Deep research, P95 latency | < 180 s | `[benchmark]` |
-| Cost per run |, | `[benchmark]` |
-| Tool failure rate |, | `[benchmark]` |
-| Availability (uptime) | 99.5% | `[benchmark]` |
+| Metric                                        | Target  | Measured      |
+| --------------------------------------------- | ------- | ------------- |
+| Quick research, P50 latency (typical time)    | ,       | `[benchmark]` |
+| Quick research, P95 latency (slowest 1 in 20) | < 30 s  | `[benchmark]` |
+| Deep research, P50 latency                    | ,       | `[benchmark]` |
+| Deep research, P95 latency                    | < 180 s | `[benchmark]` |
+| Cost per run                                  | ,       | `[benchmark]` |
+| Tool failure rate                             | ,       | `[benchmark]` |
+| Availability (uptime)                         | 99.5%   | `[benchmark]` |
 
 ---
 
@@ -186,15 +186,15 @@ Each feature below has a one-line plain explanation.
 > and is scored. If the score drops too low, the change is rejected
 > automatically.
 
-| Metric | What it means | Threshold | Measured |
-|---|---|---|---|
-| Citation accuracy | cited sources actually support the claim | ≥ 90% | `[benchmark]` |
-| Citation completeness | important claims that have a citation |, | `[benchmark]` |
-| Retrieval recall | share of the right sources it managed to find |, | `[benchmark]` |
-| Claim correctness | claims that are factually right |, | `[benchmark]` |
-| Groundedness / faithfulness | report stays true to the evidence, no invention |, | `[benchmark]` |
-| Recall@K / Precision@K / MRR / NDCG | standard search-quality scores |, | `[benchmark]` |
-| Agent task success / recovery rate | sub-tasks completed / failures recovered from |, | `[benchmark]` |
+| Metric                              | What it means                                   | Threshold | Measured      |
+| ----------------------------------- | ----------------------------------------------- | --------- | ------------- |
+| Citation accuracy                   | cited sources actually support the claim        | ≥ 90%     | `[benchmark]` |
+| Citation completeness               | important claims that have a citation           | ,         | `[benchmark]` |
+| Retrieval recall                    | share of the right sources it managed to find   | ,         | `[benchmark]` |
+| Claim correctness                   | claims that are factually right                 | ,         | `[benchmark]` |
+| Groundedness / faithfulness         | report stays true to the evidence, no invention | ,         | `[benchmark]` |
+| Recall@K / Precision@K / MRR / NDCG | standard search-quality scores                  | ,         | `[benchmark]` |
+| Agent task success / recovery rate  | sub-tasks completed / failures recovered from   | ,         | `[benchmark]` |
 
 ---
 
@@ -267,20 +267,77 @@ Each feature below has a one-line plain explanation.
 > **In plain terms:** the "Why" column says what job each tool does. A
 > non-technical reader can read only that column.
 
-| Layer | Choice | Why (plain English) |
-|---|---|---|
-| Frontend | Next.js, TypeScript, Tailwind, shadcn/ui, TanStack Query, SSE | Builds the website, its styling, and the live progress feed |
-| API | FastAPI (modular monolith) | The "front counter" that receives requests; one well-organised codebase, not a scatter of tiny services |
-| Orchestration | **LangGraph** | Runs the multi-step agent workflow, remembers progress, handles the loop, resumes after a crash |
-| Retrieval | **LlamaIndex** | Reads and indexes documents, then finds the relevant passages |
-| Model/tool layer | **LangChain** | A common adapter so we can swap AI providers and tools without rewriting agents |
-| System of record | PostgreSQL | The master database, the single source of truth |
-| Vectors | pgvector (inside Postgres) | "Search by meaning" lives in the same database, one less moving part |
-| Object storage | S3 | Cheap warehouse for big files (PDFs, saved pages, reports) |
-| Cache / queue | Redis + Celery/ARQ | The ticket queue for jobs and a fast cache to avoid repeat work |
-| Auth | Auth.js + PostgreSQL | Handles sign-up / login ourselves so we understand and control it |
-| Observability | OpenTelemetry, Prometheus, Grafana, LangSmith | Tracing, metrics, dashboards, and AI-call inspection, so we can see what happened |
-| Infra | Docker, AWS, Terraform, GitHub Actions | Packaging, cloud hosting, "infrastructure written as code", and automated deploys |
+| Layer            | Choice                                                        | Why (plain English)                                                                                     |
+| ---------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Frontend         | Next.js, TypeScript, Tailwind, shadcn/ui, TanStack Query, SSE | Builds the website, its styling, and the live progress feed                                             |
+| API              | FastAPI (modular monolith)                                    | The "front counter" that receives requests; one well-organised codebase, not a scatter of tiny services |
+| Orchestration    | **LangGraph**                                                 | Runs the multi-step agent workflow, remembers progress, handles the loop, resumes after a crash         |
+| Retrieval        | **LlamaIndex**                                                | Reads and indexes documents, then finds the relevant passages                                           |
+| Model/tool layer | **LangChain**                                                 | A common adapter so we can swap AI providers and tools without rewriting agents                         |
+| System of record | PostgreSQL                                                    | The master database, the single source of truth                                                         |
+| Vectors          | pgvector (inside Postgres)                                    | "Search by meaning" lives in the same database, one less moving part                                    |
+| Object storage   | S3                                                            | Cheap warehouse for big files (PDFs, saved pages, reports)                                              |
+| Cache / queue    | Redis + Celery/ARQ                                            | The ticket queue for jobs and a fast cache to avoid repeat work                                         |
+| Auth             | Auth.js + PostgreSQL                                          | Handles sign-up / login ourselves so we understand and control it                                       |
+| Observability    | OpenTelemetry, Prometheus, Grafana, LangSmith                 | Tracing, metrics, dashboards, and AI-call inspection, so we can see what happened                       |
+| Infra            | Docker, AWS, Terraform, GitHub Actions                        | Packaging, cloud hosting, "infrastructure written as code", and automated deploys                       |
+
+---
+
+## Frontend architecture
+
+> Built in Phase 1, before any backend existed. The point of building it first
+> is that the product decisions - what a run looks like, what a citation has to
+> prove, how a contradiction is presented - get made against a real interface
+> rather than being inferred from a schema later.
+
+**Stack.** Next.js App Router, TypeScript in strict mode (plus
+`noUncheckedIndexedAccess`), Tailwind v4 with semantic design tokens,
+shadcn/ui-style primitives kept in-repo, TanStack Query, native `EventSource`.
+
+**Server state is TanStack Query, and only TanStack Query.** There is no global
+store. The SSE hook writes into the same cache the REST hooks read, so the live
+feed and the fetched snapshot cannot disagree.
+
+**One transport, two targets.** Components never call `fetch`; everything goes
+through a typed client whose base URL is chosen by `NEXT_PUBLIC_API_MODE`. In
+`mock` mode that URL is a set of Next.js route handlers implementing the
+contract from `docs/TDD.md` section 18 - including a real `text/event-stream`
+endpoint with `id:` frames and `Last-Event-ID` replay. Both sides import the
+same DTOs from `packages/shared-types`, so a contract drift is a compile error.
+
+**The activity checklist is derived, never transmitted.** `deriveStages()` folds
+the event stream into the seven-stage checklist. A separate "current stage"
+event could contradict the trace; a derivation cannot.
+
+**Report Markdown is parsed, never injected.** Report text is synthesised from
+untrusted web pages, so it is turned into React elements by a small parser that
+supports exactly what the synthesizer emits. `dangerouslySetInnerHTML` appears
+nowhere in the codebase, and a test asserts that HTML in source-derived text
+renders as literal text.
+
+**Unresolvable citations are visible.** A `[n]` with no matching citation
+renders as a warning marker rather than disappearing - a broken evidence chain
+is exactly the thing a reader must not be protected from.
+
+**Not measured is not zero.** Every formatter renders `null` as an em dash. A
+run with zero sources and a run whose sources were never counted are different
+facts, and the evaluation dashboard depends on the distinction.
+
+**Key paths**
+
+```
+apps/web/src/
+├── app/(app)/              # signed-in pages: dashboard, research/*, evaluations, settings
+├── app/api/mock/v1/        # mock backend: REST + SSE route handlers (deleted in Phase 2)
+├── components/ui/          # shadcn-style primitives
+├── components/research/    # run header, stage checklist, event feed, source/claim/
+│                           # contradiction cards, report renderer, citation popover
+├── lib/api/                # typed client, endpoints, query keys, hooks
+├── lib/research/           # stage derivation, event labels, Markdown parser, form schema
+├── lib/sse/                # EventSource hook + query-cache reconciliation
+└── mocks/                  # deterministic fixture corpus, dataset builder, event timeline
+```
 
 ---
 
@@ -314,22 +371,80 @@ aether-research/
 
 ---
 
+## Current status
+
+**Phases 0 and 1 are complete.** The repository, documentation and local
+infrastructure exist, and the frontend is a working product that runs against a
+mock API implementing the exact contract the backend will implement
+([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
+
+| Phase | Scope                                                                                                                 | Status  |
+| ----- | --------------------------------------------------------------------------------------------------------------------- | ------- |
+| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                                       | Done    |
+| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                                | Done    |
+| 2     | Backend foundation: FastAPI, Postgres, Redis, health and research endpoints                                           | Next    |
+| 3+    | Data layer, storage, model gateway, tools, RAG, LangGraph agents, evaluation, observability, load testing, deployment | Planned |
+
+What works today: sign in, browse research history, start a run, watch the agent
+timeline stream live over SSE, inspect discovered sources and duplicate
+clusters, read claims with their verbatim evidence spans, see contradictions
+recorded rather than resolved, open a report where every `[n]` resolves to a
+source and the quote behind it, and view the evaluation and system dashboards.
+
+**Nothing in the running app is real research yet.** In mock mode every run,
+source, claim, report and metric is synthetic fixture data, and the app says so
+in a banner on every page. No benchmark has been executed; the evaluation page
+states that too.
+
+---
+
 ## Quick start
+
+Requires Node 22+. Docker is only needed for the backing services, which the
+frontend does not use yet.
 
 ```bash
 # 1. clone and configure
-git clone <repo-url> aether-research && cd aether-research
-cp .env.example .env          # add provider API keys (server-side only)
+git clone <repo-url> "aether-research" && cd aether-research
+cp .env.example .env
 
-# 2. bring up Postgres + Redis + API + worker + web
-docker compose up --build
+# 2. install workspace dependencies
+#    --legacy-peer-deps is needed only for a cold resolve with no lockfile
+#    (npm arborist bug in the vitest peer graph); `npm ci` does not need it.
+npm install --legacy-peer-deps
 
-# 3. run migrations and seed the eval dataset
-make migrate
-make seed-eval
-
-# 4. open the app
+# 3. run the frontend against the mock API
+make dev                      # or: npm run dev
 open http://localhost:3000
+```
+
+### Verifying it
+
+```bash
+make ci          # format check, lint, typecheck, unit tests
+make test-e2e    # Playwright smoke suite (builds and serves the app)
+```
+
+The unit suite covers the pure logic that the UI depends on - event-to-stage
+derivation, the report Markdown parser, form validation, the HTTP error
+contract, and the self-consistency of the fixtures (every citation must resolve
+to a claim, an evidence span and a source). The end-to-end suite drives the real
+browser through the whole journey, including a live `text/event-stream`.
+
+### Local infrastructure (needed from Phase 2)
+
+```bash
+make up          # Postgres + pgvector, Redis, MinIO, Prometheus, Grafana
+make down
+```
+
+### Switching to the real backend
+
+One variable, no code change:
+
+```bash
+NEXT_PUBLIC_API_MODE=live
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
 ---
@@ -339,18 +454,18 @@ open http://localhost:3000
 > **In plain terms:** build it in slices. Each row adds one capability on top of
 > the last. Nothing after row 0 is attempted until row 0 works.
 
-| Phase | Scope | Status |
-|---|---|---|
-| 0 | Product prototype, website with fake data, so the experience is real before the engine exists | ☐ |
-| 1 | Basic backend, accounts, database, create/read research | ☐ |
-| 2 | First AI, one Planner + Researcher + Synthesizer, single straight-line path | ☐ |
-| 3 | Web research, real searching, fetching, parsing, and citations | ☐ |
-| 4 | RAG, indexing and smart retrieval over collected documents | ☐ |
-| 5 | Multi-agent, add Critic + Verifier, run researchers in parallel | ☐ |
-| 6 | Durable execution, save-points, queue, background workers, resume | ☐ |
-| 7 | Evaluation, the test set, the scoreboard, the release gate | ☐ |
-| 8 | Production engineering, monitoring, rate limits, caching, load tests, security | ☐ |
-| 9 | Deployment, cloud hosting, infrastructure-as-code, automated deploys, monitoring | ☐ |
+| Phase | Scope                                                                                         | Status |
+| ----- | --------------------------------------------------------------------------------------------- | ------ |
+| 0     | Product prototype, website with fake data, so the experience is real before the engine exists | ☑      |
+| 1     | Basic backend, accounts, database, create/read research                                       | ☐      |
+| 2     | First AI, one Planner + Researcher + Synthesizer, single straight-line path                   | ☐      |
+| 3     | Web research, real searching, fetching, parsing, and citations                                | ☐      |
+| 4     | RAG, indexing and smart retrieval over collected documents                                    | ☐      |
+| 5     | Multi-agent, add Critic + Verifier, run researchers in parallel                               | ☐      |
+| 6     | Durable execution, save-points, queue, background workers, resume                             | ☐      |
+| 7     | Evaluation, the test set, the scoreboard, the release gate                                    | ☐      |
+| 8     | Production engineering, monitoring, rate limits, caching, load tests, security                | ☐      |
+| 9     | Deployment, cloud hosting, infrastructure-as-code, automated deploys, monitoring              | ☐      |
 
 ---
 
@@ -367,40 +482,40 @@ open http://localhost:3000
 
 ## Glossary
 
-| Term | Plain meaning |
-|---|---|
-| **Agent** | A single AI worker with one job (e.g. the Planner). A "multi-agent" system is a team of them. |
-| **LLM** | Large Language Model, the AI that reads and writes text (e.g. GPT, Claude). |
-| **RAG** | Retrieval-Augmented Generation, "look it up in real sources, then answer", instead of answering from memory. |
-| **Orchestration** | Coordinating the many steps and workers in the right order, with loops and retries. |
-| **API** | The way two pieces of software talk to each other; here also the "front counter" that receives requests. |
-| **Frontend / Backend** | Frontend = what you see in the browser. Backend = the servers and databases behind it. |
-| **Queue / Worker** | You drop off a request and get a ticket (queue); a separate program (worker) does the slow job in the background. |
-| **SSE (streaming)** | Server-Sent Events, a live one-way feed from server to browser, like a delivery tracker. |
-| **Checkpoint** | A saved snapshot of progress, like a save point in a video game, so work can resume after a crash. |
-| **Database / Postgres** | The master filing cabinet where the authoritative records live. |
-| **Vector search / pgvector** | "Search by meaning", finds related text even when the words differ. |
-| **BM25 / full-text search** | The classic "search by exact keywords" method. |
-| **Hybrid retrieval** | Using keyword search and meaning search together, then re-ranking the combined results. |
-| **Reranking** | A second, smarter pass that re-sorts search results by how relevant they really are. |
-| **Embedding** | A list of numbers that represents the meaning of a piece of text, so a computer can compare meanings. |
-| **Knowledge graph** | A map of things (companies, people, products) and how they relate. |
-| **Object storage / S3** | A cheap warehouse for large files, separate from the database. |
-| **Redis** | A very fast in-memory store used here as the job queue, cache, and rate-limiter. |
-| **Rate limiting** | "Take a number", capping how many requests a user or the system handles at once. |
-| **Backpressure** | When the system is busy, new work waits in line instead of overwhelming it. |
-| **Concurrency** | How many things run at the same time. |
-| **Idempotent** | Safe to repeat, doing the same step twice has the same effect as doing it once. |
-| **Prompt injection** | A trick where text on a web page tries to give the AI new instructions; we treat all fetched text as data, never instructions. |
-| **SSRF** | Server-Side Request Forgery, tricking our server into fetching a private internal address; blocked by design. |
-| **Observability** | Being able to see what the system did, traces, metrics, dashboards, logs. |
-| **P50 / P95 / P99 latency** | The typical time / the slowest 1-in-20 / the slowest 1-in-100. |
-| **CI/CD** | Automated pipelines that test every change and deploy the good ones. |
-| **IaC (Infrastructure as Code)** | Servers and cloud setup defined in text files so they are repeatable and reviewable. |
-| **Container / Docker** | A standard box that holds an app plus everything it needs to run, identically everywhere. |
-| **Modular monolith** | One codebase kept in clean sections, simpler than many tiny services, but still organised. |
-| **Confidence score** | A 0-1 number saying how sure the system is about a claim. |
-| **Citation** | The `[n]` marker in the report that links a statement to its source and exact supporting quote. |
+| Term                             | Plain meaning                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Agent**                        | A single AI worker with one job (e.g. the Planner). A "multi-agent" system is a team of them.                                  |
+| **LLM**                          | Large Language Model, the AI that reads and writes text (e.g. GPT, Claude).                                                    |
+| **RAG**                          | Retrieval-Augmented Generation, "look it up in real sources, then answer", instead of answering from memory.                   |
+| **Orchestration**                | Coordinating the many steps and workers in the right order, with loops and retries.                                            |
+| **API**                          | The way two pieces of software talk to each other; here also the "front counter" that receives requests.                       |
+| **Frontend / Backend**           | Frontend = what you see in the browser. Backend = the servers and databases behind it.                                         |
+| **Queue / Worker**               | You drop off a request and get a ticket (queue); a separate program (worker) does the slow job in the background.              |
+| **SSE (streaming)**              | Server-Sent Events, a live one-way feed from server to browser, like a delivery tracker.                                       |
+| **Checkpoint**                   | A saved snapshot of progress, like a save point in a video game, so work can resume after a crash.                             |
+| **Database / Postgres**          | The master filing cabinet where the authoritative records live.                                                                |
+| **Vector search / pgvector**     | "Search by meaning", finds related text even when the words differ.                                                            |
+| **BM25 / full-text search**      | The classic "search by exact keywords" method.                                                                                 |
+| **Hybrid retrieval**             | Using keyword search and meaning search together, then re-ranking the combined results.                                        |
+| **Reranking**                    | A second, smarter pass that re-sorts search results by how relevant they really are.                                           |
+| **Embedding**                    | A list of numbers that represents the meaning of a piece of text, so a computer can compare meanings.                          |
+| **Knowledge graph**              | A map of things (companies, people, products) and how they relate.                                                             |
+| **Object storage / S3**          | A cheap warehouse for large files, separate from the database.                                                                 |
+| **Redis**                        | A very fast in-memory store used here as the job queue, cache, and rate-limiter.                                               |
+| **Rate limiting**                | "Take a number", capping how many requests a user or the system handles at once.                                               |
+| **Backpressure**                 | When the system is busy, new work waits in line instead of overwhelming it.                                                    |
+| **Concurrency**                  | How many things run at the same time.                                                                                          |
+| **Idempotent**                   | Safe to repeat, doing the same step twice has the same effect as doing it once.                                                |
+| **Prompt injection**             | A trick where text on a web page tries to give the AI new instructions; we treat all fetched text as data, never instructions. |
+| **SSRF**                         | Server-Side Request Forgery, tricking our server into fetching a private internal address; blocked by design.                  |
+| **Observability**                | Being able to see what the system did, traces, metrics, dashboards, logs.                                                      |
+| **P50 / P95 / P99 latency**      | The typical time / the slowest 1-in-20 / the slowest 1-in-100.                                                                 |
+| **CI/CD**                        | Automated pipelines that test every change and deploy the good ones.                                                           |
+| **IaC (Infrastructure as Code)** | Servers and cloud setup defined in text files so they are repeatable and reviewable.                                           |
+| **Container / Docker**           | A standard box that holds an app plus everything it needs to run, identically everywhere.                                      |
+| **Modular monolith**             | One codebase kept in clean sections, simpler than many tiny services, but still organised.                                     |
+| **Confidence score**             | A 0-1 number saying how sure the system is about a claim.                                                                      |
+| **Citation**                     | The `[n]` marker in the report that links a statement to its source and exact supporting quote.                                |
 
 ## License
 

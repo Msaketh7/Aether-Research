@@ -1,13 +1,13 @@
 # Aether Research: Product Requirements Document (PRD)
 
-| | |
-|---|---|
-| **Working name** | Aether Research |
-| **Document status** | Draft |
-| **Version** | 1.0 |
-| **Last updated** | 2026-09-05 |
-| **Owner** | Product |
-| **Related** | [`TDD.md`](TDD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md` |
+|                     |                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| **Working name**    | Aether Research                                                                           |
+| **Document status** | Draft                                                                                     |
+| **Version**         | 1.0                                                                                       |
+| **Last updated**    | 2026-09-05                                                                                |
+| **Owner**           | Product                                                                                   |
+| **Related**         | [`TDD.md`](TDD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md` |
 
 ---
 
@@ -40,9 +40,9 @@
 
 ### Version history
 
-| Version | Date | Status | Summary |
-|---|---|---|---|
-| 1.0 | 2026-09-05 | **Current** | Initial PRD from the staged specification |
+| Version | Date       | Status      | Summary                                   |
+| ------- | ---------- | ----------- | ----------------------------------------- |
+| 1.0     | 2026-09-05 | **Current** | Initial PRD from the staged specification |
 
 ### Change log
 
@@ -65,7 +65,7 @@ Newest first. Only decision versions are listed here.
   knowledge-base connectors); non-English research corpora; mobile apps;
   real-time collaborative report editing; fine-tuned / self-hosted frontier
   models (local Ollama kept for comparison only).
-  *Reason:* keep v1 scope shippable; these are additive and not on the critical
+  _Reason:_ keep v1 scope shippable; these are additive and not on the critical
   path.
 - **Open decisions (unresolved):** LLM provider per role; web-search vendor
   (Tavily / Exa / Brave); deployment host/region and managed-vs-self database;
@@ -127,8 +127,8 @@ assessment, recommendations, and references. **Every important claim is clickabl
 back to its source and its supporting quote**, and each claim carries a
 **confidence score** from 0 to 1.
 
-**Three ways to use it.** *Quick* (a short answer in seconds), *Deep* (the full
-report in minutes), and *Conversational* (ask a follow-up like "go deeper on
+**Three ways to use it.** _Quick_ (a short answer in seconds), _Deep_ (the full
+report in minutes), and _Conversational_ (ask a follow-up like "go deeper on
 competitor X" and it builds on what it already found).
 
 **Why the engineering matters.** The hard part is not connecting an AI to a
@@ -166,15 +166,15 @@ citation-grounded reports with full traceability.
 > fact it found, shows its confidence, points out disagreements, grades its own
 > quality, and lets you pick up where you left off.
 
-| Property | Typical search assistant | Aether Research |
-|---|---|---|
-| Execution | Synchronous request/response | Long-running, stateful, resumable workflow |
-| Agents | One | Planner + parallel researchers + verifier + critic + synthesizer |
-| State | Forgotten after the answer | Persisted (database + save-points) |
-| Claims | Unattributed prose | Every material claim gets a supporting quote, a source, and a confidence score |
-| Conflicts | Silently resolved | Contradictions recorded with a likely reason |
-| Quality | Unmeasured | First-class evaluation surface + automated quality gate |
-| Follow-ups | Restart from zero | Reuse prior research |
+| Property   | Typical search assistant     | Aether Research                                                                |
+| ---------- | ---------------------------- | ------------------------------------------------------------------------------ |
+| Execution  | Synchronous request/response | Long-running, stateful, resumable workflow                                     |
+| Agents     | One                          | Planner + parallel researchers + verifier + critic + synthesizer               |
+| State      | Forgotten after the answer   | Persisted (database + save-points)                                             |
+| Claims     | Unattributed prose           | Every material claim gets a supporting quote, a source, and a confidence score |
+| Conflicts  | Silently resolved            | Contradictions recorded with a likely reason                                   |
+| Quality    | Unmeasured                   | First-class evaluation surface + automated quality gate                        |
+| Follow-ups | Restart from zero            | Reuse prior research                                                           |
 
 ---
 
@@ -253,13 +253,13 @@ Students and knowledge workers performing complex research.
 
 ### 4.3 Personas
 
-| Persona | Need | Key mode |
-|---|---|---|
-| **Corporate-development analyst** | "Should we enter market X?", full landscape with financials | Deep |
-| **Founder / strategist** | Fast read on a trend before a meeting | Quick |
-| **Technical due-diligence lead** | Verify a vendor's claims against official filings and real code activity | Deep + Conversational |
-| **Researcher / PhD student** | Literature scan across papers with contradictions surfaced | Deep |
-| **Consultant** | A reusable, cited evidence base a client can audit | Deep + history |
+| Persona                           | Need                                                                     | Key mode              |
+| --------------------------------- | ------------------------------------------------------------------------ | --------------------- |
+| **Corporate-development analyst** | "Should we enter market X?", full landscape with financials              | Deep                  |
+| **Founder / strategist**          | Fast read on a trend before a meeting                                    | Quick                 |
+| **Technical due-diligence lead**  | Verify a vendor's claims against official filings and real code activity | Deep + Conversational |
+| **Researcher / PhD student**      | Literature scan across papers with contradictions surfaced               | Deep                  |
+| **Consultant**                    | A reusable, cited evidence base a client can audit                       | Deep + history        |
 
 ---
 
@@ -356,14 +356,14 @@ Users can register, log in, log out, and manage sessions.
 
 The user supplies:
 
-| Field | Required | Notes |
-|---|---|---|
-| Research question | Yes | Free text |
-| Research mode | Yes | `quick` \| `deep` \| `conversational` |
-| Depth | Yes (deep) | Bounded by the hard limits in FR-8 |
-| Domains | No | e.g. company websites, SEC, arXiv, GitHub |
-| Date range | No | e.g. "last 12 months" |
-| Uploaded documents | No | PDFs; parsed and added to the research corpus |
+| Field              | Required   | Notes                                         |
+| ------------------ | ---------- | --------------------------------------------- |
+| Research question  | Yes        | Free text                                     |
+| Research mode      | Yes        | `quick` \| `deep` \| `conversational`         |
+| Depth              | Yes (deep) | Bounded by the hard limits in FR-8            |
+| Domains            | No         | e.g. company websites, SEC, arXiv, GitHub     |
+| Date range         | No         | e.g. "last 12 months"                         |
+| Uploaded documents | No         | PDFs; parsed and added to the research corpus |
 
 Example:
 
@@ -387,9 +387,9 @@ The planner transforms a complex question into structured subtasks. Output is
 {
   "research_goal": "...",
   "subtasks": [
-    { "id": "market",      "question": "...", "priority": "high" },
+    { "id": "market", "question": "...", "priority": "high" },
     { "id": "competitors", "question": "...", "priority": "high" },
-    { "id": "technology",  "question": "...", "priority": "medium" }
+    { "id": "technology", "question": "...", "priority": "medium" }
   ]
 }
 ```
@@ -485,12 +485,12 @@ information back to the planner, which issues new targeted searches.
 
 **Hard limits (per run), prevent runaway agents:**
 
-| Limit | Value | Why |
-|---|---|---|
-| `max_iterations` | 4 | cap the re-research loop |
-| `max_sources` | 50 | cap how much is fetched |
-| `max_cost` | $2 | cap the money spent per run |
-| `max_runtime` | 5 minutes | cap wall-clock time |
+| Limit            | Value     | Why                         |
+| ---------------- | --------- | --------------------------- |
+| `max_iterations` | 4         | cap the re-research loop    |
+| `max_sources`    | 50        | cap how much is fetched     |
+| `max_cost`       | $2        | cap the money spent per run |
+| `max_runtime`    | 5 minutes | cap wall-clock time         |
 
 When any limit is hit, the run proceeds to synthesis with an explicit coverage
 caveat in the report.
@@ -502,7 +502,7 @@ The report contains, in order:
 1. Executive Summary
 2. Key Findings
 3. Detailed Analysis
-4. Competitive Landscape *(where applicable)*
+4. Competitive Landscape _(where applicable)_
 5. Evidence
 6. Contradictions
 7. Confidence Assessment
@@ -533,7 +533,7 @@ The user can reopen any research later and inspect every layer.
 
 ## 8. Non-functional requirements
 
-> **In plain terms:** FRs are *what it does*; NFRs are *how well it must do it*:
+> **In plain terms:** FRs are _what it does_; NFRs are _how well it must do it_:
 > speed, reliability, uptime, and safety.
 
 ### 8.1 Reliability
@@ -546,10 +546,10 @@ The user can reopen any research later and inspect every layer.
 
 ### 8.2 Performance (project targets, not third-party claims)
 
-| Mode | Target |
-|---|---|
-| Quick research | 95% of runs finish in under 30 seconds |
-| Deep research | 95% of runs finish in under 180 seconds |
+| Mode           | Target                                  |
+| -------------- | --------------------------------------- |
+| Quick research | 95% of runs finish in under 30 seconds  |
+| Deep research  | 95% of runs finish in under 180 seconds |
 
 ### 8.3 Availability
 
@@ -635,12 +635,12 @@ claim correctness, groundedness.
 
 ### 10.3 Automated evaluation dimensions
 
-| Layer | Metrics | Plain meaning |
-|---|---|---|
-| Retrieval | Recall@K, Precision@K, MRR, NDCG | did it find the right sources, and rank them well? |
-| Generation | answer correctness, faithfulness, groundedness, citation precision, citation recall | is the writing accurate and true to the evidence, and are the citations right? |
-| Agents | task success, tool selection, planning accuracy, unnecessary calls, recovery rate | did the workers do their jobs efficiently and recover from errors? |
-| Infrastructure | P50, P95, P99, throughput, cost, failure rate | is it fast, cheap, and stable enough? |
+| Layer          | Metrics                                                                             | Plain meaning                                                                  |
+| -------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Retrieval      | Recall@K, Precision@K, MRR, NDCG                                                    | did it find the right sources, and rank them well?                             |
+| Generation     | answer correctness, faithfulness, groundedness, citation precision, citation recall | is the writing accurate and true to the evidence, and are the citations right? |
+| Agents         | task success, tool selection, planning accuracy, unnecessary calls, recovery rate   | did the workers do their jobs efficiently and recover from errors?             |
+| Infrastructure | P50, P95, P99, throughput, cost, failure rate                                       | is it fast, cheap, and stable enough?                                          |
 
 ### 10.4 Release gate
 
@@ -657,18 +657,18 @@ citation correctness below 90%.
 > website running on fake data, so the experience can be judged before the engine
 > is built.
 
-| Phase | Scope | Deliverable |
-|---|---|---|
-| **0. Product prototype** | Website + fake research data + fake agents + fake activity feed + report UI | A convincing clickable product |
-| **1. Basic backend** | Accounts, database, create/read research | Authenticated CRUD |
-| **2. First AI** | One Planner + Researcher + Synthesizer; a single straight-line path | One end-to-end AI answer |
-| **3. Web research** | Real search, fetch, parse, source database, citations | Cited answers from the live web |
-| **4. RAG** | Indexing and smart retrieval over collected documents | Retrieval-grounded answers |
-| **5. Multi-agent** | Add Critic + Verifier; run researchers in parallel | Parallel, verified research |
-| **6. Durable execution** | Save-points, queue, background workers, resume, retry | Resumable long-running runs |
-| **7. Evaluation** | Test set, scoring runner, dashboard, release gate | `/evaluations` + automated gate |
-| **8. Production engineering** | Monitoring, rate limiting, caching, load testing, security, cost controls | An operable service |
-| **9. Deployment** | Cloud hosting, infrastructure-as-code, automated deploys, monitoring | Live demo at 99.5% uptime |
+| Phase                         | Scope                                                                       | Deliverable                     |
+| ----------------------------- | --------------------------------------------------------------------------- | ------------------------------- |
+| **0. Product prototype**      | Website + fake research data + fake agents + fake activity feed + report UI | A convincing clickable product  |
+| **1. Basic backend**          | Accounts, database, create/read research                                    | Authenticated CRUD              |
+| **2. First AI**               | One Planner + Researcher + Synthesizer; a single straight-line path         | One end-to-end AI answer        |
+| **3. Web research**           | Real search, fetch, parse, source database, citations                       | Cited answers from the live web |
+| **4. RAG**                    | Indexing and smart retrieval over collected documents                       | Retrieval-grounded answers      |
+| **5. Multi-agent**            | Add Critic + Verifier; run researchers in parallel                          | Parallel, verified research     |
+| **6. Durable execution**      | Save-points, queue, background workers, resume, retry                       | Resumable long-running runs     |
+| **7. Evaluation**             | Test set, scoring runner, dashboard, release gate                           | `/evaluations` + automated gate |
+| **8. Production engineering** | Monitoring, rate limiting, caching, load testing, security, cost controls   | An operable service             |
+| **9. Deployment**             | Cloud hosting, infrastructure-as-code, automated deploys, monitoring        | Live demo at 99.5% uptime       |
 
 Sequencing rules: mock-first frontend before backend; one AI and one linear path
 before multi-agent; RAG before the critic loop; durability added **after** the
@@ -678,17 +678,17 @@ agents work synchronously; evaluation before production hardening.
 
 ## 12. Risks and mitigations
 
-| Risk (plain description) | Impact | Mitigation |
-|---|---|---|
-| The AI loop runs too long or spends too much | High | Hard limits (FR-8); a gateway that budgets tokens and caps concurrency; a per-run search budget |
-| A web page tricks the AI with hidden instructions | High | Treat fetched content as data only; wrap it in delimiters; filter the output; give agents a tiny fixed tool set |
-| The server is tricked into calling an internal address | High | Block private/internal addresses on every fetch, including after redirects; domain allow/deny lists |
-| The report cites sources that don't actually support the claim | High | A Citation Validator gate, the report cannot be saved until every citation resolves to a stored quote |
-| Ten copies of one news story look like ten independent sources | Medium | De-duplicate by canonical URL, content fingerprint, and meaning; a cluster counts once |
-| An outside API is rate-limited or down | Medium | Retries, caching, graceful degradation, a dead-letter queue for failed jobs |
-| Deep runs miss the speed target | Medium | Parallel researchers, cheap models for easy steps, caching, bounded loops |
-| Over-reliance on a single AI provider | Medium | A provider-agnostic model layer plus a local option |
-| The system "learns the test" | Medium | A held-out split, periodic dataset refresh, diverse categories |
+| Risk (plain description)                                       | Impact | Mitigation                                                                                                      |
+| -------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
+| The AI loop runs too long or spends too much                   | High   | Hard limits (FR-8); a gateway that budgets tokens and caps concurrency; a per-run search budget                 |
+| A web page tricks the AI with hidden instructions              | High   | Treat fetched content as data only; wrap it in delimiters; filter the output; give agents a tiny fixed tool set |
+| The server is tricked into calling an internal address         | High   | Block private/internal addresses on every fetch, including after redirects; domain allow/deny lists             |
+| The report cites sources that don't actually support the claim | High   | A Citation Validator gate, the report cannot be saved until every citation resolves to a stored quote           |
+| Ten copies of one news story look like ten independent sources | Medium | De-duplicate by canonical URL, content fingerprint, and meaning; a cluster counts once                          |
+| An outside API is rate-limited or down                         | Medium | Retries, caching, graceful degradation, a dead-letter queue for failed jobs                                     |
+| Deep runs miss the speed target                                | Medium | Parallel researchers, cheap models for easy steps, caching, bounded loops                                       |
+| Over-reliance on a single AI provider                          | Medium | A provider-agnostic model layer plus a local option                                                             |
+| The system "learns the test"                                   | Medium | A held-out split, periodic dataset refresh, diverse categories                                                  |
 
 ---
 
@@ -707,42 +707,42 @@ agents work synchronously; evaluation before production hardening.
 
 ## 14. Glossary
 
-| Term | Plain meaning |
-|---|---|
-| **Agent** | A single AI worker with one job. "Multi-agent" = a team of them. |
-| **LLM** | Large Language Model, the AI that reads and writes text. |
-| **RAG** | "Look it up in real sources, then answer" instead of answering from memory. |
-| **Planner / Researcher / Critic / Synthesizer** | The named AI workers: splits the question / gathers info / judges sufficiency / writes the report. |
-| **Run** | One execution of the research workflow for a question (follow-ups are linked child runs). |
-| **Subtask** | One prioritised sub-question the Planner produces. |
-| **Source** | A discovered document reference (web page, filing, paper, repo, upload). |
-| **Document** | The fetched and cleaned-up content of a source. |
-| **Chunk** | A slice of a document, sized so it can be searched and retrieved. |
-| **Claim** | A single normalised statement extracted from a document. |
-| **Evidence span** | The exact verbatim text that supports (or refutes) a claim. |
-| **Citation** | The `[n]` marker in the report linking a statement to its source and quote. |
-| **Contradiction** | Two claims about the same thing with conflicting values. |
-| **Confidence score** | A 0-1 number for how sure the system is about a claim. |
-| **Checkpoint / save-point** | A saved snapshot of workflow progress, so a crash can resume. |
-| **Queue / Worker** | Drop off a job, get a ticket; a background program does the slow work. |
-| **Streaming / SSE** | A live one-way progress feed from server to browser. |
-| **Database / PostgreSQL** | The master store of authoritative records. |
-| **Vector search / pgvector** | "Search by meaning", matches related text even when the words differ. |
-| **BM25 / full-text search** | Classic "search by exact keywords". |
-| **Hybrid retrieval** | Keyword search and meaning search combined, then re-ranked. |
-| **Reranking** | A smarter second pass that re-sorts results by true relevance. |
-| **Embedding** | Numbers that represent the meaning of text, so a computer can compare meanings. |
-| **Knowledge graph** | A map of entities (companies, people, products) and their relationships. |
-| **Object storage / S3** | A cheap warehouse for large files, separate from the database. |
-| **Redis** | A very fast store used here as the job queue, cache, and rate-limiter. |
-| **Rate limiting** | Capping how many requests a user or the system handles at once. |
-| **Backpressure** | When busy, new work waits in line instead of overwhelming the system. |
-| **Idempotent** | Safe to repeat, doing a step twice is the same as doing it once. |
-| **Prompt injection** | Web-page text that tries to hijack the AI's instructions; blocked by treating all fetched text as data. |
-| **SSRF** | Tricking the server into fetching a private internal address; blocked by design. |
-| **Latency / P50 / P95 / P99** | Response time / the typical time / the slowest 1-in-20 / the slowest 1-in-100. |
-| **CI/CD** | Automated pipelines that test every change and deploy the good ones. |
-| **IaC** | Infrastructure as Code, cloud setup written in reviewable text files. |
-| **Container / Docker** | A standard box holding an app plus everything it needs to run identically anywhere. |
-| **Modular monolith** | One codebase kept in clean sections, simpler than many tiny services. |
-| **Pydantic** | A Python library that forces data into a defined shape and rejects malformed input. |
+| Term                                            | Plain meaning                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Agent**                                       | A single AI worker with one job. "Multi-agent" = a team of them.                                        |
+| **LLM**                                         | Large Language Model, the AI that reads and writes text.                                                |
+| **RAG**                                         | "Look it up in real sources, then answer" instead of answering from memory.                             |
+| **Planner / Researcher / Critic / Synthesizer** | The named AI workers: splits the question / gathers info / judges sufficiency / writes the report.      |
+| **Run**                                         | One execution of the research workflow for a question (follow-ups are linked child runs).               |
+| **Subtask**                                     | One prioritised sub-question the Planner produces.                                                      |
+| **Source**                                      | A discovered document reference (web page, filing, paper, repo, upload).                                |
+| **Document**                                    | The fetched and cleaned-up content of a source.                                                         |
+| **Chunk**                                       | A slice of a document, sized so it can be searched and retrieved.                                       |
+| **Claim**                                       | A single normalised statement extracted from a document.                                                |
+| **Evidence span**                               | The exact verbatim text that supports (or refutes) a claim.                                             |
+| **Citation**                                    | The `[n]` marker in the report linking a statement to its source and quote.                             |
+| **Contradiction**                               | Two claims about the same thing with conflicting values.                                                |
+| **Confidence score**                            | A 0-1 number for how sure the system is about a claim.                                                  |
+| **Checkpoint / save-point**                     | A saved snapshot of workflow progress, so a crash can resume.                                           |
+| **Queue / Worker**                              | Drop off a job, get a ticket; a background program does the slow work.                                  |
+| **Streaming / SSE**                             | A live one-way progress feed from server to browser.                                                    |
+| **Database / PostgreSQL**                       | The master store of authoritative records.                                                              |
+| **Vector search / pgvector**                    | "Search by meaning", matches related text even when the words differ.                                   |
+| **BM25 / full-text search**                     | Classic "search by exact keywords".                                                                     |
+| **Hybrid retrieval**                            | Keyword search and meaning search combined, then re-ranked.                                             |
+| **Reranking**                                   | A smarter second pass that re-sorts results by true relevance.                                          |
+| **Embedding**                                   | Numbers that represent the meaning of text, so a computer can compare meanings.                         |
+| **Knowledge graph**                             | A map of entities (companies, people, products) and their relationships.                                |
+| **Object storage / S3**                         | A cheap warehouse for large files, separate from the database.                                          |
+| **Redis**                                       | A very fast store used here as the job queue, cache, and rate-limiter.                                  |
+| **Rate limiting**                               | Capping how many requests a user or the system handles at once.                                         |
+| **Backpressure**                                | When busy, new work waits in line instead of overwhelming the system.                                   |
+| **Idempotent**                                  | Safe to repeat, doing a step twice is the same as doing it once.                                        |
+| **Prompt injection**                            | Web-page text that tries to hijack the AI's instructions; blocked by treating all fetched text as data. |
+| **SSRF**                                        | Tricking the server into fetching a private internal address; blocked by design.                        |
+| **Latency / P50 / P95 / P99**                   | Response time / the typical time / the slowest 1-in-20 / the slowest 1-in-100.                          |
+| **CI/CD**                                       | Automated pipelines that test every change and deploy the good ones.                                    |
+| **IaC**                                         | Infrastructure as Code, cloud setup written in reviewable text files.                                   |
+| **Container / Docker**                          | A standard box holding an app plus everything it needs to run identically anywhere.                     |
+| **Modular monolith**                            | One codebase kept in clean sections, simpler than many tiny services.                                   |
+| **Pydantic**                                    | A Python library that forces data into a defined shape and rejects malformed input.                     |

@@ -30,22 +30,19 @@ function convert(mdPath, docxPath, title) {
 }
 
 // 1. masters
-convert(path.join(docsDir, 'PRD.md'), path.join(docsDir, 'PRD.docx'),
-  'Aether Research: PRD');
-convert(path.join(docsDir, 'TDD.md'), path.join(docsDir, 'TDD.docx'),
-  'Aether Research: TDD');
+convert(path.join(docsDir, 'PRD.md'), path.join(docsDir, 'PRD.docx'), 'Aether Research: PRD');
+convert(path.join(docsDir, 'TDD.md'), path.join(docsDir, 'TDD.docx'), 'Aether Research: TDD');
 
 // 2. every versioned snapshot
 if (fs.existsSync(versionsDir)) {
-  const snaps = fs.readdirSync(versionsDir)
+  const snaps = fs
+    .readdirSync(versionsDir)
     .filter((f) => f.endsWith('.md'))
     .sort();
   for (const f of snaps) {
     const base = f.replace(/\.md$/, '');
     const m = base.match(/^(PRD|TDD)-v(.+)$/);
-    const title = m
-      ? `Aether Research: ${m[1]} v${m[2]}`
-      : base;
+    const title = m ? `Aether Research: ${m[1]} v${m[2]}` : base;
     convert(path.join(versionsDir, f), path.join(versionsDir, base + '.docx'), title);
   }
 }

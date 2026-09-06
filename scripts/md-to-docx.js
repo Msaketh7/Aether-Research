@@ -32,10 +32,7 @@ try {
 } catch (e) {
   const fallbacks = [
     process.env.DOCX_LIB_DIR,
-    path.join(
-      process.env.LOCALAPPDATA || '',
-      'Temp/claude'
-    ),
+    path.join(process.env.LOCALAPPDATA || '', 'Temp/claude'),
   ].filter(Boolean);
   // last resort: let the caller pass NODE_PATH
   try {
@@ -43,7 +40,7 @@ try {
   } catch (e2) {
     console.error(
       'Cannot find the "docx" package. Install it (npm i docx) or set ' +
-        'NODE_PATH to a node_modules dir that contains it.'
+        'NODE_PATH to a node_modules dir that contains it.',
     );
     process.exit(1);
   }
@@ -118,14 +115,12 @@ function parseInline(text, baseOpts = {}) {
         runs.push(
           new ExternalHyperlink({
             link: url,
-            children: [
-              new TextRun({ text: label, font: BODY, style: 'Hyperlink' }),
-            ],
-          })
+            children: [new TextRun({ text: label, font: BODY, style: 'Hyperlink' })],
+          }),
         );
       } else {
         // internal/relative link — render label, keep the path in parens muted
-        pushText(label, { });
+        pushText(label, {});
       }
       i += link[0].length;
       continue;
@@ -181,9 +176,7 @@ function buildTable(headerCells, bodyRows) {
   bodyRows.forEach(consider);
   const totalLen = colTextLen.reduce((a, b) => a + b, 0) || cols;
   const minW = Math.max(900, Math.floor(CONTENT_WIDTH / (cols * 3)));
-  let widths = colTextLen.map((l) =>
-    Math.max(minW, Math.round((l / totalLen) * CONTENT_WIDTH))
-  );
+  let widths = colTextLen.map((l) => Math.max(minW, Math.round((l / totalLen) * CONTENT_WIDTH)));
   // normalise to exactly CONTENT_WIDTH
   let sum = widths.reduce((a, b) => a + b, 0);
   widths[cols - 1] += CONTENT_WIDTH - sum;
@@ -205,9 +198,7 @@ function buildTable(headerCells, bodyRows) {
   const makeCell = (text, idx, opts = {}) =>
     new TableCell({
       width: { size: widths[idx], type: WidthType.DXA },
-      shading: opts.header
-        ? { type: ShadingType.CLEAR, fill: 'E8E8E8', color: 'auto' }
-        : undefined,
+      shading: opts.header ? { type: ShadingType.CLEAR, fill: 'E8E8E8', color: 'auto' } : undefined,
       margins: { top: 60, bottom: 60, left: 100, right: 100 },
       children: [
         new Paragraph({
@@ -223,7 +214,7 @@ function buildTable(headerCells, bodyRows) {
       new TableRow({
         tableHeader: true,
         children: headerCells.map((c, idx) => makeCell(c, idx, { header: true })),
-      })
+      }),
     );
   }
   for (const r of bodyRows) {
@@ -282,10 +273,8 @@ function parseMarkdown(md) {
               idx === 0
                 ? { top: { style: BorderStyle.SINGLE, size: 4, color: 'DDDDDD' } }
                 : undefined,
-            children: [
-              new TextRun({ text: c || ' ', font: MONO, size: 18 }),
-            ],
-          })
+            children: [new TextRun({ text: c || ' ', font: MONO, size: 18 })],
+          }),
         );
       });
       continue;
@@ -300,7 +289,7 @@ function parseMarkdown(md) {
             bottom: { style: BorderStyle.SINGLE, size: 6, color: '999999' },
           },
           children: [new TextRun({ text: '' })],
-        })
+        }),
       );
       i += 1;
       continue;
@@ -315,7 +304,7 @@ function parseMarkdown(md) {
           heading: HEADING_BY_LEVEL[level],
           spacing: { before: level <= 2 ? 240 : 160, after: 100 },
           children: parseInline(h[2].replace(/\s+#*\s*$/, '')),
-        })
+        }),
       );
       i += 1;
       continue;
@@ -356,7 +345,7 @@ function parseMarkdown(md) {
           },
           shading: { type: ShadingType.CLEAR, fill: 'F7F7F7', color: 'auto' },
           children: parseInline(text, { italics: true }),
-        })
+        }),
       );
       continue;
     }
@@ -372,9 +361,7 @@ function parseMarkdown(md) {
             // append to previous paragraph
             const prev = out[out.length - 1];
             if (prev instanceof Paragraph) {
-              prev.addChildElement(
-                new TextRun({ text: ' ' + lines[i].trim(), font: BODY })
-              );
+              prev.addChildElement(new TextRun({ text: ' ' + lines[i].trim(), font: BODY }));
             }
             i += 1;
             continue;
@@ -386,13 +373,11 @@ function parseMarkdown(md) {
         const level = indent >= 2 ? 1 : 0;
         out.push(
           new Paragraph({
-            numbering: ordered
-              ? { reference: 'ordered', level }
-              : undefined,
+            numbering: ordered ? { reference: 'ordered', level } : undefined,
             bullet: ordered ? undefined : { level },
             spacing: { before: 20, after: 20 },
             children: parseInline(m[3]),
-          })
+          }),
         );
         i += 1;
       }
@@ -419,7 +404,7 @@ function parseMarkdown(md) {
       new Paragraph({
         spacing: { before: 40, after: 80, line: 276 },
         children: parseInline(para.join(' ')),
-      })
+      }),
     );
   }
 
@@ -449,10 +434,20 @@ function main() {
         {
           reference: 'ordered',
           levels: [
-            { level: 0, format: LevelFormat.DECIMAL, text: '%1.', alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: 460, hanging: 320 } } } },
-            { level: 1, format: LevelFormat.LOWER_LETTER, text: '%2.', alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: 920, hanging: 320 } } } },
+            {
+              level: 0,
+              format: LevelFormat.DECIMAL,
+              text: '%1.',
+              alignment: AlignmentType.START,
+              style: { paragraph: { indent: { left: 460, hanging: 320 } } },
+            },
+            {
+              level: 1,
+              format: LevelFormat.LOWER_LETTER,
+              text: '%2.',
+              alignment: AlignmentType.START,
+              style: { paragraph: { indent: { left: 920, hanging: 320 } } },
+            },
           ],
         },
       ],
@@ -472,7 +467,9 @@ function main() {
 
   Packer.toBuffer(doc).then((buf) => {
     fs.writeFileSync(outPath, buf);
-    console.log(`wrote ${outPath} (${buf.length.toLocaleString()} bytes, ${children.length} blocks)`);
+    console.log(
+      `wrote ${outPath} (${buf.length.toLocaleString()} bytes, ${children.length} blocks)`,
+    );
   });
 }
 

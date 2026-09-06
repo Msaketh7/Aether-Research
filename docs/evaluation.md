@@ -26,9 +26,7 @@ Each case is a versioned record:
   "mode": "deep",
   "expected_topics": ["pricing", "funding", "hardware", "competition"],
   "expected_source_types": ["web", "sec", "github"],
-  "expected_claims": [
-    { "key": "company-x.funding.series-c", "must_be_present": true }
-  ],
+  "expected_claims": [{ "key": "company-x.funding.series-c", "must_be_present": true }],
   "notes": "checks contradiction handling on restated revenue figures"
 }
 ```
@@ -45,25 +43,25 @@ low-coverage report rather than a confident one.
 
 ### 3.1 Retrieval
 
-| Metric | Question it answers |
-|---|---|
-| Recall@K | Did the relevant chunks come back at all? |
+| Metric      | Question it answers                           |
+| ----------- | --------------------------------------------- |
+| Recall@K    | Did the relevant chunks come back at all?     |
 | Precision@K | How much of what came back was worth reading? |
-| MRR | How high was the first relevant chunk? |
-| NDCG | Is the ranking, not just the set, good? |
+| MRR         | How high was the first relevant chunk?        |
+| NDCG        | Is the ranking, not just the set, good?       |
 
 Measured per retrieval strategy (dense, lexical, hybrid, hybrid + rerank) so
 that ADR-level choices are backed by numbers rather than by preference.
 
 ### 3.2 Generation
 
-| Metric | Definition |
-|---|---|
-| Correctness | Does the answer match the reference on the checkable facts? |
-| Groundedness | Is every factual statement traceable to retrieved content? |
-| Faithfulness | Does the statement preserve the source's meaning, not merely echo its words? |
+| Metric             | Definition                                                                      |
+| ------------------ | ------------------------------------------------------------------------------- |
+| Correctness        | Does the answer match the reference on the checkable facts?                     |
+| Groundedness       | Is every factual statement traceable to retrieved content?                      |
+| Faithfulness       | Does the statement preserve the source's meaning, not merely echo its words?    |
 | Citation precision | Of the citations emitted, how many resolve to evidence that supports the claim? |
-| Citation recall | Of the claims that need a citation, how many carry one? |
+| Citation recall    | Of the claims that need a citation, how many carry one?                         |
 
 Citation precision and recall are computed **structurally** first - the chain
 `citation -> claim -> evidence -> document -> source` either resolves or does
@@ -72,13 +70,13 @@ not a model quality issue.
 
 ### 3.3 Agent behaviour
 
-| Metric | Definition |
-|---|---|
-| Task completion | Fraction of planner subtasks that reached `done` |
-| Tool selection accuracy | Correct tool for the subtask type |
-| Unnecessary tool calls | Calls whose results never entered evidence |
-| Planning quality | Coverage of `expected_topics` by the generated subtasks |
-| Recovery rate | Runs that completed despite an injected failure |
+| Metric                  | Definition                                              |
+| ----------------------- | ------------------------------------------------------- |
+| Task completion         | Fraction of planner subtasks that reached `done`        |
+| Tool selection accuracy | Correct tool for the subtask type                       |
+| Unnecessary tool calls  | Calls whose results never entered evidence              |
+| Planning quality        | Coverage of `expected_topics` by the generated subtasks |
+| Recovery rate           | Runs that completed despite an injected failure         |
 
 ### 3.4 System
 
@@ -101,12 +99,12 @@ judge invalidates comparison with prior runs, and the report says so.
 
 Thresholds are configuration, not code, and every one is justified:
 
-| Metric | Gate | Rationale |
-|---|---|---|
-| Citation precision | configurable, high | a wrong citation is worse than a missing one |
-| Groundedness | configurable, high | the core product promise |
-| Retrieval Recall@10 | configurable | below this, synthesis cannot succeed |
-| Failure rate | configurable, low | reliability regression detector |
+| Metric              | Gate               | Rationale                                    |
+| ------------------- | ------------------ | -------------------------------------------- |
+| Citation precision  | configurable, high | a wrong citation is worse than a missing one |
+| Groundedness        | configurable, high | the core product promise                     |
+| Retrieval Recall@10 | configurable       | below this, synthesis cannot succeed         |
+| Failure rate        | configurable, low  | reliability regression detector              |
 
 The gate runs on `main` and on release candidates. A regression fails the build.
 Thresholds start at whatever the first measured baseline supports and are

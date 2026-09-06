@@ -1,13 +1,13 @@
 # Aether Research: Technical Design Document (TDD)
 
-| | |
-|---|---|
-| **Working name** | Aether Research |
-| **Document status** | Draft |
-| **Version** | 1.0 |
-| **Last updated** | 2026-09-05 |
-| **Owner** | Engineering |
-| **Related** | [`PRD.md`](PRD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md`, `ADRs/` |
+|                     |                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| **Working name**    | Aether Research                                                                                    |
+| **Document status** | Draft                                                                                              |
+| **Version**         | 1.0                                                                                                |
+| **Last updated**    | 2026-09-05                                                                                         |
+| **Owner**           | Engineering                                                                                        |
+| **Related**         | [`PRD.md`](PRD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md`, `ADRs/` |
 
 ---
 
@@ -44,9 +44,9 @@
 
 ### Version history
 
-| Version | Date | Status | Summary |
-|---|---|---|---|
-| 1.0 | 2026-09-05 | **Current** | Initial TDD from the staged specification |
+| Version | Date       | Status      | Summary                                   |
+| ------- | ---------- | ----------- | ----------------------------------------- |
+| 1.0     | 2026-09-05 | **Current** | Initial TDD from the staged specification |
 
 ### Change log
 
@@ -73,13 +73,13 @@ Newest first. Only decision versions are listed here.
   structure; nine ADRs; and open technical questions.
 - **Added (`sessions` table)**: beyond the table list supplied in the spec, a
   `sessions` table was introduced for server-side session storage.
-  *Reason:* FR-1 requires session management and per-device revoke.
+  _Reason:_ FR-1 requires session management and per-device revoke.
 - **Deferred (still open):** splitting the worker into dedicated ingestion /
   evaluation worker pools ("only at scale"); a dedicated vector database
   separate from Postgres (`ADR-0003`, revisit at scale); a standalone
   knowledge-graph store (kept as a projection of `claims` for now); Kafka for
   the queue (Redis + Celery/ARQ for v1).
-  *Reason:* avoid premature infrastructure; the v1 choices are sufficient at
+  _Reason:_ avoid premature infrastructure; the v1 choices are sufficient at
   demo scale.
 - **Open technical questions (unresolved):** embedding model + dimension and
   reranker choice; web-search vendor; Celery vs ARQ; pgvector index type
@@ -94,7 +94,7 @@ Newest first. Only decision versions are listed here.
 
 ## How to read this document
 
-This is the **technical** design. It is still meant to be *followable* by a
+This is the **technical** design. It is still meant to be _followable_ by a
 non-technical reader who wants to understand the architecture and the system
 design.
 
@@ -142,11 +142,11 @@ from the last save-point instead of starting over and re-spending money.
 **Why three frameworks instead of one.** They do different jobs and are kept from
 overlapping:
 
-- **LlamaIndex** is the *librarian*: it reads documents and finds the relevant
+- **LlamaIndex** is the _librarian_: it reads documents and finds the relevant
   passages.
-- **LangGraph** is the *project manager*: it runs the multi-step workflow, the
+- **LangGraph** is the _project manager_: it runs the multi-step workflow, the
   loop, the save-points, and the live progress feed.
-- **LangChain** is the *universal adapter*: one common way to call any AI
+- **LangChain** is the _universal adapter_: one common way to call any AI
   provider or tool, so we can swap them without rewriting the agents.
 
 **Why there's a "gateway" in front of the AI.** If 50 research runs each want to
@@ -252,13 +252,13 @@ and deployment.
 > counter and the back room) so we can add back-room capacity independently as
 > research demand grows.
 
-| Unit | Contents | Scales on |
-|---|---|---|
-| **API container** | FastAPI gateway, auth, research API, file API, SSE endpoints | request rate |
-| **Worker container** | Queue consumer + LangGraph runtime + agents + retrieval | active research count |
-| Postgres | system of record + pgvector | data volume / IOPS |
-| Redis | queue, cache, rate limiter, distributed locks | job throughput |
-| S3 | large artifacts | storage |
+| Unit                 | Contents                                                     | Scales on             |
+| -------------------- | ------------------------------------------------------------ | --------------------- |
+| **API container**    | FastAPI gateway, auth, research API, file API, SSE endpoints | request rate          |
+| **Worker container** | Queue consumer + LangGraph runtime + agents + retrieval      | active research count |
+| Postgres             | system of record + pgvector                                  | data volume / IOPS    |
+| Redis                | queue, cache, rate limiter, distributed locks                | job throughput        |
+| S3                   | large artifacts                                              | storage               |
 
 At scale the worker splits into: research workers, ingestion workers, evaluation
 workers, independently scaled.
@@ -272,7 +272,7 @@ workers, independently scaled.
 
 ### 3.1 Frontend (`apps/web`)
 
-*Plain terms: the website you interact with, plus the live progress feed.*
+_Plain terms: the website you interact with, plus the live progress feed._
 
 - **Stack:** Next.js (App Router), TypeScript, Tailwind, shadcn/ui, TanStack
   Query, native `EventSource` for SSE.
@@ -281,18 +281,18 @@ workers, independently scaled.
   activity stream, reconciled into the query cache.
 - **Pages:**
 
-  | Route | Purpose |
-  |---|---|
-  | `/login` | Sign in |
-  | `/dashboard` | Recent research, quick-start box |
-  | `/research/new` | Question + mode + depth + domains + date range + uploads |
-  | `/research/[id]` | Run overview + live activity feed |
-  | `/research/[id]/sources` | Discovered sources, duplicate clusters, credibility |
-  | `/research/[id]/evidence` | Claims, supporting quotes, confidence, contradictions |
-  | `/research/[id]/activity` | Full step-by-step agent trace |
-  | `/research/[id]/report` | Final report with inline `[n]` citations |
-  | `/settings` | Profile, sessions, provider/model preferences |
-  | `/evaluations` | Quality + system dashboards, benchmark history |
+  | Route                     | Purpose                                                  |
+  | ------------------------- | -------------------------------------------------------- |
+  | `/login`                  | Sign in                                                  |
+  | `/dashboard`              | Recent research, quick-start box                         |
+  | `/research/new`           | Question + mode + depth + domains + date range + uploads |
+  | `/research/[id]`          | Run overview + live activity feed                        |
+  | `/research/[id]/sources`  | Discovered sources, duplicate clusters, credibility      |
+  | `/research/[id]/evidence` | Claims, supporting quotes, confidence, contradictions    |
+  | `/research/[id]/activity` | Full step-by-step agent trace                            |
+  | `/research/[id]/report`   | Final report with inline `[n]` citations                 |
+  | `/settings`               | Profile, sessions, provider/model preferences            |
+  | `/evaluations`            | Quality + system dashboards, benchmark history           |
 
 - **Activity feed** renders a checklist driven by SSE events:
   `✓ Planning`, `✓ Searching 14 sources`, `→ Verifying claims`,
@@ -300,8 +300,8 @@ workers, independently scaled.
 
 ### 3.2 API Gateway (`apps/api/app/api`)
 
-*Plain terms: the front counter. Receives every request, checks it, and routes
-it. Hands back a ticket for long jobs.*
+_Plain terms: the front counter. Receives every request, checks it, and routes
+it. Hands back a ticket for long jobs._
 
 - **FastAPI**, modular monolith. Routers: `auth`, `research`, `files`,
   `evaluations`, `sse`, `health`.
@@ -314,8 +314,8 @@ it. Hands back a ticket for long jobs.*
 
 ### 3.3 Auth service (`apps/api/app/auth`)
 
-*Plain terms: the part that knows who you are and makes sure you only see your
-own research.*
+_Plain terms: the part that knows who you are and makes sure you only see your
+own research._
 
 - Auth.js on the frontend; the API validates the session and loads the user.
 - Server-side session store in Postgres; session list + revoke.
@@ -324,8 +324,8 @@ own research.*
 
 ### 3.4 Research API (`apps/api/app/research`)
 
-*Plain terms: start a research run, check its status, ask a follow-up, or cancel
-it.*
+_Plain terms: start a research run, check its status, ask a follow-up, or cancel
+it._
 
 - `POST /research`, validate → create `research_projects` (if new) +
   `research_runs` row (`status = queued`) → enqueue job → return `202` +
@@ -338,8 +338,8 @@ it.*
 
 ### 3.5 File API (`apps/api/app/api` + `sources`)
 
-*Plain terms: upload a PDF; the system reads it, cleans it, indexes it, and adds
-it to the research material.*
+_Plain terms: upload a PDF; the system reads it, cleans it, indexes it, and adds
+it to the research material._
 
 - `POST /files`, presigned S3 upload; on completion, enqueue an ingestion job
   that parses the PDF, normalizes content, chunks + embeds, and creates
@@ -348,22 +348,22 @@ it to the research material.*
 
 ### 3.6 Redis
 
-*Plain terms: the fast front desk: the ticket queue, the "we already did
-this" cache, the bouncer, and a shared scratchpad.*
+_Plain terms: the fast front desk: the ticket queue, the "we already did
+this" cache, the bouncer, and a shared scratchpad._
 
-| Use | Mechanism |
-|---|---|
-| Job queue | Celery or ARQ over Redis |
-| Cache | search cache, URL cache, embedding cache, LLM cache (see Section 13) |
-| Rate limiting | token bucket per user/route/cost |
-| Distributed locks | ingestion dedup, single-writer per run |
-| Temporary state | SSE fan-out channel per run, cancel flags |
-| Deduplication | in-flight request de-dupe for the LLM Gateway and the fetcher |
+| Use               | Mechanism                                                            |
+| ----------------- | -------------------------------------------------------------------- |
+| Job queue         | Celery or ARQ over Redis                                             |
+| Cache             | search cache, URL cache, embedding cache, LLM cache (see Section 13) |
+| Rate limiting     | token bucket per user/route/cost                                     |
+| Distributed locks | ingestion dedup, single-writer per run                               |
+| Temporary state   | SSE fan-out channel per run, cancel flags                            |
+| Deduplication     | in-flight request de-dupe for the LLM Gateway and the fetcher        |
 
 ### 3.7 Task Worker (`apps/api/app/workers`)
 
-*Plain terms: the back room. Pulls a job, runs the whole agent workflow, saves
-progress after every step, and streams updates to your browser.*
+_Plain terms: the back room. Pulls a job, runs the whole agent workflow, saves
+progress after every step, and streams updates to your browser._
 
 - Consumes jobs; for each research job it builds the LangGraph app with a
   Postgres checkpointer and invokes it with the run's thread id.
@@ -434,25 +434,25 @@ progress after every step, and streams updates to your browser.*
 
 ### 4.2 Node responsibilities
 
-*Plain terms: each row is one AI worker, what it takes in, what it produces, and
-how powerful a model it needs.*
+_Plain terms: each row is one AI worker, what it takes in, what it produces, and
+how powerful a model it needs._
 
-| Node | Input | Output | Model tier |
-|---|---|---|---|
-| **Planner** | question, mode, depth, domains, date range, parent evidence (followups) | `ResearchPlan` (Pydantic): `research_goal`, `subtasks[{id, question, priority}]` | strong |
-| **Researcher** (per subtask, parallel) | one subtask + `SearchBudget` slice | ranked `RetrievedSource[]` + fetched `Document[]` | strong for reasoning; small for relevance filtering |
-| **Evidence Extractor** | documents for a subtask | `EvidenceCandidate[]` (claim text, span, offsets, stance) | medium |
-| **Claim Normalization** | evidence candidates | `Claim[]` with `normalized_key`, subject/predicate/object | medium |
-| **Verification Agent** | claims + all evidence | per-claim `status` + calibrated `confidence` | strong |
-| **Contradiction Check** | claims grouped by `normalized_key` | `Contradiction[]` with `likely_reason` | strong |
-| **Critic** | coverage/confidence/contradiction state per subtask | `sufficient: bool` + `missing: MissingInfo[]` | strong |
-| **Synthesizer** | verified claims, contradictions, sources | report sections (Markdown) + citation markers | strongest |
-| **Citation Validator** | draft report + citation markers | validated report or repair instructions | small/medium (deterministic checks + one LLM repair pass) |
+| Node                                   | Input                                                                   | Output                                                                           | Model tier                                                |
+| -------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| **Planner**                            | question, mode, depth, domains, date range, parent evidence (followups) | `ResearchPlan` (Pydantic): `research_goal`, `subtasks[{id, question, priority}]` | strong                                                    |
+| **Researcher** (per subtask, parallel) | one subtask + `SearchBudget` slice                                      | ranked `RetrievedSource[]` + fetched `Document[]`                                | strong for reasoning; small for relevance filtering       |
+| **Evidence Extractor**                 | documents for a subtask                                                 | `EvidenceCandidate[]` (claim text, span, offsets, stance)                        | medium                                                    |
+| **Claim Normalization**                | evidence candidates                                                     | `Claim[]` with `normalized_key`, subject/predicate/object                        | medium                                                    |
+| **Verification Agent**                 | claims + all evidence                                                   | per-claim `status` + calibrated `confidence`                                     | strong                                                    |
+| **Contradiction Check**                | claims grouped by `normalized_key`                                      | `Contradiction[]` with `likely_reason`                                           | strong                                                    |
+| **Critic**                             | coverage/confidence/contradiction state per subtask                     | `sufficient: bool` + `missing: MissingInfo[]`                                    | strong                                                    |
+| **Synthesizer**                        | verified claims, contradictions, sources                                | report sections (Markdown) + citation markers                                    | strongest                                                 |
+| **Citation Validator**                 | draft report + citation markers                                         | validated report or repair instructions                                          | small/medium (deterministic checks + one LLM repair pass) |
 
 ### 4.3 Graph state
 
-*Plain terms: the shared "clipboard" every worker reads from and writes to. It is
-saved after every step.*
+_Plain terms: the shared "clipboard" every worker reads from and writes to. It is
+saved after every step._
 
 ```python
 class ResearchState(TypedDict):
@@ -488,8 +488,8 @@ class ResearchState(TypedDict):
 
 ### 4.4 Loop control
 
-*Plain terms: the guardrails checked between every step so the job can never run
-forever or overspend.*
+_Plain terms: the guardrails checked between every step so the job can never run
+forever or overspend._
 
 ```
 if iteration > max_iterations          -> force route to Synthesizer (with caveat)
@@ -507,11 +507,11 @@ if cancel_flag(run_id)                 -> checkpoint + mark cancelled
 > project manager, universal adapter. They are deliberately not allowed to
 > overlap, so each stays replaceable.
 
-| Framework | Layer | Responsibilities |
-|---|---|---|
-| **LlamaIndex** | Data / Retrieval (*librarian*) | document loaders, parsing, chunking, indexing, hybrid retrieval (vector + BM25), metadata filters, reranking, per-document query engines, structured (Pydantic) extraction outputs |
-| **LangGraph** | Agent / Workflow (*project manager*) | graph definition, state, routing, parallel `Send` fan-out, loops, checkpointing/persistence, streaming, human-in-the-loop, durable execution / resume |
-| **LangChain** | Model / Tool integration (*universal adapter*) | `LLMProvider` adapters, tool interfaces, prompt templates, output parsers, retriever interfaces shared by agents |
+| Framework      | Layer                                          | Responsibilities                                                                                                                                                                   |
+| -------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **LlamaIndex** | Data / Retrieval (_librarian_)                 | document loaders, parsing, chunking, indexing, hybrid retrieval (vector + BM25), metadata filters, reranking, per-document query engines, structured (Pydantic) extraction outputs |
+| **LangGraph**  | Agent / Workflow (_project manager_)           | graph definition, state, routing, parallel `Send` fan-out, loops, checkpointing/persistence, streaming, human-in-the-loop, durable execution / resume                              |
+| **LangChain**  | Model / Tool integration (_universal adapter_) | `LLMProvider` adapters, tool interfaces, prompt templates, output parsers, retriever interfaces shared by agents                                                                   |
 
 ADR: `docs/ADRs/0001-framework-split.md`.
 
@@ -536,23 +536,23 @@ Config (`packages/prompts` + `models/registry.yaml`):
 
 ```yaml
 roles:
-  planner:      { provider: anthropic, tier: strong }
-  researcher:   { provider: openai,    tier: strong }
-  critic:       { provider: openai,    tier: strong }
-  synthesizer:  { provider: anthropic, tier: strongest }
-  classifier:   { provider: openai,    tier: small }
+  planner: { provider: anthropic, tier: strong }
+  researcher: { provider: openai, tier: strong }
+  critic: { provider: openai, tier: strong }
+  synthesizer: { provider: anthropic, tier: strongest }
+  classifier: { provider: openai, tier: small }
 profiles:
-  local_dev:    { provider: ollama }          # cloud-vs-local comparison
+  local_dev: { provider: ollama } # cloud-vs-local comparison
 ```
 
 ### 6.2 Task → tier routing
 
-| Task | Tier (plain: how powerful a model) |
-|---|---|
-| query classification, source relevance, metadata extraction | small (cheap, fast) |
-| claim extraction | medium |
-| research reasoning, criticism | strong |
-| final synthesis | strongest (most capable, most expensive) |
+| Task                                                        | Tier (plain: how powerful a model)       |
+| ----------------------------------------------------------- | ---------------------------------------- |
+| query classification, source relevance, metadata extraction | small (cheap, fast)                      |
+| claim extraction                                            | medium                                   |
+| research reasoning, criticism                               | strong                                   |
+| final synthesis                                             | strongest (most capable, most expensive) |
 
 ### 6.3 Gateway features
 
@@ -588,319 +588,351 @@ profiles:
 
 ### 7.1 Stores
 
-| Store | Holds |
-|---|---|
-| **PostgreSQL** | system of record, all relational tables below |
-| **pgvector** | `document_chunks.embedding` (co-located in Postgres) |
-| **S3** | PDFs, raw HTML, screenshots, parsed docs, generated reports, eval artifacts |
-| **Redis** | queue, cache, rate limit, locks, SSE fan-out, temp state |
+| Store          | Holds                                                                       |
+| -------------- | --------------------------------------------------------------------------- |
+| **PostgreSQL** | system of record, all relational tables below                               |
+| **pgvector**   | `document_chunks.embedding` (co-located in Postgres)                        |
+| **S3**         | PDFs, raw HTML, screenshots, parsed docs, generated reports, eval artifacts |
+| **Redis**      | queue, cache, rate limit, locks, SSE fan-out, temp state                    |
 
 Large documents are **never** stored in Postgres, only a storage key.
 
 ### 7.2 Schema (system of record)
 
 > Types are illustrative Postgres. All tables have `id uuid primary key default
-> gen_random_uuid()`, `created_at timestamptz not null default now()`, and where
+gen_random_uuid()`, `created_at timestamptz not null default now()`, and where
 > noted `updated_at`. All foreign keys are indexed.
 >
-> *Plain-terms reading guide: "fk → x" means "points at a row in table x".
+> _Plain-terms reading guide: "fk → x" means "points at a row in table x".
 > "jsonb" is a flexible sub-record. "vector(N)" is the list of numbers used for
-> meaning-search.*
+> meaning-search._
 
 #### `users`
-| Column | Type | Notes |
-|---|---|---|
-| email | `citext` | unique, not null |
-| password_hash | `text` | Auth.js credential flow |
-| name | `text` | |
-| role | `text` | `user` \| `admin` |
-| settings | `jsonb` | provider/model prefs, UI prefs |
-| last_login_at | `timestamptz` | |
-| updated_at | `timestamptz` | |
+
+| Column        | Type          | Notes                          |
+| ------------- | ------------- | ------------------------------ |
+| email         | `citext`      | unique, not null               |
+| password_hash | `text`        | Auth.js credential flow        |
+| name          | `text`        |                                |
+| role          | `text`        | `user` \| `admin`              |
+| settings      | `jsonb`       | provider/model prefs, UI prefs |
+| last_login_at | `timestamptz` |                                |
+| updated_at    | `timestamptz` |                                |
 
 #### `sessions`
-| Column | Type | Notes |
-|---|---|---|
-| user_id | `uuid` | → users |
-| token_hash | `text` | unique |
-| user_agent | `text` | |
-| ip | `inet` | |
-| expires_at | `timestamptz` | |
+
+| Column     | Type          | Notes    |
+| ---------- | ------------- | -------- |
+| user_id    | `uuid`        | → users  |
+| token_hash | `text`        | unique   |
+| user_agent | `text`        |          |
+| ip         | `inet`        |          |
+| expires_at | `timestamptz` |          |
 | revoked_at | `timestamptz` | nullable |
 
 #### `research_projects`
-| Column | Type | Notes |
-|---|---|---|
-| user_id | `uuid` | → users |
-| title | `text` | |
-| description | `text` | |
+
+| Column      | Type          | Notes    |
+| ----------- | ------------- | -------- |
+| user_id     | `uuid`        | → users  |
+| title       | `text`        |          |
+| description | `text`        |          |
 | archived_at | `timestamptz` | nullable |
-| updated_at | `timestamptz` | |
+| updated_at  | `timestamptz` |          |
 
 #### `research_runs`
-*Plain terms: one row per time you press "Start Research" (or ask a follow-up).*
-| Column | Type | Notes |
-|---|---|---|
-| project_id | `uuid` | → research_projects |
-| user_id | `uuid` | → users (denormalized for authz) |
-| parent_run_id | `uuid` | → research_runs, nullable (conversational followups) |
-| question | `text` | not null |
-| mode | `text` | `quick` \| `deep` \| `conversational` |
-| depth | `int` | |
-| domains | `text[]` | |
-| date_range_start | `date` | nullable |
-| date_range_end | `date` | nullable |
-| status | `text` | `queued` \| `planning` \| `researching` \| `verifying` \| `synthesizing` \| `validating` \| `completed` \| `failed` \| `cancelled` |
-| langgraph_thread_id | `text` | ties the run to its saved workflow state |
-| langgraph_checkpoint_id | `text` | last save-point |
-| iteration_count | `int` | default 0 |
-| total_cost_usd | `numeric(10,4)` | default 0 |
-| total_tokens | `bigint` | default 0 |
-| source_count | `int` | default 0 |
-| coverage_caveat | `text` | set when a hard limit truncated the run |
-| started_at | `timestamptz` | |
-| completed_at | `timestamptz` | |
-| error | `jsonb` | nullable |
+
+_Plain terms: one row per time you press "Start Research" (or ask a follow-up)._
+
+| Column                  | Type            | Notes                                                                                                                              |
+| ----------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| project_id              | `uuid`          | → research_projects                                                                                                                |
+| user_id                 | `uuid`          | → users (denormalized for authz)                                                                                                   |
+| parent_run_id           | `uuid`          | → research_runs, nullable (conversational followups)                                                                               |
+| question                | `text`          | not null                                                                                                                           |
+| mode                    | `text`          | `quick` \| `deep` \| `conversational`                                                                                              |
+| depth                   | `int`           |                                                                                                                                    |
+| domains                 | `text[]`        |                                                                                                                                    |
+| date_range_start        | `date`          | nullable                                                                                                                           |
+| date_range_end          | `date`          | nullable                                                                                                                           |
+| status                  | `text`          | `queued` \| `planning` \| `researching` \| `verifying` \| `synthesizing` \| `validating` \| `completed` \| `failed` \| `cancelled` |
+| langgraph_thread_id     | `text`          | ties the run to its saved workflow state                                                                                           |
+| langgraph_checkpoint_id | `text`          | last save-point                                                                                                                    |
+| iteration_count         | `int`           | default 0                                                                                                                          |
+| total_cost_usd          | `numeric(10,4)` | default 0                                                                                                                          |
+| total_tokens            | `bigint`        | default 0                                                                                                                          |
+| source_count            | `int`           | default 0                                                                                                                          |
+| coverage_caveat         | `text`          | set when a hard limit truncated the run                                                                                            |
+| started_at              | `timestamptz`   |                                                                                                                                    |
+| completed_at            | `timestamptz`   |                                                                                                                                    |
+| error                   | `jsonb`         | nullable                                                                                                                           |
 
 Indexes: `(user_id, created_at desc)`, `(project_id)`, `(status)`,
 `(parent_run_id)`.
 
 #### `research_tasks` (planner subtasks)
-*Plain terms: the smaller questions the Planner created for this run.*
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs |
-| external_id | `text` | e.g. `market`, `competitors` |
-| question | `text` | |
-| priority | `text` | `high` \| `medium` \| `low` |
-| status | `text` | `pending` \| `researching` \| `done` \| `insufficient` |
-| rationale | `text` | why the planner created it |
-| iteration | `int` | which loop created it |
-| completed_at | `timestamptz` | |
+
+_Plain terms: the smaller questions the Planner created for this run._
+
+| Column       | Type          | Notes                                                  |
+| ------------ | ------------- | ------------------------------------------------------ |
+| run_id       | `uuid`        | → research_runs                                        |
+| external_id  | `text`        | e.g. `market`, `competitors`                           |
+| question     | `text`        |                                                        |
+| priority     | `text`        | `high` \| `medium` \| `low`                            |
+| status       | `text`        | `pending` \| `researching` \| `done` \| `insufficient` |
+| rationale    | `text`        | why the planner created it                             |
+| iteration    | `int`         | which loop created it                                  |
+| completed_at | `timestamptz` |                                                        |
 
 #### `sources`
-*Plain terms: every document reference discovered: one row per web page,
-filing, paper, repo, or upload.*
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs (nullable; sources may be shared across runs) |
-| url | `text` | original |
-| canonical_url | `text` | after canonicalization (dedupe) |
-| domain | `text` | |
-| source_type | `text` | `web` \| `sec` \| `arxiv` \| `github` \| `upload` |
-| title | `text` | |
-| publisher | `text` | |
-| author | `text` | |
-| published_at | `timestamptz` | nullable |
-| accessed_at | `timestamptz` | |
-| content_hash | `text` | sha256 of normalized content (exact-dupe key) |
-| credibility_score | `numeric(3,2)` | |
-| credibility_metadata | `jsonb` | domain reputation, is_primary, tier |
-| dedup_cluster_id | `uuid` | groups near-duplicates |
+
+_Plain terms: every document reference discovered: one row per web page,
+filing, paper, repo, or upload._
+
+| Column               | Type           | Notes                                                         |
+| -------------------- | -------------- | ------------------------------------------------------------- |
+| run_id               | `uuid`         | → research_runs (nullable; sources may be shared across runs) |
+| url                  | `text`         | original                                                      |
+| canonical_url        | `text`         | after canonicalization (dedupe)                               |
+| domain               | `text`         |                                                               |
+| source_type          | `text`         | `web` \| `sec` \| `arxiv` \| `github` \| `upload`             |
+| title                | `text`         |                                                               |
+| publisher            | `text`         |                                                               |
+| author               | `text`         |                                                               |
+| published_at         | `timestamptz`  | nullable                                                      |
+| accessed_at          | `timestamptz`  |                                                               |
+| content_hash         | `text`         | sha256 of normalized content (exact-dupe key)                 |
+| credibility_score    | `numeric(3,2)` |                                                               |
+| credibility_metadata | `jsonb`        | domain reputation, is_primary, tier                           |
+| dedup_cluster_id     | `uuid`         | groups near-duplicates                                        |
 
 Indexes: `(run_id)`, `(canonical_url)`, `(content_hash)`, `(dedup_cluster_id)`,
 `(source_type)`.
 
 #### `documents`
-*Plain terms: the actual cleaned-up text of a source, plus a pointer to the raw
-file in S3.*
-| Column | Type | Notes |
-|---|---|---|
-| source_id | `uuid` | → sources |
-| storage_key | `text` | S3 key for raw + parsed artifacts |
-| mime_type | `text` | |
-| raw_size_bytes | `bigint` | |
-| normalized_content | `text` | boilerplate-stripped text |
-| language | `text` | ISO code from language detection |
-| extraction_method | `text` | reader/parser used |
-| token_count | `int` | |
-| content_hash | `text` | sha256 (idempotent ingestion key) |
+
+_Plain terms: the actual cleaned-up text of a source, plus a pointer to the raw
+file in S3._
+
+| Column             | Type     | Notes                             |
+| ------------------ | -------- | --------------------------------- |
+| source_id          | `uuid`   | → sources                         |
+| storage_key        | `text`   | S3 key for raw + parsed artifacts |
+| mime_type          | `text`   |                                   |
+| raw_size_bytes     | `bigint` |                                   |
+| normalized_content | `text`   | boilerplate-stripped text         |
+| language           | `text`   | ISO code from language detection  |
+| extraction_method  | `text`   | reader/parser used                |
+| token_count        | `int`    |                                   |
+| content_hash       | `text`   | sha256 (idempotent ingestion key) |
 
 Unique: `(content_hash)`.
 
 #### `document_chunks`
-*Plain terms: each document sliced into searchable pieces; each piece has a
-meaning-vector and a keyword index.*
-| Column | Type | Notes |
-|---|---|---|
-| document_id | `uuid` | → documents |
-| chunk_index | `int` | |
-| content | `text` | |
-| token_count | `int` | |
-| embedding | `vector(EMBED_DIM)` | pgvector; HNSW index (meaning-search) |
-| embedding_model | `text` | |
-| tsv | `tsvector` | generated from `content` for keyword/full-text search |
-| metadata | `jsonb` | section, page, offsets, source_type (for filters) |
+
+_Plain terms: each document sliced into searchable pieces; each piece has a
+meaning-vector and a keyword index._
+
+| Column          | Type                | Notes                                                 |
+| --------------- | ------------------- | ----------------------------------------------------- |
+| document_id     | `uuid`              | → documents                                           |
+| chunk_index     | `int`               |                                                       |
+| content         | `text`              |                                                       |
+| token_count     | `int`               |                                                       |
+| embedding       | `vector(EMBED_DIM)` | pgvector; HNSW index (meaning-search)                 |
+| embedding_model | `text`              |                                                       |
+| tsv             | `tsvector`          | generated from `content` for keyword/full-text search |
+| metadata        | `jsonb`             | section, page, offsets, source_type (for filters)     |
 
 Indexes: `USING hnsw (embedding vector_cosine_ops)`, `USING gin (tsv)`,
 `(document_id, chunk_index)`, `gin (metadata)`.
 
 #### `claims`
-*Plain terms: one row per distinct statement the research produced.*
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs |
-| task_id | `uuid` | → research_tasks, nullable |
-| text | `text` | normalized atomic assertion |
-| subject | `text` | |
-| predicate | `text` | |
-| object_value | `text` | |
-| claim_type | `text` | `quantitative` \| `qualitative` \| `event` |
-| normalized_key | `text` | groups the same claim across sources; drives contradiction detection |
-| confidence | `numeric(3,2)` | calibrated, from the Verification Agent |
-| status | `text` | `candidate` \| `verified` \| `refuted` \| `contested` |
-| first_seen_at | `timestamptz` | |
+
+_Plain terms: one row per distinct statement the research produced._
+
+| Column         | Type           | Notes                                                                |
+| -------------- | -------------- | -------------------------------------------------------------------- |
+| run_id         | `uuid`         | → research_runs                                                      |
+| task_id        | `uuid`         | → research_tasks, nullable                                           |
+| text           | `text`         | normalized atomic assertion                                          |
+| subject        | `text`         |                                                                      |
+| predicate      | `text`         |                                                                      |
+| object_value   | `text`         |                                                                      |
+| claim_type     | `text`         | `quantitative` \| `qualitative` \| `event`                           |
+| normalized_key | `text`         | groups the same claim across sources; drives contradiction detection |
+| confidence     | `numeric(3,2)` | calibrated, from the Verification Agent                              |
+| status         | `text`         | `candidate` \| `verified` \| `refuted` \| `contested`                |
+| first_seen_at  | `timestamptz`  |                                                                      |
 
 Indexes: `(run_id)`, `(normalized_key)`, `(status)`.
 
 #### `evidence`
-*Plain terms: the exact quote that supports (or refutes) a claim, and where it
-came from.*
-| Column | Type | Notes |
-|---|---|---|
-| claim_id | `uuid` | → claims |
-| document_id | `uuid` | → documents |
-| source_id | `uuid` | → sources |
-| span_text | `text` | verbatim |
-| span_start | `int` | char offset in `normalized_content` |
-| span_end | `int` | |
-| stance | `text` | `supports` \| `refutes` \| `neutral` |
-| extractor_agent | `text` | |
-| extractor_model | `text` | |
-| confidence | `numeric(3,2)` | |
+
+_Plain terms: the exact quote that supports (or refutes) a claim, and where it
+came from._
+
+| Column          | Type           | Notes                                |
+| --------------- | -------------- | ------------------------------------ |
+| claim_id        | `uuid`         | → claims                             |
+| document_id     | `uuid`         | → documents                          |
+| source_id       | `uuid`         | → sources                            |
+| span_text       | `text`         | verbatim                             |
+| span_start      | `int`          | char offset in `normalized_content`  |
+| span_end        | `int`          |                                      |
+| stance          | `text`         | `supports` \| `refutes` \| `neutral` |
+| extractor_agent | `text`         |                                      |
+| extractor_model | `text`         |                                      |
+| confidence      | `numeric(3,2)` |                                      |
 
 Indexes: `(claim_id)`, `(source_id)`, `(document_id)`.
 
 #### `contradictions`
-*Plain terms: one row per genuine disagreement between sources, with a best-guess
-reason.*
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs |
-| normalized_key | `text` | the disputed claim key |
-| claim_a_id | `uuid` | → claims |
-| claim_b_id | `uuid` | → claims |
-| value_a | `text` | |
-| value_b | `text` | |
-| likely_reason | `text` | e.g. "different fiscal periods" |
-| resolution | `text` | `unresolved` \| `resolved_a` \| `resolved_b` \| `both_valid_in_context` |
-| resolved_by | `text` | agent or user |
+
+_Plain terms: one row per genuine disagreement between sources, with a best-guess
+reason._
+
+| Column         | Type   | Notes                                                                   |
+| -------------- | ------ | ----------------------------------------------------------------------- |
+| run_id         | `uuid` | → research_runs                                                         |
+| normalized_key | `text` | the disputed claim key                                                  |
+| claim_a_id     | `uuid` | → claims                                                                |
+| claim_b_id     | `uuid` | → claims                                                                |
+| value_a        | `text` |                                                                         |
+| value_b        | `text` |                                                                         |
+| likely_reason  | `text` | e.g. "different fiscal periods"                                         |
+| resolution     | `text` | `unresolved` \| `resolved_a` \| `resolved_b` \| `both_valid_in_context` |
+| resolved_by    | `text` | agent or user                                                           |
 
 #### `reports`
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs, unique |
-| title | `text` | |
-| summary | `text` | executive summary cache |
-| overall_confidence | `numeric(3,2)` | |
-| status | `text` | `draft` \| `validated` \| `published` |
-| model | `text` | synthesizer model |
-| word_count | `int` | |
-| generated_at | `timestamptz` | |
-| validated_at | `timestamptz` | citation-validation pass time |
+
+| Column             | Type           | Notes                                 |
+| ------------------ | -------------- | ------------------------------------- |
+| run_id             | `uuid`         | → research_runs, unique               |
+| title              | `text`         |                                       |
+| summary            | `text`         | executive summary cache               |
+| overall_confidence | `numeric(3,2)` |                                       |
+| status             | `text`         | `draft` \| `validated` \| `published` |
+| model              | `text`         | synthesizer model                     |
+| word_count         | `int`          |                                       |
+| generated_at       | `timestamptz`  |                                       |
+| validated_at       | `timestamptz`  | citation-validation pass time         |
 
 #### `report_sections`
-| Column | Type | Notes |
-|---|---|---|
-| report_id | `uuid` | → reports |
-| kind | `text` | `executive_summary` \| `key_findings` \| `detailed_analysis` \| `competitive_landscape` \| `evidence` \| `contradictions` \| `confidence_assessment` \| `recommendations` \| `references` |
-| heading | `text` | |
-| ordinal | `int` | |
-| content_md | `text` | Markdown with `[n]` markers |
+
+| Column     | Type   | Notes                                                                                                                                                                                     |
+| ---------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| report_id  | `uuid` | → reports                                                                                                                                                                                 |
+| kind       | `text` | `executive_summary` \| `key_findings` \| `detailed_analysis` \| `competitive_landscape` \| `evidence` \| `contradictions` \| `confidence_assessment` \| `recommendations` \| `references` |
+| heading    | `text` |                                                                                                                                                                                           |
+| ordinal    | `int`  |                                                                                                                                                                                           |
+| content_md | `text` | Markdown with `[n]` markers                                                                                                                                                               |
 
 #### `citations`
-*Plain terms: the link behind every `[n]` in the report.*
-| Column | Type | Notes |
-|---|---|---|
-| report_section_id | `uuid` | → report_sections |
-| claim_id | `uuid` | → claims |
-| source_id | `uuid` | → sources |
-| ordinal | `int` | the `[n]` number within the report |
-| quote | `text` | the supporting evidence span shown on hover/click |
+
+_Plain terms: the link behind every `[n]` in the report._
+
+| Column            | Type   | Notes                                             |
+| ----------------- | ------ | ------------------------------------------------- |
+| report_section_id | `uuid` | → report_sections                                 |
+| claim_id          | `uuid` | → claims                                          |
+| source_id         | `uuid` | → sources                                         |
+| ordinal           | `int`  | the `[n]` number within the report                |
+| quote             | `text` | the supporting evidence span shown on hover/click |
 
 Indexes: `(report_section_id)`, `(claim_id)`, `(source_id)`.
 
 #### `agent_runs`
-*Plain terms: one row per AI-worker execution; the step-by-step activity log.*
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs |
-| task_id | `uuid` | → research_tasks, nullable |
-| agent_name | `text` | `planner` \| `researcher` \| `evidence_extractor` \| `claim_normalizer` \| `verifier` \| `critic` \| `synthesizer` \| `citation_validator` |
-| iteration | `int` | |
-| status | `text` | `running` \| `ok` \| `error` |
-| input | `jsonb` | |
-| output | `jsonb` | |
-| latency_ms | `int` | |
-| tokens | `int` | |
-| cost_usd | `numeric(10,4)` | |
-| trace_id | `text` | OpenTelemetry |
-| span_id | `text` | |
-| error | `jsonb` | nullable |
-| started_at / completed_at | `timestamptz` | |
+
+_Plain terms: one row per AI-worker execution; the step-by-step activity log._
+
+| Column                    | Type            | Notes                                                                                                                                      |
+| ------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| run_id                    | `uuid`          | → research_runs                                                                                                                            |
+| task_id                   | `uuid`          | → research_tasks, nullable                                                                                                                 |
+| agent_name                | `text`          | `planner` \| `researcher` \| `evidence_extractor` \| `claim_normalizer` \| `verifier` \| `critic` \| `synthesizer` \| `citation_validator` |
+| iteration                 | `int`           |                                                                                                                                            |
+| status                    | `text`          | `running` \| `ok` \| `error`                                                                                                               |
+| input                     | `jsonb`         |                                                                                                                                            |
+| output                    | `jsonb`         |                                                                                                                                            |
+| latency_ms                | `int`           |                                                                                                                                            |
+| tokens                    | `int`           |                                                                                                                                            |
+| cost_usd                  | `numeric(10,4)` |                                                                                                                                            |
+| trace_id                  | `text`          | OpenTelemetry                                                                                                                              |
+| span_id                   | `text`          |                                                                                                                                            |
+| error                     | `jsonb`         | nullable                                                                                                                                   |
+| started_at / completed_at | `timestamptz`   |                                                                                                                                            |
 
 #### `tool_calls`
-*Plain terms: one row per external action: a search, a fetch, or an API call.*
-| Column | Type | Notes |
-|---|---|---|
-| agent_run_id | `uuid` | → agent_runs |
-| tool_name | `text` | `search` \| `fetch` \| `parse` \| `retrieve` \| `sec_api` \| `arxiv_api` \| `github_api` |
-| request | `jsonb` | |
-| response_summary | `jsonb` | truncated; full body in S3 if large |
-| status | `text` | `ok` \| `error` \| `rate_limited` \| `timeout` |
-| latency_ms | `int` | |
-| cost_usd | `numeric(10,4)` | |
-| cache_hit | `bool` | |
-| retries | `int` | |
-| trace_id / span_id | `text` | |
-| error | `jsonb` | nullable |
+
+_Plain terms: one row per external action: a search, a fetch, or an API call._
+
+| Column             | Type            | Notes                                                                                    |
+| ------------------ | --------------- | ---------------------------------------------------------------------------------------- |
+| agent_run_id       | `uuid`          | → agent_runs                                                                             |
+| tool_name          | `text`          | `search` \| `fetch` \| `parse` \| `retrieve` \| `sec_api` \| `arxiv_api` \| `github_api` |
+| request            | `jsonb`         |                                                                                          |
+| response_summary   | `jsonb`         | truncated; full body in S3 if large                                                      |
+| status             | `text`          | `ok` \| `error` \| `rate_limited` \| `timeout`                                           |
+| latency_ms         | `int`           |                                                                                          |
+| cost_usd           | `numeric(10,4)` |                                                                                          |
+| cache_hit          | `bool`          |                                                                                          |
+| retries            | `int`           |                                                                                          |
+| trace_id / span_id | `text`          |                                                                                          |
+| error              | `jsonb`         | nullable                                                                                 |
 
 #### `llm_calls`
-*Plain terms: one row per AI model call, with its token count and cost.*
-| Column | Type | Notes |
-|---|---|---|
-| agent_run_id | `uuid` | → agent_runs, nullable |
-| role | `text` | planner/researcher/... |
-| provider | `text` | `openai` \| `anthropic` \| `gemini` \| `ollama` |
-| model | `text` | |
-| prompt_version | `text` | from `packages/prompts` |
-| prompt_tokens / completion_tokens | `int` | |
-| cost_usd | `numeric(10,4)` | |
-| latency_ms | `int` | |
-| temperature | `numeric(3,2)` | |
-| cache_hit | `bool` | |
-| status | `text` | `ok` \| `error` \| `fallback` |
-| request_hash | `text` | for de-dupe |
-| trace_id / span_id | `text` | |
+
+_Plain terms: one row per AI model call, with its token count and cost._
+
+| Column                            | Type            | Notes                                           |
+| --------------------------------- | --------------- | ----------------------------------------------- |
+| agent_run_id                      | `uuid`          | → agent_runs, nullable                          |
+| role                              | `text`          | planner/researcher/...                          |
+| provider                          | `text`          | `openai` \| `anthropic` \| `gemini` \| `ollama` |
+| model                             | `text`          |                                                 |
+| prompt_version                    | `text`          | from `packages/prompts`                         |
+| prompt_tokens / completion_tokens | `int`           |                                                 |
+| cost_usd                          | `numeric(10,4)` |                                                 |
+| latency_ms                        | `int`           |                                                 |
+| temperature                       | `numeric(3,2)`  |                                                 |
+| cache_hit                         | `bool`          |                                                 |
+| status                            | `text`          | `ok` \| `error` \| `fallback`                   |
+| request_hash                      | `text`          | for de-dupe                                     |
+| trace_id / span_id                | `text`          |                                                 |
 
 #### `evaluations`
-*Plain terms: one row per test-question result in a benchmark run.*
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs, nullable (benchmark rows have none) |
-| benchmark_id | `text` | dataset case id |
-| dataset_version | `text` | |
-| git_sha | `text` | commit under test |
-| kind | `text` | `retrieval` \| `generation` \| `agent` \| `infrastructure` \| `full` |
-| metrics | `jsonb` | recall@k, precision@k, mrr, ndcg, faithfulness, citation_precision, ... |
-| thresholds | `jsonb` | gate values |
-| passed | `bool` | |
+
+_Plain terms: one row per test-question result in a benchmark run._
+
+| Column          | Type    | Notes                                                                   |
+| --------------- | ------- | ----------------------------------------------------------------------- |
+| run_id          | `uuid`  | → research_runs, nullable (benchmark rows have none)                    |
+| benchmark_id    | `text`  | dataset case id                                                         |
+| dataset_version | `text`  |                                                                         |
+| git_sha         | `text`  | commit under test                                                       |
+| kind            | `text`  | `retrieval` \| `generation` \| `agent` \| `infrastructure` \| `full`    |
+| metrics         | `jsonb` | recall@k, precision@k, mrr, ndcg, faithfulness, citation_precision, ... |
+| thresholds      | `jsonb` | gate values                                                             |
+| passed          | `bool`  |                                                                         |
 
 #### `feedback`
-| Column | Type | Notes |
-|---|---|---|
-| run_id | `uuid` | → research_runs |
-| report_id | `uuid` | → reports |
-| user_id | `uuid` | → users |
-| rating | `int` | 1-5 |
-| helpful | `bool` | |
-| category | `text` | `accuracy` \| `completeness` \| `citations` \| `readability` \| `other` |
-| comment | `text` | |
+
+| Column    | Type   | Notes                                                                   |
+| --------- | ------ | ----------------------------------------------------------------------- |
+| run_id    | `uuid` | → research_runs                                                         |
+| report_id | `uuid` | → reports                                                               |
+| user_id   | `uuid` | → users                                                                 |
+| rating    | `int`  | 1-5                                                                     |
+| helpful   | `bool` |                                                                         |
+| category  | `text` | `accuracy` \| `completeness` \| `citations` \| `readability` \| `other` |
+| comment   | `text` |                                                                         |
 
 ### 7.3 Connection management
 
-*Plain terms: databases have a limited number of "phone lines"; a pooler shares
-them efficiently so the app never runs out.*
+_Plain terms: databases have a limited number of "phone lines"; a pooler shares
+them efficiently so the app never runs out._
 
 - PgBouncer (transaction pooling) in front of Postgres.
 - Separate pools for API (short transactions) and Worker (longer transactions).
@@ -995,16 +1027,16 @@ cluster as one independent source**, not N copies.
 
 ### 9.4 SearchBudget
 
-*Plain terms: a per-run spending cap for searching and fetching.*
+_Plain terms: a per-run spending cap for searching and fetching._
 
-| Field | Example |
-|---|---|
-| `max_queries` | 30 |
-| `max_results` | per-query cap |
-| `max_domains` | diversity cap |
-| `max_pages` | 100 |
-| `timeout` | 5 min |
-| `cost_limit` | contributes to `max_cost` |
+| Field         | Example                   |
+| ------------- | ------------------------- |
+| `max_queries` | 30                        |
+| `max_results` | per-query cap             |
+| `max_domains` | diversity cap             |
+| `max_pages`   | 100                       |
+| `timeout`     | 5 min                     |
+| `cost_limit`  | contributes to `max_cost` |
 
 ---
 
@@ -1058,7 +1090,7 @@ worker:
 - A run can resume after: worker crash, deploy, transient provider outage, or a
   user-initiated pause.
 - The worker supervisor scans for runs `status in (planning, researching,
-  verifying, synthesizing)` with a stale heartbeat and re-enqueues them; the
+verifying, synthesizing)` with a stale heartbeat and re-enqueues them; the
   graph resumes from the last checkpoint (no repeated side effects because
   ingestion and writes are idempotent on hashes / natural keys).
 - `POST /research/{id}/cancel` sets a Redis flag; the graph checks it between
@@ -1088,19 +1120,19 @@ attempt 3 → fail → dead-letter / fallback
 
 ### 12.2 Error taxonomy
 
-| Class | Plain meaning | Handling |
-|---|---|---|
-| **Transient** | temporary blip | retry with backoff |
-| **Rate limit** | "you're going too fast" | retry honoring `Retry-After`; gateway throttles that provider |
-| **Auth** | "your key is wrong / not allowed" | no retry; alert; fail that call, continue the run if possible |
-| **Timeout** | no response in time | retry once with a longer budget, then dead-letter |
-| **Content failure** | page unparseable / empty / blocked | drop the source, log it, continue |
-| **Permanent** | malformed request (a bug) | no retry; surface the error |
+| Class               | Plain meaning                      | Handling                                                      |
+| ------------------- | ---------------------------------- | ------------------------------------------------------------- |
+| **Transient**       | temporary blip                     | retry with backoff                                            |
+| **Rate limit**      | "you're going too fast"            | retry honoring `Retry-After`; gateway throttles that provider |
+| **Auth**            | "your key is wrong / not allowed"  | no retry; alert; fail that call, continue the run if possible |
+| **Timeout**         | no response in time                | retry once with a longer budget, then dead-letter             |
+| **Content failure** | page unparseable / empty / blocked | drop the source, log it, continue                             |
+| **Permanent**       | malformed request (a bug)          | no retry; surface the error                                   |
 
 ### 12.3 Circuit breaking
 
-*Plain terms: if a provider keeps failing, stop calling it for a while instead of
-hammering it.*
+_Plain terms: if a provider keeps failing, stop calling it for a while instead of
+hammering it._
 
 - Per provider and per external API: open the breaker after a failure-rate
   threshold; route to a fallback provider or skip the connector; half-open probe
@@ -1120,19 +1152,19 @@ hammering it.*
 > result. The one thing never cached blindly is a final research answer, those
 > must stay fresh.
 
-| Cache | Key | TTL | Notes |
-|---|---|---|---|
-| **Search** | `sha256(query + domains + date_range)` | short (hours) | avoids duplicate search spend within/near a run |
-| **URL / fetch** | `url + content_hash` | medium (days) | serves the archived normalized content |
-| **Embedding** | `sha256(text) + embedding_model` | long | embeddings are deterministic |
-| **LLM** | `sha256(provider + model + prompt + params)` | short, **selective** | only deterministic sub-ops (classification, metadata extraction, normalization). **Never blindly cache final research answers.** |
+| Cache           | Key                                          | TTL                  | Notes                                                                                                                            |
+| --------------- | -------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Search**      | `sha256(query + domains + date_range)`       | short (hours)        | avoids duplicate search spend within/near a run                                                                                  |
+| **URL / fetch** | `url + content_hash`                         | medium (days)        | serves the archived normalized content                                                                                           |
+| **Embedding**   | `sha256(text) + embedding_model`             | long                 | embeddings are deterministic                                                                                                     |
+| **LLM**         | `sha256(provider + model + prompt + params)` | short, **selective** | only deterministic sub-ops (classification, metadata extraction, normalization). **Never blindly cache final research answers.** |
 
 Cache lookups are recorded (`cache_hit` on `tool_calls` / `llm_calls`) so the
 evaluation system can report cost savings.
 
 ### 13.1 Prompt / context optimization
 
-*Plain terms: ways to cut the AI bill without hurting quality.*
+_Plain terms: ways to cut the AI bill without hurting quality._
 
 - Keep system prompts stable (better provider-side prompt caching; stable
   `prompt_version`).
@@ -1156,11 +1188,11 @@ API  →  Queue  →  Concurrency manager  →  Worker pool
 
 Global caps (Redis-coordinated):
 
-| Cap | Value |
-|---|---|
-| max concurrent research runs | 20 |
-| max concurrent searches | 50 |
-| max concurrent LLM requests | 30 (gateway semaphore; ~8 per provider) |
+| Cap                          | Value                                   |
+| ---------------------------- | --------------------------------------- |
+| max concurrent research runs | 20                                      |
+| max concurrent searches      | 50                                      |
+| max concurrent LLM requests  | 30 (gateway semaphore; ~8 per provider) |
 
 - 500 submitted runs do **not** launch 5,000 agents; excess runs wait in the
   queue.
@@ -1255,13 +1287,13 @@ Each node/span records: `latency`, `tokens`, `cost`, `model`, `prompt_version`,
 
 ### 16.2 Stack
 
-| Concern | Tool |
-|---|---|
-| Traces / spans | OpenTelemetry → LangSmith (LLM-aware) + an OTLP collector |
-| Metrics | Prometheus |
-| Dashboards | Grafana |
-| LLM run inspection | LangSmith |
-| Logs | structured JSON, correlation id = `run_id` + `trace_id` |
+| Concern            | Tool                                                      |
+| ------------------ | --------------------------------------------------------- |
+| Traces / spans     | OpenTelemetry → LangSmith (LLM-aware) + an OTLP collector |
+| Metrics            | Prometheus                                                |
+| Dashboards         | Grafana                                                   |
+| LLM run inspection | LangSmith                                                 |
+| Logs               | structured JSON, correlation id = `run_id` + `trace_id`   |
 
 ### 16.3 Key metrics
 
@@ -1304,12 +1336,12 @@ Each node/span records: `latency`, `tokens`, `cost`, `model`, `prompt_version`,
 
 ### 17.3 Metrics
 
-| Layer | Metrics |
-|---|---|
-| Retrieval | Recall@K, Precision@K, MRR, NDCG |
-| Generation | answer correctness, faithfulness, groundedness, citation precision, citation recall |
-| Agent | task success, tool selection accuracy, planning accuracy, unnecessary calls, recovery rate |
-| Infrastructure | P50, P95, P99, throughput, cost, failure rate |
+| Layer          | Metrics                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| Retrieval      | Recall@K, Precision@K, MRR, NDCG                                                           |
+| Generation     | answer correctness, faithfulness, groundedness, citation precision, citation recall        |
+| Agent          | task success, tool selection accuracy, planning accuracy, unnecessary calls, recovery rate |
+| Infrastructure | P50, P95, P99, throughput, cost, failure rate                                              |
 
 Grading: deterministic checks where possible (does the citation resolve? is the
 source in `expected_sources`? is the topic covered?); an LLM-as-judge with a
@@ -1329,27 +1361,27 @@ rubric for correctness / faithfulness, sampled and spot-audited by a human.
 
 > **In plain terms:** the list of requests the front counter accepts.
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/auth/register` | create account |
-| `POST` | `/auth/login` | start session |
-| `POST` | `/auth/logout` | end session |
-| `GET` | `/auth/sessions` / `DELETE /auth/sessions/{id}` | list / revoke sessions |
-| `POST` | `/research` | create run → `202 { run_id }` |
-| `GET` | `/research` | list the current user's runs |
-| `GET` | `/research/{id}` | run status + summary |
-| `GET` | `/research/{id}/events` | SSE progress stream |
-| `GET` | `/research/{id}/sources` | sources + duplicate clusters |
-| `GET` | `/research/{id}/evidence` | claims, evidence, contradictions |
-| `GET` | `/research/{id}/activity` | the agent / tool / LLM trace |
-| `GET` | `/research/{id}/report` | report + sections + citations |
-| `POST` | `/research/{id}/followup` | conversational child run |
-| `POST` | `/research/{id}/cancel` | cooperative cancel |
-| `POST` | `/files` | presigned upload + ingestion |
-| `POST` | `/feedback` | rate a report |
-| `GET` | `/evaluations` | dashboard data |
-| `POST` | `/evaluations/run` | (admin) trigger a benchmark |
-| `GET` | `/health` / `/health/ready` | liveness / readiness |
+| Method | Path                                            | Purpose                          |
+| ------ | ----------------------------------------------- | -------------------------------- |
+| `POST` | `/auth/register`                                | create account                   |
+| `POST` | `/auth/login`                                   | start session                    |
+| `POST` | `/auth/logout`                                  | end session                      |
+| `GET`  | `/auth/sessions` / `DELETE /auth/sessions/{id}` | list / revoke sessions           |
+| `POST` | `/research`                                     | create run → `202 { run_id }`    |
+| `GET`  | `/research`                                     | list the current user's runs     |
+| `GET`  | `/research/{id}`                                | run status + summary             |
+| `GET`  | `/research/{id}/events`                         | SSE progress stream              |
+| `GET`  | `/research/{id}/sources`                        | sources + duplicate clusters     |
+| `GET`  | `/research/{id}/evidence`                       | claims, evidence, contradictions |
+| `GET`  | `/research/{id}/activity`                       | the agent / tool / LLM trace     |
+| `GET`  | `/research/{id}/report`                         | report + sections + citations    |
+| `POST` | `/research/{id}/followup`                       | conversational child run         |
+| `POST` | `/research/{id}/cancel`                         | cooperative cancel               |
+| `POST` | `/files`                                        | presigned upload + ingestion     |
+| `POST` | `/feedback`                                     | rate a report                    |
+| `GET`  | `/evaluations`                                  | dashboard data                   |
+| `POST` | `/evaluations/run`                              | (admin) trigger a benchmark      |
+| `GET`  | `/health` / `/health/ready`                     | liveness / readiness             |
 
 All list endpoints are cursor-paginated and scoped to the authenticated user.
 
@@ -1362,14 +1394,14 @@ All list endpoints are cursor-paginated and scoped to the authenticated user.
 > do the right thing, the full self-grading exam, and an end-to-end test that
 > drives a real browser through the whole product.
 
-| Level | Targets |
-|---|---|
-| **Unit** | query parser, source parser, URL validator, citation parser, ranking functions, cost calculator, token budget, state transitions |
-| **Integration** | API↔DB, API↔Redis, Worker↔LangGraph, Retriever↔pgvector, Search↔evidence DB |
-| **Agent** | behavioural: "Compare company A and B" then planner creates a competitor task, researcher uses web search, critic verifies evidence, synthesizer produces citations |
-| **RAG** | retrieval recall/precision on a fixed fixture corpus; reranker improves ordering; metadata filters honoured |
-| **Evaluation** | `benchmark.json` run against each release |
-| **E2E (Playwright)** | login → new research → submit → live activity → wait for completion → open report → click citation → view source |
+| Level                | Targets                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit**             | query parser, source parser, URL validator, citation parser, ranking functions, cost calculator, token budget, state transitions                                    |
+| **Integration**      | API↔DB, API↔Redis, Worker↔LangGraph, Retriever↔pgvector, Search↔evidence DB                                                                                         |
+| **Agent**            | behavioural: "Compare company A and B" then planner creates a competitor task, researcher uses web search, critic verifies evidence, synthesizer produces citations |
+| **RAG**              | retrieval recall/precision on a fixed fixture corpus; reranker improves ordering; metadata filters honoured                                                         |
+| **Evaluation**       | `benchmark.json` run against each release                                                                                                                           |
+| **E2E (Playwright)** | login → new research → submit → live activity → wait for completion → open report → click citation → view source                                                    |
 
 Fixtures in `data/fixtures/`. External APIs are recorded/replayed (VCR-style) in
 CI; a nightly job runs a small live subset.
@@ -1383,10 +1415,10 @@ CI; a nightly job runs a small live subset.
 > branch additionally sit the full exam. Production deploys build an image, ship
 > it, and confirm it is healthy.
 
-| Trigger | Pipeline |
-|---|---|
-| **PR** | lint → typecheck → unit → integration → security scan → build |
-| **Main** | all PR steps + evaluation benchmark + Docker build |
+| Trigger        | Pipeline                                                          |
+| -------------- | ----------------------------------------------------------------- |
+| **PR**         | lint → typecheck → unit → integration → security scan → build     |
+| **Main**       | all PR steps + evaluation benchmark + Docker build                |
 | **Production** | build image → push registry → deploy → smoke tests → health check |
 
 - Security scan: dependency audit, secret scan, SAST, container scan.
@@ -1462,20 +1494,20 @@ aether-research/
 
 ## 23. Architecture Decision Records
 
-> **In plain terms:** short notes recording *why* each big choice was made, so a
+> **In plain terms:** short notes recording _why_ each big choice was made, so a
 > future reader doesn't have to guess.
 
-| ADR | Decision |
-|---|---|
-| `0001-framework-split.md` | LlamaIndex = retrieval, LangGraph = orchestration, LangChain = model/tool layer; no overlap |
-| `0002-async-execution.md` | HTTP returns `202`; research runs on a worker via a Redis queue |
-| `0003-postgres-pgvector.md` | One Postgres for relational + vectors in v1; revisit a dedicated vector DB at scale |
-| `0004-auth-authjs-postgres.md` | Auth.js + Postgres instead of a hosted auth product, to own the architecture |
-| `0005-llm-gateway.md` | All model calls go through one gateway (rate limit, retry, fallback, budget, semaphore, cache) |
-| `0006-checkpointing.md` | LangGraph Postgres checkpointer for durable, resumable runs |
-| `0007-modular-monolith.md` | Two deploy units (API + Worker); split into ingestion/eval workers only at scale |
-| `0008-contradictions-first-class.md` | Conflicting values are recorded, never silently resolved |
-| `0009-citation-validator-gate.md` | A report cannot persist until every citation resolves to a stored evidence span |
+| ADR                                  | Decision                                                                                       |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `0001-framework-split.md`            | LlamaIndex = retrieval, LangGraph = orchestration, LangChain = model/tool layer; no overlap    |
+| `0002-async-execution.md`            | HTTP returns `202`; research runs on a worker via a Redis queue                                |
+| `0003-postgres-pgvector.md`          | One Postgres for relational + vectors in v1; revisit a dedicated vector DB at scale            |
+| `0004-auth-authjs-postgres.md`       | Auth.js + Postgres instead of a hosted auth product, to own the architecture                   |
+| `0005-llm-gateway.md`                | All model calls go through one gateway (rate limit, retry, fallback, budget, semaphore, cache) |
+| `0006-checkpointing.md`              | LangGraph Postgres checkpointer for durable, resumable runs                                    |
+| `0007-modular-monolith.md`           | Two deploy units (API + Worker); split into ingestion/eval workers only at scale               |
+| `0008-contradictions-first-class.md` | Conflicting values are recorded, never silently resolved                                       |
+| `0009-citation-validator-gate.md`    | A report cannot persist until every citation resolves to a stored evidence span                |
 
 ---
 
@@ -1494,53 +1526,53 @@ aether-research/
 
 ## 25. Glossary
 
-| Term | Plain meaning |
-|---|---|
-| **Frontend / Backend** | Frontend = the website in your browser. Backend = the servers and databases behind it. |
-| **API** | How software talks to software; here also "the front counter" that receives requests. |
-| **Gateway** | A single controlled entry point that everything of a kind must pass through. |
-| **Agent** | One AI worker with one job. Multi-agent = a team of them. |
-| **LLM** | Large Language Model, the AI that reads and writes text. |
-| **Token** | A chunk of text (~3/4 of a word), the unit AI models are billed in. |
-| **Prompt** | The instructions + context given to an AI model for one call. |
-| **RAG** | "Retrieve then generate", look things up in real sources before answering. |
-| **Orchestration** | Coordinating many steps/workers in the right order, with loops and retries. |
-| **LangGraph / LlamaIndex / LangChain** | Project manager / librarian / universal adapter (see Section 5). |
-| **Node (in the graph)** | One step in the workflow flowchart. |
-| **State / clipboard** | The shared data every workflow step reads and writes. |
-| **Checkpoint** | A saved snapshot of workflow progress, for resuming after a crash. |
-| **Queue / Worker** | Drop off a job, get a ticket; a background program does the slow work. |
-| **SSE** | Server-Sent Events, a one-way live feed from server to browser. |
-| **Postgres / system of record** | The authoritative database; the single source of truth. |
-| **pgvector / vector search** | "Search by meaning" stored inside Postgres. |
-| **Embedding** | Numbers representing text meaning, so meanings can be compared. |
-| **BM25 / full-text / tsv** | Classic "search by exact keywords". |
-| **Hybrid retrieval** | Keyword + meaning search combined, then re-ranked. |
-| **Reranking / cross-encoder** | A smarter second pass that re-sorts results by true relevance. |
-| **Chunk** | A slice of a document sized for search and retrieval. |
-| **Knowledge graph** | A map of entities and their relationships. |
-| **Object storage / S3 / MinIO** | A cheap warehouse for big files, separate from the database. |
-| **Redis** | A very fast store used as the queue, cache, rate-limiter, and locks. |
-| **Rate limiting / token bucket** | Capping how many requests are allowed in a window. |
-| **Backpressure** | When busy, new work waits in line instead of overwhelming the system. |
-| **Concurrency / semaphore** | How many things run at once / the counter that enforces the limit. |
-| **Idempotent** | Safe to repeat, running a step twice equals running it once. |
-| **Content hash / fingerprint** | A short code derived from content; identical content → identical code. |
-| **Canonicalization** | Reducing many equivalent forms (of a URL) to one standard form. |
-| **Backoff / jitter** | Waiting longer between retries, plus a random offset so retries don't sync up. |
-| **Circuit breaker** | Stop calling a failing dependency for a while instead of hammering it. |
-| **Dead-letter queue** | Where jobs go after all retries fail, for later inspection. |
-| **Prompt injection** | Fetched text that tries to hijack the AI's instructions; blocked by treating it as data. |
-| **SSRF** | Tricking the server into calling a private internal address; blocked by design. |
-| **SAST** | Static analysis that scans source code for security bugs. |
-| **Observability / trace / span** | Seeing what happened / the record of one run / one step within it. |
-| **P50 / P95 / P99** | The typical time / slowest 1-in-20 / slowest 1-in-100. |
-| **CI/CD** | Automated pipelines that test every change and deploy the good ones. |
-| **IaC / Terraform** | Infrastructure as Code, cloud setup written in reviewable text files. |
-| **Container / Docker / image** | A standard box holding an app + its dependencies; an "image" is the box's template. |
-| **Kubernetes / ECS / Fargate** | Systems that run and manage many containers in the cloud. |
-| **Modular monolith** | One codebase in clean sections, simpler than many micro-services. |
-| **Migration** | A versioned change to the database structure. |
-| **Pydantic** | A Python library that forces data into a defined shape and rejects malformed input. |
-| **Confidence score** | A 0-1 number for how sure the system is about a claim. |
-| **Citation** | The `[n]` marker linking a report statement to its source and supporting quote. |
+| Term                                   | Plain meaning                                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Frontend / Backend**                 | Frontend = the website in your browser. Backend = the servers and databases behind it.   |
+| **API**                                | How software talks to software; here also "the front counter" that receives requests.    |
+| **Gateway**                            | A single controlled entry point that everything of a kind must pass through.             |
+| **Agent**                              | One AI worker with one job. Multi-agent = a team of them.                                |
+| **LLM**                                | Large Language Model, the AI that reads and writes text.                                 |
+| **Token**                              | A chunk of text (~3/4 of a word), the unit AI models are billed in.                      |
+| **Prompt**                             | The instructions + context given to an AI model for one call.                            |
+| **RAG**                                | "Retrieve then generate", look things up in real sources before answering.               |
+| **Orchestration**                      | Coordinating many steps/workers in the right order, with loops and retries.              |
+| **LangGraph / LlamaIndex / LangChain** | Project manager / librarian / universal adapter (see Section 5).                         |
+| **Node (in the graph)**                | One step in the workflow flowchart.                                                      |
+| **State / clipboard**                  | The shared data every workflow step reads and writes.                                    |
+| **Checkpoint**                         | A saved snapshot of workflow progress, for resuming after a crash.                       |
+| **Queue / Worker**                     | Drop off a job, get a ticket; a background program does the slow work.                   |
+| **SSE**                                | Server-Sent Events, a one-way live feed from server to browser.                          |
+| **Postgres / system of record**        | The authoritative database; the single source of truth.                                  |
+| **pgvector / vector search**           | "Search by meaning" stored inside Postgres.                                              |
+| **Embedding**                          | Numbers representing text meaning, so meanings can be compared.                          |
+| **BM25 / full-text / tsv**             | Classic "search by exact keywords".                                                      |
+| **Hybrid retrieval**                   | Keyword + meaning search combined, then re-ranked.                                       |
+| **Reranking / cross-encoder**          | A smarter second pass that re-sorts results by true relevance.                           |
+| **Chunk**                              | A slice of a document sized for search and retrieval.                                    |
+| **Knowledge graph**                    | A map of entities and their relationships.                                               |
+| **Object storage / S3 / MinIO**        | A cheap warehouse for big files, separate from the database.                             |
+| **Redis**                              | A very fast store used as the queue, cache, rate-limiter, and locks.                     |
+| **Rate limiting / token bucket**       | Capping how many requests are allowed in a window.                                       |
+| **Backpressure**                       | When busy, new work waits in line instead of overwhelming the system.                    |
+| **Concurrency / semaphore**            | How many things run at once / the counter that enforces the limit.                       |
+| **Idempotent**                         | Safe to repeat, running a step twice equals running it once.                             |
+| **Content hash / fingerprint**         | A short code derived from content; identical content → identical code.                   |
+| **Canonicalization**                   | Reducing many equivalent forms (of a URL) to one standard form.                          |
+| **Backoff / jitter**                   | Waiting longer between retries, plus a random offset so retries don't sync up.           |
+| **Circuit breaker**                    | Stop calling a failing dependency for a while instead of hammering it.                   |
+| **Dead-letter queue**                  | Where jobs go after all retries fail, for later inspection.                              |
+| **Prompt injection**                   | Fetched text that tries to hijack the AI's instructions; blocked by treating it as data. |
+| **SSRF**                               | Tricking the server into calling a private internal address; blocked by design.          |
+| **SAST**                               | Static analysis that scans source code for security bugs.                                |
+| **Observability / trace / span**       | Seeing what happened / the record of one run / one step within it.                       |
+| **P50 / P95 / P99**                    | The typical time / slowest 1-in-20 / slowest 1-in-100.                                   |
+| **CI/CD**                              | Automated pipelines that test every change and deploy the good ones.                     |
+| **IaC / Terraform**                    | Infrastructure as Code, cloud setup written in reviewable text files.                    |
+| **Container / Docker / image**         | A standard box holding an app + its dependencies; an "image" is the box's template.      |
+| **Kubernetes / ECS / Fargate**         | Systems that run and manage many containers in the cloud.                                |
+| **Modular monolith**                   | One codebase in clean sections, simpler than many micro-services.                        |
+| **Migration**                          | A versioned change to the database structure.                                            |
+| **Pydantic**                           | A Python library that forces data into a defined shape and rejects malformed input.      |
+| **Confidence score**                   | A 0-1 number for how sure the system is about a claim.                                   |
+| **Citation**                           | The `[n]` marker linking a report statement to its source and supporting quote.          |

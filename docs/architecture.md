@@ -36,32 +36,32 @@ thread is the single failure mode this architecture exists to prevent.
 
 ## 2. Process types
 
-| Process | Responsibility | Scales on |
-|---|---|---|
-| `web` | Next.js UI, server-rendered shell, no secrets | request rate |
-| `api` | REST + SSE, auth, authz, validation, enqueue | request concurrency |
-| `worker` | LangGraph execution, agents, tools, retrieval, persistence | queue depth |
+| Process  | Responsibility                                             | Scales on           |
+| -------- | ---------------------------------------------------------- | ------------------- |
+| `web`    | Next.js UI, server-rendered shell, no secrets              | request rate        |
+| `api`    | REST + SSE, auth, authz, validation, enqueue               | request concurrency |
+| `worker` | LangGraph execution, agents, tools, retrieval, persistence | queue depth         |
 
 `api` and `worker` are built from **one image** with different entrypoints, so
 they share models, migrations and configuration.
 
 ## 3. Module boundaries (`apps/api/app/`)
 
-| Module | Owns |
-|---|---|
-| `api/` | HTTP routing, request/response DTOs, SSE relay |
-| `core/` | settings, logging, errors, typed config |
-| `auth/` | sessions, password hashing, authz helpers |
-| `research/` | run lifecycle, orchestration entry, status transitions |
-| `agents/` | LangGraph nodes and agent implementations |
-| `retrieval/` | `Retriever` interface, hybrid search, reranking |
-| `sources/` | connectors, fetch pipeline, SSRF guard, dedupe |
-| `evidence/` | claim/evidence/contradiction domain logic |
-| `reports/` | report schema, synthesis assembly, citation validation |
-| `evaluations/` | benchmark runner, metrics, thresholds |
-| `observability/` | tracing, metrics, structured logging |
-| `db/` | SQLAlchemy models, repositories, migrations |
-| `workers/` | queue consumer, job lifecycle, checkpoint recovery |
+| Module           | Owns                                                   |
+| ---------------- | ------------------------------------------------------ |
+| `api/`           | HTTP routing, request/response DTOs, SSE relay         |
+| `core/`          | settings, logging, errors, typed config                |
+| `auth/`          | sessions, password hashing, authz helpers              |
+| `research/`      | run lifecycle, orchestration entry, status transitions |
+| `agents/`        | LangGraph nodes and agent implementations              |
+| `retrieval/`     | `Retriever` interface, hybrid search, reranking        |
+| `sources/`       | connectors, fetch pipeline, SSRF guard, dedupe         |
+| `evidence/`      | claim/evidence/contradiction domain logic              |
+| `reports/`       | report schema, synthesis assembly, citation validation |
+| `evaluations/`   | benchmark runner, metrics, thresholds                  |
+| `observability/` | tracing, metrics, structured logging                   |
+| `db/`            | SQLAlchemy models, repositories, migrations            |
+| `workers/`       | queue consumer, job lifecycle, checkpoint recovery     |
 
 Modules talk through typed service interfaces. A module never imports another
 module's ORM models directly.
@@ -120,15 +120,15 @@ hope about the model.
 
 ## 7. Cross-cutting rules
 
-| Rule | Where enforced |
-|---|---|
-| Every external call has a timeout, retry policy and error class | `sources/`, `models/`, `retrieval/` |
-| Every LLM call is recorded (tokens, cost, latency, model, run, agent) | LLM gateway |
-| Every tool call is recorded (request, status, latency, cache hit) | tool wrapper |
-| Web content is untrusted data, never instructions | `sources/` sanitizer + prompt structure |
-| Every list query is bounded and paginated | repository layer |
-| Every research object is checked for ownership | `auth/` dependency |
-| Run state is durable and resumable | LangGraph checkpointer + Postgres |
+| Rule                                                                  | Where enforced                          |
+| --------------------------------------------------------------------- | --------------------------------------- |
+| Every external call has a timeout, retry policy and error class       | `sources/`, `models/`, `retrieval/`     |
+| Every LLM call is recorded (tokens, cost, latency, model, run, agent) | LLM gateway                             |
+| Every tool call is recorded (request, status, latency, cache hit)     | tool wrapper                            |
+| Web content is untrusted data, never instructions                     | `sources/` sanitizer + prompt structure |
+| Every list query is bounded and paginated                             | repository layer                        |
+| Every research object is checked for ownership                        | `auth/` dependency                      |
+| Run state is durable and resumable                                    | LangGraph checkpointer + Postgres       |
 
 ## 8. Delivery phases
 
