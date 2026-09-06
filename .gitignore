@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# test output
+coverage/
+playwright-report/
+test-results/
+.playwright/
+
+# generated docs artifacts
+*.pdf
+page-*.jpg
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

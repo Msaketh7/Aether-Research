@@ -1,0 +1,12 @@
+{
+  "name": "aether-doc-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Documentation build tooling for Aether Research (Markdown -> DOCX).",
+  "scripts": {
+    "docs": "node build-docs.js"
+  },
+  "dependencies": {
+    "docx": "^9.0.0"
+  }
+}
