@@ -34,3 +34,6 @@ page-*.jpg
 Thumbs.db
 .vscode/
 .idea/
+
+# next.js
+apps/web/tsconfig.tsbuildinfo
