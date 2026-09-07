@@ -20,6 +20,7 @@ from app.api.router import api_v1_router, probe_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import Database
+from app.models import build_gateway
 from app.observability.middleware import (
     REQUEST_ID_HEADER,
     RequestContextMiddleware,
@@ -64,6 +65,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.database = Database(settings)
     app.state.queue = _build_queue(settings)
     app.state.storage = build_object_storage(settings)
+    # One gateway per process: it owns the concurrency semaphore, and a
+    # per-request gateway would give each request its own, which is none.
+    app.state.gateway = build_gateway(settings)
     app.state.broker = InMemoryEventBroker(buffer_size=settings.sse_replay_buffer_size)
 
     logger.info(
@@ -80,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Ordered shutdown: stop accepting work, then release connections.
         await app.state.queue.close()
         await app.state.broker.close()
+        await app.state.gateway.close()
         await app.state.storage.close()
         await app.state.database.dispose()
         logger.info("api stopped")

@@ -108,9 +108,28 @@ class Settings(BaseSettings):
     sse_max_connection_seconds: int = 900
     sse_replay_buffer_size: int = 500
 
-    # --- providers (used from Phase 5; declared so the surface is complete)
+    # --- model gateway (ADR 0007) -----------------------------------------
+    # A provider with no credential is simply not built. Ollama needs none,
+    # which is what keeps local development free of API keys.
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
+    ollama_base_url: str = "http://localhost:11434"
+
+    #: Declared models live in YAML so repricing is a reviewable diff. Absolute
+    #: path, or None for the file shipped beside `app/models/`.
+    model_registry_path: Path | None = None
+
+    # Bounds on the gateway. A model call is the slowest and most expensive
+    # thing the system does, so none of these has an unbounded default.
+    llm_request_timeout_seconds: float = 60.0
+    llm_max_attempts: int = 3
+    llm_retry_base_delay_seconds: float = 0.5
+    llm_retry_max_delay_seconds: float = 8.0
+    #: Fifty parallel researchers become this many concurrent calls and the
+    #: rest queue (TDD 6.3). Without it, fan-out becomes a rate-limit wall.
+    llm_max_concurrent_calls: int = 8
+
+    # --- research tools (used from Phase 6) -------------------------------
     tavily_api_key: SecretStr | None = None
     github_token: SecretStr | None = None
 

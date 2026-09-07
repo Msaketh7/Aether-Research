@@ -10,7 +10,7 @@ The Aether Research backend: one codebase, two process types
 
 ## Status
 
-**Phase 4 (object storage) is complete.** What exists today:
+**Phase 5 (model abstraction) is complete.** What exists today:
 
 - typed settings, structured JSON logging, request-id propagation
 - the error envelope the frontend already consumes (`ApiErrorBody`)
@@ -26,6 +26,11 @@ The Aether Research backend: one codebase, two process types
   ([ADR 0010](../../docs/ADRs/0010-object-storage.md)): S3 and MinIO through one
   implementation, a filesystem backend for development without Docker, a derived
   key namespace, and timeouts, retries and a size ceiling on every call.
+- **A model gateway** behind `LLMGateway`
+  ([ADR 0007](../../docs/ADRs/0007-model-routing.md)): Anthropic, OpenAI and
+  Ollama behind one interface, a YAML model registry, role- and mode-based
+  routing with declared fallbacks, and bounds and a call ledger on every
+  request.
 
 What does **not** exist yet, and is not pretended to:
 
@@ -40,6 +45,9 @@ What does **not** exist yet, and is not pretended to:
   tested, and nothing calls it yet: the first artifact is written by the
   ingestion pipeline in Phase 7. The bucket being empty is the truthful state,
   not a failure.
+- **Any model call.** The gateway is built and tested; the agents that call it
+  arrive in Phase 10. Nothing in this build sends a prompt to a provider, so no
+  API key is required to run it.
 
 ## Database
 
@@ -78,6 +86,44 @@ this order:
 If the available server has no pgvector, the suite migrates to
 `0001_core_schema` and the vector-specific assertions skip while the schema
 drift test still asserts that the embedding column is the _only_ difference.
+
+## Model gateway
+
+Agents ask for a **role**, never a model:
+
+```python
+completion = await gateway.generate(role=AgentName.PLANNER, mode=ResearchMode.DEEP, prompt=prompt)
+```
+
+Declared models live in [`app/models/registry.yaml`](app/models/registry.yaml) —
+provider, tier, context window, capability flags and a dated, sourced price.
+Adding a model or repricing one is a reviewable diff, not a deploy.
+
+| Concern                | Where it is handled                                            |
+| ---------------------- | -------------------------------------------------------------- |
+| which model for a role | `routing.py`: role → tier, shifted by research mode            |
+| a provider failing     | bounded retry with jitter, then failover down a declared chain |
+| fan-out                | a concurrency semaphore; the rest queue                        |
+| what it cost           | every _attempt_ recorded with tokens, cost, latency and status |
+| provider quirks        | capability flags on the model spec, never silent degradation   |
+
+Two honesty rules the code enforces. A model whose price cannot be verified is
+**unpriced**, and its cost is `None` rather than `0.00`. A capability a provider
+does not have — Anthropic embeddings, OpenAI token counting — raises
+`CapabilityNotSupported` rather than returning something plausible.
+
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`: leave either empty and that provider is
+simply not built. Ollama needs no key, which is what lets the whole graph run
+locally.
+
+### Testing the providers
+
+Through the **real vendor SDKs**, with only the socket replaced
+(`httpx2.MockTransport`). Request building, serialisation, SSE and NDJSON stream
+decoding and the SDKs' own exception classes all execute — which is where every
+defect this phase found actually was. What is not covered, and is said rather
+than implied: the real network, real authentication, and whether the vendors'
+current responses still match the fixtures.
 
 ## Object storage
 
@@ -148,6 +194,7 @@ app/
 ├── db/             engine, session factory, health probe
 ├── workers/        job queue interface and adapters
 ├── storage/        ObjectStorage protocol, S3 and filesystem backends, keys
+├── models/         LLM gateway, registry, routing, provider adapters
 ├── observability/  request-id and access-log middleware
 └── agents/ retrieval/ sources/ evidence/ reports/ evaluations/
                     module boundaries, filled by later phases

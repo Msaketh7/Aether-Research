@@ -1,0 +1,153 @@
+# Declared models: what exists, what it costs, what it can do.
+#
+# This file is data, not code (TDD 6.1). Adding a model, repricing one, or
+# changing which tier it serves is a reviewable diff, not a deploy of new logic.
+#
+# ---------------------------------------------------------------------------
+# Pricing rules
+# ---------------------------------------------------------------------------
+# Every price carries `as_of` and `source`. A price this repository cannot
+# verify is left null rather than guessed: `cost_usd` then returns None ("not
+# measured") instead of 0.0 ("free"), and Phase 16's budget ledger can refuse or
+# flag a model it cannot cost. A model that genuinely costs nothing - a locally
+# hosted one - is priced *at* zero with a source that says so. Those are
+# different facts and the code keeps them apart.
+#
+# ---------------------------------------------------------------------------
+# Tiers
+# ---------------------------------------------------------------------------
+# small < medium < strong < strongest. These are this system's tiers, defined by
+# what a model is used for (TDD 6.2), not by a vendor's product name. A role
+# routed to `strongest` resolves to the strongest tier actually declared here,
+# which is what "the strongest configured" means in the build plan - so leaving
+# `strongest` empty is a valid, cheaper configuration, not a misconfiguration.
+
+models:
+  # -------------------------------------------------------------------------
+  # Anthropic
+  # -------------------------------------------------------------------------
+  # Current Anthropic models reject `temperature` with a 400, so it is declared
+  # off. They also expose a token-counting endpoint, which is what lets the
+  # gateway check a prompt against the context window before spending on a call.
+  - key: anthropic:haiku
+    provider: anthropic
+    model_id: claude-haiku-4-5
+    tier: small
+    context_window: 200000
+    max_output_tokens: 8192
+    supports_temperature: true
+    supports_token_counting: true
+    pricing:
+      input_usd_per_mtok: 1.00
+      output_usd_per_mtok: 5.00
+      as_of: 2026-06-24
+      source: Anthropic published API pricing
+
+  - key: anthropic:sonnet
+    provider: anthropic
+    model_id: claude-sonnet-5
+    tier: medium
+    context_window: 1000000
+    max_output_tokens: 64000
+    supports_temperature: false
+    supports_token_counting: true
+    pricing:
+      input_usd_per_mtok: 2.00
+      output_usd_per_mtok: 10.00
+      as_of: 2026-06-24
+      source: Anthropic published API pricing
+
+  - key: anthropic:opus
+    provider: anthropic
+    model_id: claude-opus-5
+    tier: strong
+    context_window: 1000000
+    max_output_tokens: 64000
+    supports_temperature: false
+    supports_token_counting: true
+    pricing:
+      input_usd_per_mtok: 5.00
+      output_usd_per_mtok: 25.00
+      as_of: 2026-06-24
+      source: Anthropic published API pricing
+
+  # -------------------------------------------------------------------------
+  # Ollama - local, no API key (the reason ADR 0007 requires this provider)
+  # -------------------------------------------------------------------------
+  # `model_id` must match a tag you have actually pulled. Confirm with
+  # `ollama list` and edit these if yours differ; the provider's readiness check
+  # queries /api/tags and fails with the missing tag named, so a wrong value
+  # here surfaces at startup rather than in the middle of a research run.
+  #
+  # Priced at zero with a source saying why - self-hosted inference has no
+  # per-token charge. This is the one case where 0.0 is a measurement.
+  - key: ollama:chat
+    provider: ollama
+    model_id: llama3.1:8b
+    tier: small
+    context_window: 128000
+    max_output_tokens: 4096
+    supports_temperature: true
+    # Ollama reports token counts only after generating, so there is no
+    # count-before-you-spend endpoint to call.
+    supports_token_counting: false
+    pricing:
+      input_usd_per_mtok: 0.0
+      output_usd_per_mtok: 0.0
+      as_of: 2026-09-06
+      source: self-hosted; no per-token charge
+
+  - key: ollama:embed
+    provider: ollama
+    model_id: nomic-embed-text
+    tier: small
+    context_window: 8192
+    max_output_tokens: 1
+    # Not a chat model: it must never be picked as a conversation fallback.
+    supports_chat: false
+    supports_streaming: false
+    supports_structured_output: false
+    supports_embeddings: true
+    embedding_dimensions: 768
+    pricing:
+      input_usd_per_mtok: 0.0
+      output_usd_per_mtok: 0.0
+      as_of: 2026-09-06
+      source: self-hosted; no per-token charge
+  # -------------------------------------------------------------------------
+  # OpenAI - adapter implemented and tested; no models declared by default
+  # -------------------------------------------------------------------------
+  # Deliberately empty. Declaring a model here asserts two facts this repository
+  # cannot verify - the exact model id and its current price - and a wrong model
+  # id is a hard 404 at run time while a wrong price silently corrupts every
+  # cost report built on it.
+  #
+  # To enable OpenAI, uncomment and fill in from the vendor's model and pricing
+  # pages. Nothing else has to change: the adapter, the router and the gateway
+  # already handle it, and `make api-test` covers the path.
+  #
+  # - key: openai:strong
+  #   provider: openai
+  #   model_id: <model id from the vendor's model list>
+  #   tier: strong
+  #   context_window: <from the vendor's docs>
+  #   max_output_tokens: <from the vendor's docs>
+  #   supports_temperature: true
+  #   pricing:
+  #     input_usd_per_mtok: <from the vendor's pricing page>
+  #     output_usd_per_mtok: <from the vendor's pricing page>
+  #     as_of: <the date you read it>
+  #     source: <where you read it>
+  #
+  # - key: openai:embed
+  #   provider: openai
+  #   model_id: <embedding model id>
+  #   tier: small
+  #   context_window: 8192
+  #   max_output_tokens: 1
+  #   supports_chat: false
+  #   supports_streaming: false
+  #   supports_structured_output: false
+  #   supports_embeddings: true
+  #   embedding_dimensions: <the model's dimension count>
+  #   pricing: ...

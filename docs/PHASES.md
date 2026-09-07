@@ -18,8 +18,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 2   | Backend foundation         | Done     |
 | 3   | Database                   | Done     |
 | 4   | Storage                    | Done     |
-| 5   | Model abstraction          | **Next** |
-| 6   | Web research tools         | Planned  |
+| 5   | Model abstraction          | Done     |
+| 6   | Web research tools         | **Next** |
 | 7   | Document ingestion         | Planned  |
 | 8   | Retrieval                  | Planned  |
 | 9   | LangGraph agent system     | Planned  |
@@ -149,7 +149,7 @@ the wrapped aiohttp response, not the proxy, so `stream.read(n)` raised
 `TypeError` and every chunked download failed. Streaming now reads through
 `iter_chunks` on the unbound body.
 
-## Phase 5 — Model abstraction · **Next**
+## Phase 5 — Model abstraction · **Done**
 
 Provider-neutral `LLMProvider` interface: `generate()`, `generate_structured()`,
 `stream()`, `embed()`. Implement OpenAI, Anthropic and Ollama. Select by
@@ -159,7 +159,41 @@ tier and provider — planner to a cheaper model, researcher to medium/strong,
 critic to strong, synthesizer to the strongest configured. Ollama keeps local
 development free of API keys. (ADR 0007 already records this design.)
 
-## Phase 6 — Web research tools · Planned
+_Landed:_ `app/models/` — an `LLMProvider` protocol with all four operations
+plus `count_tokens`, implemented for Anthropic, OpenAI and Ollama; a
+YAML-declared `ModelRegistry`; a `ModelRouter` resolving (role, mode) to a tier
+and a bounded fallback chain; and an `LLMGateway` that is the only door to a
+model. Every call is bounded by a timeout, a retry policy with jitter, a
+concurrency semaphore and a per-model output ceiling, and every _attempt_ is
+recorded with tokens, cost, latency and status.
+
+Capabilities are declared rather than assumed, which is what "providers are
+replaceable" actually costs: current Anthropic models reject `temperature` with
+a 400, Anthropic has no embeddings API at all, and neither OpenAI nor Ollama can
+count a prompt's tokens before spending them. Each is a flag on the model spec or
+an explicit `CapabilityNotSupported`, never a silent degradation.
+
+Prices are dated and sourced, and a model whose price this repository cannot
+verify ships **unpriced** — `cost_usd` then returns `None`, not `0.0`, so
+Phase 16's budget ledger can tell an uncosted call from a free one. The shipped
+registry declares Anthropic and Ollama models; the OpenAI adapter is complete and
+tested but declares none, because a guessed model id is a hard 404 and a guessed
+price silently corrupts every cost report built on it.
+
+Divergence recorded: TDD 6.1's illustrative YAML routes the planner to the strong
+tier. ADR 0007 and this build plan both route it to the cheap tier; the
+implementation follows them and TDD 6.1 has been amended to match.
+
+80 new tests, 282 total. The adapters are tested through the real vendor SDKs
+with only the socket replaced, so request shape, stream decoding and the SDK
+exception classes all execute.
+
+Defect found by running it: the embeddings-only model was being offered as a
+fallback in _chat_ routing chains, where a failover onto it would have produced a
+confusing 400 instead of an answer. Chat capability is now a declared flag the
+router filters on.
+
+## Phase 6 — Web research tools · **Next**
 
 Tools: `web_search()`, `fetch_url()`, `extract_content()`, `search_sec()`,
 `search_arxiv()`, `search_github()`. Each needs a strict input schema, timeout,

@@ -17,6 +17,10 @@ dependencies = [
   "redis>=8.1.0",
   "pgvector>=0.4.1",
   "aioboto3>=15.5.0",
+  "anthropic>=1.0.0",
+  "openai>=2.0.0",
+  "pyyaml>=6.0.3",
+  "types-pyyaml>=6.0.12",
 ]
 
 [dependency-groups]

@@ -25,6 +25,7 @@ from app.core.pagination import PageParams
 from app.db.repositories.research import SqlAlchemyResearchRepository
 from app.db.repositories.user import UserRepository
 from app.db.session import Database
+from app.models import LLMGateway
 from app.research.events import EventBroker
 from app.research.service import ResearchService
 from app.storage import ObjectStorage
@@ -54,6 +55,16 @@ def get_broker(request: Request) -> EventBroker:
 def get_object_storage(request: Request) -> ObjectStorage:
     storage: ObjectStorage = request.app.state.storage
     return storage
+
+
+def get_gateway(request: Request) -> LLMGateway:
+    """The process-wide model gateway.
+
+    Handed out rather than constructed per request: it owns the concurrency
+    semaphore that makes fan-out safe, and one semaphore per request is none.
+    """
+    gateway: LLMGateway = request.app.state.gateway
+    return gateway
 
 
 async def get_session(
@@ -133,6 +144,7 @@ DatabaseDep = Annotated[Database, Depends(get_database)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
 BrokerDep = Annotated[EventBroker, Depends(get_broker)]
 ObjectStorageDep = Annotated[ObjectStorage, Depends(get_object_storage)]
+GatewayDep = Annotated[LLMGateway, Depends(get_gateway)]
 ResearchServiceDep = Annotated[ResearchService, Depends(get_research_service)]
 CurrentUser = Annotated[Principal, Depends(get_current_user)]
 PageParamsDep = Annotated[PageParams, Depends(get_page_params)]

@@ -526,24 +526,42 @@ ADR: `docs/ADRs/0001-framework-split.md`.
 
 ### 6.1 Model registry
 
-Agents never instantiate a provider. They call:
+Agents never instantiate a provider. They ask the gateway for a **role**, and it
+resolves the model:
 
 ```python
-llm = model_registry.get(role="researcher", mode="deep")
+completion = await gateway.generate(
+    role=AgentName.RESEARCHER, mode=ResearchMode.DEEP, prompt=prompt
+)
 ```
 
-Config (`packages/prompts` + `models/registry.yaml`):
+Declared models live in `apps/api/app/models/registry.yaml`, one entry per model
+carrying its provider, tier, context window, output ceiling, capability flags and
+a **dated, sourced** price. A model whose price cannot be verified is declared
+unpriced, and its cost is then reported as `null` rather than `0.00` — _not
+measured_ and _free_ are different facts, and §16's budget ledger acts on the
+difference.
 
-```yaml
-roles:
-  planner: { provider: anthropic, tier: strong }
-  researcher: { provider: openai, tier: strong }
-  critic: { provider: openai, tier: strong }
-  synthesizer: { provider: anthropic, tier: strongest }
-  classifier: { provider: openai, tier: small }
-profiles:
-  local_dev: { provider: ollama } # cloud-vs-local comparison
+Capabilities are declared, not assumed. The ones that already bite: current
+Anthropic models reject `temperature`; Anthropic has no embeddings API; neither
+OpenAI nor Ollama can count a prompt's tokens before generating; and an
+embeddings model must never be selected as a chat fallback.
+
+The role → tier policy lives in `app/models/routing.py` and follows ADR 0007:
+
 ```
+planner, claim_normalizer                         small
+researcher, evidence_extractor, citation_validator medium
+verifier, critic                                   strong
+synthesizer                                        strongest configured
+```
+
+Research mode shifts that: `deep` uses the base tier, `quick` and
+`conversational` step down one, and the synthesizer never drops below `strong`.
+
+_(An earlier draft of this section routed the planner to `strong`. ADR 0007 and
+the build plan both put it on the cheap tier, and the implementation follows
+them.)_
 
 ### 6.2 Task → tier routing
 
