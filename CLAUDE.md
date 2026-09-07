@@ -17,16 +17,17 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–3 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–4 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
-| Layer                 | State                                                                                                        |
-| --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Frontend (`apps/web`) | Complete product surface, 94 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var. |
-| API (`apps/api`)      | FastAPI: research surface, SSE, authorisation, error contract, health probes. 128 tests.                     |
-| Database              | PostgreSQL, 19 tables, Alembic migrations, pgvector column. Runs survive restart.                            |
-| Worker / agents       | **Does not exist.** A created run stays `queued`. Phases 9 and 13.                                           |
-| Everything else       | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                  |
+| Layer                 | State                                                                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend (`apps/web`) | Complete product surface, 94 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                       |
+| API (`apps/api`)      | FastAPI: research surface, SSE, authorisation, error contract, health probes. 202 tests.                                                           |
+| Database              | PostgreSQL, 19 tables, Alembic migrations, pgvector column. Runs survive restart.                                                                  |
+| Object storage        | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. No caller yet — Phase 7 writes the first artifact. |
+| Worker / agents       | **Does not exist.** A created run stays `queued`. Phases 9 and 13.                                                                                 |
+| Everything else       | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                        |
 
 Nothing fabricates data to fill a gap. No benchmark has been executed.
 
@@ -40,7 +41,7 @@ Nothing fabricates data to fill a gap. No benchmark has been executed.
 | [`docs/architecture.md`](docs/architecture.md) | System map                                                              |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE per trust boundary; prompt injection and SSRF                    |
 | [`docs/evaluation.md`](docs/evaluation.md)     | Metrics, thresholds, the no-fabricated-numbers rule                     |
-| [`docs/ADRs/`](docs/ADRs/)                     | 9 accepted decisions. New irreversible choice ⇒ new ADR.                |
+| [`docs/ADRs/`](docs/ADRs/)                     | 10 accepted decisions. New irreversible choice ⇒ new ADR.               |
 
 ## Repository structure
 
@@ -58,6 +59,7 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
   app/research/    run lifecycle, repository protocol, event broker, service
   app/db/          base, models/, repositories/
   app/workers/     JobQueue interface, Redis + in-memory adapters
+  app/storage/     ObjectStorage protocol, S3 + filesystem backends, key namespace
   app/agents|retrieval|sources|evidence|reports|evaluations|observability/
                    module boundaries with docstrings; filled by later phases
   migrations/      Alembic
@@ -75,7 +77,8 @@ Tailwind v4, shadcn-style components in-repo, TanStack Query 5, native `EventSou
 Zod 4. Vitest 4, Playwright 1.63.
 
 **Backend** — Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic,
-asyncpg, pgvector, Redis. `uv` for locked deps. `ruff` + `mypy --strict`. pytest.
+asyncpg, pgvector, Redis, aioboto3 (S3). `uv` for locked deps. `ruff` +
+`mypy --strict`. pytest, with `moto` in server mode for a real S3 endpoint.
 
 **Planned** — LangGraph (orchestration, ADR 0002), LlamaIndex (ingestion/retrieval,
 ADR 0003), OpenAI/Anthropic/Ollama behind one gateway (ADR 0007), OpenTelemetry,
@@ -109,11 +112,21 @@ Hard-won; do not rediscover them.
   directory on a random port with trust auth, destroyed afterwards. It touches
   no existing cluster and needs no credentials. `AETHER_TEST_DATABASE_URL`
   overrides it.
+- **The storage tests start their own S3 server** (`moto` in server mode, on a
+  free port) rather than patching botocore, so signing and HTTP really run. No
+  MinIO or Docker needed.
+- **`APP_ENV=test` selects the filesystem storage backend**, so the object-store
+  path is runnable here. It is refused in production.
 - **The repo path contains a space.** Vitest's `forks` pool cannot hand off to
   workers, so the config pins `pool: 'threads'`.
 - **npm cold resolve crashes** (arborist bug in the vitest peer graph) without
   `--legacy-peer-deps`. `npm ci` from the committed lockfile is fine.
 - Bash heredocs fail above roughly 8 KB — use the Write tool for larger files.
+- **The repo stores LF and there is no `.gitattributes`.** Python's
+  `Path.write_text` emits CRLF here, which turns a three-line edit into a
+  whole-file diff. Write with `newline="
+"`, or check `git diff --stat`
+  before committing.
 
 ## Engineering rules (non-negotiable)
 

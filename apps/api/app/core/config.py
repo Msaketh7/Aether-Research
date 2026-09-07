@@ -61,6 +61,34 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: int = 10
     db_command_timeout_seconds: int = 30
 
+    # --- object storage (ADR 0010) ----------------------------------------
+    # `None` resolves to the filesystem backend under APP_ENV=test and to S3
+    # everywhere else, so a real deployment cannot fall back to local disk by
+    # omission. See `app.storage.build_object_storage`.
+    storage_backend: Literal["s3", "filesystem"] | None = None
+    storage_local_path: Path = REPO_ROOT / ".data" / "object-storage"
+
+    # Unset endpoint means real AWS S3; set it to a MinIO URL locally.
+    s3_endpoint_url: str | None = None
+    s3_bucket: str = "aether-artifacts"
+    s3_region: str = "us-east-1"
+    # Unset credentials are intended: botocore's default chain then resolves
+    # them, which on ECS is the task role, so production stores no S3 keys.
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    s3_addressing_style: Literal["auto", "path", "virtual"] = "auto"
+
+    # Every external call is bounded (project rule). A hung S3 read inside a
+    # worker is a research run that stalls without ever explaining why.
+    s3_connect_timeout_seconds: int = 5
+    s3_read_timeout_seconds: int = 30
+    s3_max_attempts: int = 3
+
+    #: Ceiling on a single artifact, enforced on read as well as write. 25 MiB
+    #: comfortably holds an SEC filing or a long paper; anything larger is a
+    #: decompression bomb or a bug, and either way must not be buffered.
+    max_artifact_bytes: int = 25 * 1024 * 1024
+
     # --- run governance (FR-8, enforced from Phase 9) ---------------------
     max_research_iterations: int = 4
     max_sources: int = 50
@@ -104,6 +132,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def resolved_storage_backend(self) -> Literal["s3", "filesystem"]:
+        """The backend to build, with the test-environment default applied.
+
+        Explicit configuration always wins, so a developer can point a local
+        test run at MinIO. Only the absence of a choice is resolved by
+        environment - and it resolves to S3 outside tests, never the reverse.
+        """
+        if self.storage_backend is not None:
+            return self.storage_backend
+        return "filesystem" if self.app_env == "test" else "s3"
 
     @property
     def docs_url(self) -> str | None:

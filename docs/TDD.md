@@ -597,6 +597,20 @@ profiles:
 
 Large documents are **never** stored in Postgres, only a storage key.
 
+Those keys are derived in one place and follow a fixed layout, so that deleting
+a user's data, expiring artifacts by age and attributing storage cost to a run
+are all prefix operations rather than joins:
+
+```
+runs/{run_id}/{kind}/{name}          kind ∈ raw-html | pdf | document | screenshot | report
+evaluations/{evaluation_id}/{name}
+```
+
+Immutable artifacts are content-addressed on the same SHA-256 that
+`documents.content_hash` stores, which makes re-ingesting a source idempotent.
+See [ADR 0010](ADRs/0010-object-storage.md) for the interface, the backends and
+the failure classification.
+
 ### 7.2 Schema (system of record)
 
 > Types are illustrative Postgres. All tables have `id uuid primary key default

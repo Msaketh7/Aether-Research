@@ -27,6 +27,7 @@ from app.db.repositories.user import UserRepository
 from app.db.session import Database
 from app.research.events import EventBroker
 from app.research.service import ResearchService
+from app.storage import ObjectStorage
 from app.workers.queue import JobQueue
 
 
@@ -48,6 +49,11 @@ def get_queue(request: Request) -> JobQueue:
 def get_broker(request: Request) -> EventBroker:
     broker: EventBroker = request.app.state.broker
     return broker
+
+
+def get_object_storage(request: Request) -> ObjectStorage:
+    storage: ObjectStorage = request.app.state.storage
+    return storage
 
 
 async def get_session(
@@ -126,6 +132,7 @@ SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
 BrokerDep = Annotated[EventBroker, Depends(get_broker)]
+ObjectStorageDep = Annotated[ObjectStorage, Depends(get_object_storage)]
 ResearchServiceDep = Annotated[ResearchService, Depends(get_research_service)]
 CurrentUser = Annotated[Principal, Depends(get_current_user)]
 PageParamsDep = Annotated[PageParams, Depends(get_page_params)]

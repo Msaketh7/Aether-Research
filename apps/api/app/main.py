@@ -26,6 +26,7 @@ from app.observability.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.research.events import InMemoryEventBroker
+from app.storage import build_object_storage
 from app.workers.queue import InMemoryJobQueue, JobQueue, RedisJobQueue, build_redis
 
 logger = get_logger(__name__)
@@ -62,11 +63,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # transaction (see app/api/deps.py).
     app.state.database = Database(settings)
     app.state.queue = _build_queue(settings)
+    app.state.storage = build_object_storage(settings)
     app.state.broker = InMemoryEventBroker(buffer_size=settings.sse_replay_buffer_size)
 
     logger.info(
         "api starting",
-        extra={"environment": settings.app_env, "queue": type(app.state.queue).__name__},
+        extra={
+            "environment": settings.app_env,
+            "queue": type(app.state.queue).__name__,
+            "storage": type(app.state.storage).__name__,
+        },
     )
     try:
         yield
@@ -74,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Ordered shutdown: stop accepting work, then release connections.
         await app.state.queue.close()
         await app.state.broker.close()
+        await app.state.storage.close()
         await app.state.database.dispose()
         logger.info("api stopped")
 

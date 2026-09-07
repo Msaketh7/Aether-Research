@@ -16,6 +16,7 @@ dependencies = [
   "alembic>=1.19.2",
   "redis>=8.1.0",
   "pgvector>=0.4.1",
+  "aioboto3>=15.5.0",
 ]
 
 [dependency-groups]
@@ -25,6 +26,8 @@ dev = [
   "httpx>=0.28.1",
   "ruff>=0.16.6",
   "mypy>=2.3.1",
+  "moto[s3,server]>=5.1.0",
+  "types-aioboto3[s3]>=15.5.0",
 ]
 
 [build-system]

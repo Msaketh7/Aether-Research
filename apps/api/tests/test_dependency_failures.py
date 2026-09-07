@@ -90,3 +90,36 @@ async def test_reads_still_work_while_the_queue_is_down(broken_queue_client: Asy
     """A dispatch outage must not take down the read surface."""
     response = await broken_queue_client.get(f"{API}/research")
     assert response.status_code == 200
+
+
+class BrokenObjectStorage:
+    """An artifact store that cannot be reached, as MinIO being down looks."""
+
+    async def check(self) -> bool:
+        return False
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_readiness_fails_when_the_artifact_store_is_down(client: AsyncClient):
+    """A run that cannot persist a fetched PDF produces a report whose citations
+    point at nothing, so an unreachable store must stop traffic."""
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.storage = BrokenObjectStorage()
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    by_name = {dep["name"]: dep for dep in response.json()["dependencies"]}
+    assert by_name["object-storage"]["ok"] is False
+    # The other dependencies are still reported honestly rather than blanked.
+    assert by_name["postgres"]["ok"] is True
+
+
+async def test_liveness_survives_an_artifact_store_outage(client: AsyncClient):
+    """Storage is not part of liveness; a MinIO blip must not restart the API."""
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.storage = BrokenObjectStorage()
+
+    assert (await client.get("/health")).status_code == 200

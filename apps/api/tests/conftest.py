@@ -30,6 +30,7 @@ from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.main import create_app
 from tests.support.postgres import SKIP_REASON, ProvisionedDatabase, provision_database
+from tests.support.s3 import S3Server, run_s3_server
 
 BASE_URL = "http://testserver"
 API = "/api/v1"
@@ -73,11 +74,15 @@ def postgres() -> Iterator[ProvisionedDatabase | None]:
 
 
 @pytest.fixture
-def settings(postgres: ProvisionedDatabase | None) -> Settings:
+def settings(postgres: ProvisionedDatabase | None, tmp_path: Path) -> Settings:
     """Test configuration.
 
     The SSE timings are compressed so a stream test finishes in milliseconds
     instead of waiting on a 15-second production heartbeat.
+
+    Object storage gets a per-test directory. ``app_env="test"`` already selects
+    the filesystem backend; naming the root explicitly is what keeps the suite
+    from writing artifacts into the repository.
     """
     if postgres is None:
         pytest.skip(SKIP_REASON)
@@ -85,6 +90,7 @@ def settings(postgres: ProvisionedDatabase | None) -> Settings:
         app_env="test",
         log_level="warning",
         database_url=postgres.url,
+        storage_local_path=tmp_path / "object-storage",
         sse_heartbeat_seconds=1,
         sse_max_connection_seconds=2,
         max_concurrent_runs_per_user=3,
@@ -159,6 +165,37 @@ async def tolerant_client(settings: Settings) -> AsyncIterator[AsyncClient]:
         app.router.lifespan_context(app),
     ):
         yield http
+
+
+@pytest.fixture(scope="session")
+def s3_server() -> Iterator[S3Server]:
+    """A real S3 server for the storage tests, started on first use.
+
+    Session-scoped because starting it costs more than every test that uses it
+    put together; isolation comes from a fresh bucket per test instead.
+    """
+    with run_s3_server() as server:
+        yield server
+
+
+def s3_settings(server: S3Server, *, bucket: str, **overrides: object) -> Settings:
+    """Configuration pointing the S3 backend at the test server.
+
+    Every field is overridable, including the region, so a test can exercise a
+    configuration a developer could plausibly write.
+    """
+    fields: dict[str, object] = {
+        "app_env": "test",
+        "log_level": "warning",
+        "storage_backend": "s3",
+        "s3_endpoint_url": server.endpoint_url,
+        "s3_bucket": bucket,
+        "s3_region": server.region,
+        "s3_access_key_id": server.access_key_id,
+        "s3_secret_access_key": server.secret_access_key,
+    }
+    fields.update(overrides)
+    return Settings(**fields)
 
 
 @pytest.fixture

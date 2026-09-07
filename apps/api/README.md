@@ -10,17 +10,22 @@ The Aether Research backend: one codebase, two process types
 
 ## Status
 
-**Phase 3 (data layer) is complete.** What exists today:
+**Phase 4 (object storage) is complete.** What exists today:
 
 - typed settings, structured JSON logging, request-id propagation
 - the error envelope the frontend already consumes (`ApiErrorBody`)
-- liveness and readiness probes that really check Postgres and Redis
+- liveness and readiness probes that really check Postgres, Redis and the
+  artifact store
 - the research API surface from `docs/TDD.md` section 18, with `202 Accepted`
   on create and an SSE progress stream
 - per-user ownership enforced in the SQL of every read
 - **PostgreSQL persistence**: 19 tables, Alembic migrations, keyset pagination,
   a session-per-request transaction, and connection pooling. A run survives a
   restart of this process.
+- **Object storage** behind `ObjectStorage`
+  ([ADR 0010](../../docs/ADRs/0010-object-storage.md)): S3 and MinIO through one
+  implementation, a filesystem backend for development without Docker, a derived
+  key namespace, and timeouts, retries and a size ceiling on every call.
 
 What does **not** exist yet, and is not pretended to:
 
@@ -31,6 +36,10 @@ What does **not** exist yet, and is not pretended to:
   evidence, reports and traces exist and are constrained, but only
   `research_runs` and `users` are written to so far. The endpoints return empty
   collections, which is the truthful answer.
+- **Anything written to the artifact store.** The storage layer is built and
+  tested, and nothing calls it yet: the first artifact is written by the
+  ingestion pipeline in Phase 7. The bucket being empty is the truthful state,
+  not a failure.
 
 ## Database
 
@@ -70,6 +79,37 @@ If the available server has no pgvector, the suite migrates to
 `0001_core_schema` and the vector-specific assertions skip while the schema
 drift test still asserts that the embedding column is the _only_ difference.
 
+## Object storage
+
+Keys are derived in `app/storage/keys.py` and nowhere else:
+
+```
+runs/{run_id}/{kind}/{name}          raw-html | pdf | document | screenshot | report
+evaluations/{evaluation_id}/{name}
+```
+
+Immutable artifacts are content-addressed on the SHA-256 that
+`documents.content_hash` stores, so re-ingesting a source converges on one
+object instead of duplicating it.
+
+| Environment                    | Backend                                | Selected by                   |
+| ------------------------------ | -------------------------------------- | ----------------------------- |
+| production / staging           | AWS S3, credentials from the task role | default                       |
+| local development              | MinIO from `make up`                   | `S3_ENDPOINT_URL`             |
+| tests, machines without Docker | a directory on disk                    | `APP_ENV=test`, or explicitly |
+
+The filesystem backend is never selected implicitly outside tests and is refused
+in production. `/ready` HEADs the configured bucket - not the account, which
+would pass on credentials alone while every write failed.
+
+### Testing against a real S3 endpoint
+
+`moto` in **server** mode, on a free port, not its botocore-patching decorator:
+request signing, addressing style, HTTP status handling and the streaming body
+all really execute, which is where the bugs are. The same contract tests run
+against both backends, so the filesystem one cannot be used to make a test pass
+that S3 would fail.
+
 ## Running it
 
 ```bash
@@ -107,6 +147,7 @@ app/
 ├── research/       run lifecycle, repository interface, event broker
 ├── db/             engine, session factory, health probe
 ├── workers/        job queue interface and adapters
+├── storage/        ObjectStorage protocol, S3 and filesystem backends, keys
 ├── observability/  request-id and access-log middleware
 └── agents/ retrieval/ sources/ evidence/ reports/ evaluations/
                     module boundaries, filled by later phases

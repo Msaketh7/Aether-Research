@@ -15,3 +15,4 @@ accepted; a changed mind means a new ADR that supersedes the old one.
 | [0007](0007-model-routing.md)           | Provider-neutral LLM gateway with role-based model routing       | Accepted |
 | [0008](0008-aws-ecs-deployment.md)      | AWS ECS Fargate as the production deployment target              | Accepted |
 | [0009](0009-frontend-mock-transport.md) | Frontend-first delivery against an in-process mock API           | Accepted |
+| [0010](0010-object-storage.md)          | S3-compatible object storage behind an `ObjectStorage` interface | Accepted |

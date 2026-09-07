@@ -17,8 +17,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 1   | Frontend product prototype | Done     |
 | 2   | Backend foundation         | Done     |
 | 3   | Database                   | Done     |
-| 4   | Storage                    | **Next** |
-| 5   | Model abstraction          | Planned  |
+| 4   | Storage                    | Done     |
+| 5   | Model abstraction          | **Next** |
 | 6   | Web research tools         | Planned  |
 | 7   | Document ingestion         | Planned  |
 | 8   | Retrieval                  | Planned  |
@@ -126,14 +126,30 @@ _Landed:_ commit `8d4bc5e`. 19 tables (adds `sessions`). Two migrations —
 pgvector is split out because the extension is a server-side prerequisite. 128
 tests against a real, migrated Postgres.
 
-## Phase 4 — Storage · **Next**
+## Phase 4 — Storage · **Done**
 
 S3-compatible object storage behind an `ObjectStorage` abstraction with
 `upload()`, `download()`, `delete()`, `exists()`. Store PDFs, raw source HTML,
 normalised documents, screenshots, evaluation artifacts, and generated reports
 where appropriate. MinIO locally through Docker Compose; AWS S3 in production.
 
-## Phase 5 — Model abstraction · Planned
+_Landed:_ ADR 0010. `app/storage/` with a keyed namespace
+(`runs/{run_id}/{kind}/{name}`, content-addressed on the SHA-256 the schema
+already stores) and two implementations — `S3ObjectStorage` for MinIO and AWS,
+`FilesystemObjectStorage` for tests and Docker-less development, refused in
+production. Every call is bounded by a timeout, a retry policy and a 25 MiB
+ceiling enforced on read as well as write; `download_stream` is the escape
+hatch. Failures are translated into three classes with different retry
+semantics. The artifact store is now a readiness dependency, probed by a HEAD on
+the bucket itself. 74 new tests, the shared contract run against both backends,
+with the S3 one talking HTTP to a real S3 server rather than a patched botocore.
+
+Defect found by running it: `aiobotocore`'s `async with body as stream` yields
+the wrapped aiohttp response, not the proxy, so `stream.read(n)` raised
+`TypeError` and every chunked download failed. Streaming now reads through
+`iter_chunks` on the unbound body.
+
+## Phase 5 — Model abstraction · **Next**
 
 Provider-neutral `LLMProvider` interface: `generate()`, `generate_structured()`,
 `stream()`, `embed()`. Implement OpenAI, Anthropic and Ollama. Select by

@@ -12,6 +12,9 @@ __pycache__/
 .env.*
 !.env.example
 
+# local object storage (filesystem backend, development only)
+.data/
+
 # build output
 .next/
 out/

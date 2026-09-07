@@ -6,9 +6,9 @@ The two answer different questions and must not be conflated:
   An orchestrator restarts the container when this fails, so it must never
   depend on a downstream service; otherwise a brief database blip becomes a
   restart storm.
-* ``/ready`` - can this process serve traffic? It really checks Postgres and
-  Redis, and returns 503 when it cannot, so a load balancer stops sending
-  requests without the container being killed.
+* ``/ready`` - can this process serve traffic? It really checks Postgres, Redis
+  and the artifact store, and returns 503 when it cannot, so a load balancer
+  stops sending requests without the container being killed.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 
-from app.api.deps import DatabaseDep, QueueDep, SettingsDep
+from app.api.deps import DatabaseDep, ObjectStorageDep, QueueDep, SettingsDep
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,6 +63,7 @@ async def ready(
     settings: SettingsDep,
     database: DatabaseDep,
     queue: QueueDep,
+    storage: ObjectStorageDep,
 ) -> ReadyResponse:
     """Probe every hard dependency concurrently, with a ceiling.
 
@@ -71,10 +72,12 @@ async def ready(
     """
     try:
         async with asyncio.timeout(5):
-            database_ok, queue_ok = await asyncio.gather(database.check(), queue.check())
+            database_ok, queue_ok, storage_ok = await asyncio.gather(
+                database.check(), queue.check(), storage.check()
+            )
     except TimeoutError:
         logger.warning("readiness probe timed out")
-        database_ok = queue_ok = False
+        database_ok = queue_ok = storage_ok = False
 
     depth: int | None = None
     if queue_ok:
@@ -93,6 +96,14 @@ async def ready(
             name="redis",
             ok=queue_ok,
             detail=None if queue_ok else "Not reachable.",
+        ),
+        # A writable artifact store is a hard dependency, not a nicety: a run
+        # that cannot persist a fetched PDF produces a report whose citations
+        # point at nothing.
+        DependencyStatus(
+            name="object-storage",
+            ok=storage_ok,
+            detail=None if storage_ok else "Not reachable.",
         ),
     ]
 

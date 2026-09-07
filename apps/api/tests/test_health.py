@@ -37,6 +37,8 @@ async def test_ready_passes_when_every_dependency_answers(client: AsyncClient):
     assert by_name["postgres"]["detail"] is None
     # The in-memory queue selected by app_env=test is genuinely available.
     assert by_name["redis"]["ok"] is True
+    # As is the filesystem artifact store, which really writes a probe file.
+    assert by_name["object-storage"]["ok"] is True
 
 
 async def test_ready_reports_503_when_the_database_is_unreachable(
