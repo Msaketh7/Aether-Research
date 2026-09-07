@@ -19,8 +19,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 3   | Database                   | Done     |
 | 4   | Storage                    | Done     |
 | 5   | Model abstraction          | Done     |
-| 6   | Web research tools         | **Next** |
-| 7   | Document ingestion         | Planned  |
+| 6   | Web research tools         | Done     |
+| 7   | Document ingestion         | **Next** |
 | 8   | Retrieval                  | Planned  |
 | 9   | LangGraph agent system     | Planned  |
 | 10  | Agents                     | Planned  |
@@ -193,7 +193,7 @@ fallback in _chat_ routing chains, where a failover onto it would have produced 
 confusing 400 instead of an answer. Chat capability is now a declared flag the
 router filters on.
 
-## Phase 6 — Web research tools · **Next**
+## Phase 6 — Web research tools · **Done**
 
 Tools: `web_search()`, `fetch_url()`, `extract_content()`, `search_sec()`,
 `search_arxiv()`, `search_github()`. Each needs a strict input schema, timeout,
@@ -203,7 +203,43 @@ localhost, 127.0.0.1, private ranges, cloud metadata endpoints and unsafe
 schemes. Retrieved content is untrusted data; never execute instructions found
 in a page.
 
-## Phase 7 — Document ingestion · Planned
+_Landed:_ ADR 0011. `app/sources/` with the six tools behind a `Toolbelt`, one
+guarded HTTP client, and a `ToolExecutor` that bounds, retries, classifies and
+records every call.
+
+Two controls are enforced by construction rather than by convention, which is
+what the ADR records. Retrieved text is `UntrustedText`, whose `__str__`
+**raises** — so `f"Summarise: {page.body}"` is a `TypeError` at the moment it is
+written rather than a prompt injection in production; reaching the characters
+means choosing `for_prompt()` (delimited, with a standing data notice) or
+`expose()` (storage and hashing). And every outbound request goes through one
+client whose SSRF guard has four layers: scheme/credential/port checks, DNS
+resolution before the request, **every** resolved address checked rather than the
+first, and the **connected peer verified** against that set before a byte of body
+is read. Redirects are followed manually and re-validated at every hop.
+
+A `Toolbelt` is a capability object: the synthesizer's is empty, and there is no
+shell, filesystem or code-execution tool — not disabled, absent.
+
+130 new tests, 412 total. The SSRF cases are written as attacks rather than as
+coverage — cloud metadata, loopback in six spellings, RFC 1918 including the
+172.16/12 range hand-written blocklists miss, and the numeric encodings.
+
+Two defects found by running it, both real security gaps:
+
+- `http://127.1/` and `http://0177.0.0.1/` are loopback, and the classifier
+  missed them — they were refused only because Windows DNS happened to fail,
+  and would have reached the resolver on Linux. The full `inet_aton` grammar is
+  now implemented.
+- `httpx.AsyncClient(cookies=None)` means "no _initial_ cookies", not "no cookie
+  jar". A `Set-Cookie` from the first hop of a redirect was being stored and
+  replayed on the second. The jar is now emptied before every request.
+
+Verified end to end against the live internet as well as against mocks: a real
+130 KB page fetched over real DNS and TLS with robots.txt honoured, extracted to
+4.7 KB of article text, while the same client refused the metadata endpoint.
+
+## Phase 7 — Document ingestion · **Next**
 
 Upload, parsing, metadata extraction, chunking, embedding, indexing — using
 LlamaIndex where appropriate (ADR 0003). Support PDF, HTML, Markdown, TXT.

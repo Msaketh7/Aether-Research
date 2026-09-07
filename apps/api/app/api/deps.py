@@ -28,6 +28,7 @@ from app.db.session import Database
 from app.models import LLMGateway
 from app.research.events import EventBroker
 from app.research.service import ResearchService
+from app.sources import Toolbelt
 from app.storage import ObjectStorage
 from app.workers.queue import JobQueue
 
@@ -55,6 +56,17 @@ def get_broker(request: Request) -> EventBroker:
 def get_object_storage(request: Request) -> ObjectStorage:
     storage: ObjectStorage = request.app.state.storage
     return storage
+
+
+def get_toolbelt(request: Request) -> Toolbelt:
+    """The process-wide research toolbelt.
+
+    Handed out rather than constructed per request: it owns the guarded HTTP
+    client and its connection pool, and a per-request one would re-fetch every
+    robots.txt and give each request its own concurrency cap.
+    """
+    toolbelt: Toolbelt = request.app.state.toolbelt
+    return toolbelt
 
 
 def get_gateway(request: Request) -> LLMGateway:
@@ -145,6 +157,7 @@ QueueDep = Annotated[JobQueue, Depends(get_queue)]
 BrokerDep = Annotated[EventBroker, Depends(get_broker)]
 ObjectStorageDep = Annotated[ObjectStorage, Depends(get_object_storage)]
 GatewayDep = Annotated[LLMGateway, Depends(get_gateway)]
+ToolbeltDep = Annotated[Toolbelt, Depends(get_toolbelt)]
 ResearchServiceDep = Annotated[ResearchService, Depends(get_research_service)]
 CurrentUser = Annotated[Principal, Depends(get_current_user)]
 PageParamsDep = Annotated[PageParams, Depends(get_page_params)]

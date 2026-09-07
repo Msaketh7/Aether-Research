@@ -57,9 +57,21 @@ threat in the system, because ingesting hostile text is the product's core loop.
   document text, so injected assertions with no supporting span are dropped by
   citation validation.
 
+**Status (Phase 6).** The delimiting, sanitisation and least-privilege controls
+are implemented in `apps/api/app/sources` and enforced by the type system rather
+than by convention — retrieved text is `UntrustedText`, whose `__str__` raises,
+so it cannot be interpolated into a prompt at all (ADR 0011). The remaining
+controls (system-prompt wording, structured output, verbatim-span validation)
+arrive with the agents in Phases 10-12.
+
 **Residual risk.** A sufficiently plausible injected _claim_ can still enter the
 evidence base with a real span behind it. Mitigation is corroboration scoring
 and source credibility, not prevention. Accepted and documented.
+
+Sanitisation removes only the class of attack a _reviewer cannot see_ —
+zero-width characters, bidi controls, hidden elements, dangerous URIs. A
+hostile instruction written in ordinary prose passes it untouched by design;
+the defence against that is the rest of this stack, not the sanitiser.
 
 ### 3.2 SSRF via fetched URLs (boundary 4)
 
@@ -74,8 +86,24 @@ private RFC 1918 address.
   checked against a blocklist: loopback, link-local (including the cloud
   metadata range), RFC 1918, unique-local, and CGNAT.
 - Re-validation after every redirect; redirects are capped.
-- Response size cap, connect and read timeouts, no automatic auth headers.
+- Response size cap enforced _while streaming_, connect and read timeouts, no
+  automatic auth headers, and the cookie jar emptied before every request so a
+  redirect chain cannot carry state to the next hop.
 - The worker's egress security group forbids traffic to the VPC CIDR.
+
+**Status (Phase 6).** Implemented in `app/sources/urls.py` and
+`app/sources/http.py`, in four layers (ADR 0011). Beyond the list above: the
+numeric address encodings are decoded with the full `inet_aton` grammar
+(`http://2130706433/`, `http://127.1/`, `http://0177.0.0.1/` are all loopback and
+`ipaddress.ip_address` rejects all three, so a guard built on it alone passes
+them to a resolver that accepts them); _every_ resolved address is checked rather
+than the first; and the **connected peer address is verified** against the
+validated set before any body is read, which closes the DNS-rebinding window.
+69 tests exercise this, written as attacks rather than as coverage.
+
+**Residual risk.** The peer check is skipped when a transport does not report a
+peer address. Pre-flight validation and per-hop redirect re-validation still
+apply, and the egress security group remains the outer layer.
 
 ### 3.3 Denial of wallet (boundaries 1 and 4)
 

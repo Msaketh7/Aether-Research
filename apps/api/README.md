@@ -10,7 +10,7 @@ The Aether Research backend: one codebase, two process types
 
 ## Status
 
-**Phase 5 (model abstraction) is complete.** What exists today:
+**Phase 6 (web research tools) is complete.** What exists today:
 
 - typed settings, structured JSON logging, request-id propagation
 - the error envelope the frontend already consumes (`ApiErrorBody`)
@@ -26,6 +26,11 @@ The Aether Research backend: one codebase, two process types
   ([ADR 0010](../../docs/ADRs/0010-object-storage.md)): S3 and MinIO through one
   implementation, a filesystem backend for development without Docker, a derived
   key namespace, and timeouts, retries and a size ceiling on every call.
+- **Six research tools** behind a `Toolbelt`
+  ([ADR 0011](../../docs/ADRs/0011-untrusted-content-boundary.md)): web search,
+  fetch, extract, SEC EDGAR, arXiv and GitHub, each with a strict input schema,
+  a timeout, retries, error classification and a recorded call — behind a
+  four-layer SSRF guard and an untrusted-content type.
 - **A model gateway** behind `LLMGateway`
   ([ADR 0007](../../docs/ADRs/0007-model-routing.md)): Anthropic, OpenAI and
   Ollama behind one interface, a YAML model registry, role- and mode-based
@@ -48,6 +53,8 @@ What does **not** exist yet, and is not pretended to:
 - **Any model call.** The gateway is built and tested; the agents that call it
   arrive in Phase 10. Nothing in this build sends a prompt to a provider, so no
   API key is required to run it.
+- **Any research.** The tools are built and tested; nothing calls them until the
+  agent graph exists (Phases 9-10). A created run still stays `queued`.
 
 ## Database
 
@@ -86,6 +93,57 @@ this order:
 If the available server has no pgvector, the suite migrates to
 `0001_core_schema` and the vector-specific assertions skip while the schema
 drift test still asserts that the embedding column is the _only_ difference.
+
+## Research tools
+
+Six tools, and only six. There is no shell tool, no filesystem tool and no
+code-execution tool — not disabled, absent (TDD 15.3).
+
+| Tool              | Does                                  |
+| ----------------- | ------------------------------------- |
+| `web_search`      | candidate sources via Tavily or Brave |
+| `fetch_url`       | retrieve a page, guarded and bounded  |
+| `extract_content` | readability pass, boilerplate removed |
+| `search_sec`      | EDGAR full-text search over filings   |
+| `search_arxiv`    | preprints                             |
+| `search_github`   | repositories and code                 |
+
+An agent is handed a `Toolbelt`, which is a **capability**: which tools it
+carries is decided by the caller's role, and the synthesizer's carries none.
+
+### Two controls enforced by the type system
+
+**Retrieved text cannot become an instruction.** It is `UntrustedText`, not
+`str`, and `__str__` raises:
+
+```python
+prompt = f"Summarise: {page.body}"  # TypeError, at the moment it is written
+prompt = page.body.for_prompt()  # delimited, with a standing data notice
+raw = page.body.expose()  # storage, hashing, span verification
+```
+
+**Every outbound request goes through one guarded client.** Its SSRF guard runs
+in four layers, and each exists because the one before it can be defeated:
+
+1. scheme allowlist, no URL credentials, dangerous ports refused;
+2. DNS resolved before the request — the hostname is never trusted, and
+   `http://2130706433/`, `http://127.1/` and `http://0177.0.0.1/` are decoded
+   as the loopback addresses they are;
+3. **every** resolved address checked, not the first;
+4. the **connected peer** verified against that set before any body is read,
+   which closes the DNS-rebinding window.
+
+Redirects are followed manually and re-validated at every hop; the cookie jar is
+emptied before every request. `robots.txt` is honoured, cached per origin.
+
+### Testing
+
+The SSRF cases are written as _attacks_, not as coverage — each is a technique
+that defeats a naive guard, and the docstring names it. The fetcher runs against
+`httpx2.MockTransport`, so redirect handling, streaming and the size cap all
+really execute. What is **not** covered, stated rather than implied: whether the
+vendors' current response shapes still match the fixtures. A live smoke test
+belongs in Phase 19.
 
 ## Model gateway
 
@@ -195,6 +253,7 @@ app/
 ├── workers/        job queue interface and adapters
 ├── storage/        ObjectStorage protocol, S3 and filesystem backends, keys
 ├── models/         LLM gateway, registry, routing, provider adapters
+├── sources/        SSRF guard, guarded HTTP, untrusted content, the six tools
 ├── observability/  request-id and access-log middleware
 └── agents/ retrieval/ sources/ evidence/ reports/ evaluations/
                     module boundaries, filled by later phases

@@ -17,18 +17,19 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–5 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–6 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
-| Layer                 | State                                                                                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend (`apps/web`) | Complete product surface, 94 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                       |
-| API (`apps/api`)      | FastAPI: research surface, SSE, authorisation, error contract, health probes. 282 tests.                                                           |
-| Database              | PostgreSQL, 19 tables, Alembic migrations, pgvector column. Runs survive restart.                                                                  |
-| Object storage        | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. No caller yet — Phase 7 writes the first artifact. |
-| Model gateway         | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. No caller yet — Phase 10.               |
-| Worker / agents       | **Does not exist.** A created run stays `queued`. Phases 9 and 13.                                                                                 |
-| Everything else       | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                        |
+| Layer                 | State                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend (`apps/web`) | Complete product surface, 94 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                       |
+| API (`apps/api`)      | FastAPI: research surface, SSE, authorisation, error contract, health probes. 412 tests.                                                                           |
+| Database              | PostgreSQL, 19 tables, Alembic migrations, pgvector column. Runs survive restart.                                                                                  |
+| Object storage        | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. No caller yet — Phase 7 writes the first artifact.                 |
+| Model gateway         | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. No caller yet — Phase 10.                               |
+| Research tools        | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. No caller yet — Phase 10. |
+| Worker / agents       | **Does not exist.** A created run stays `queued`. Phases 9 and 13.                                                                                                 |
+| Everything else       | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                        |
 
 Nothing fabricates data to fill a gap. No benchmark has been executed.
 
@@ -42,7 +43,7 @@ Nothing fabricates data to fill a gap. No benchmark has been executed.
 | [`docs/architecture.md`](docs/architecture.md) | System map                                                              |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE per trust boundary; prompt injection and SSRF                    |
 | [`docs/evaluation.md`](docs/evaluation.md)     | Metrics, thresholds, the no-fabricated-numbers rule                     |
-| [`docs/ADRs/`](docs/ADRs/)                     | 10 accepted decisions. New irreversible choice ⇒ new ADR.               |
+| [`docs/ADRs/`](docs/ADRs/)                     | 11 accepted decisions. New irreversible choice ⇒ new ADR.               |
 
 ## Repository structure
 
@@ -63,6 +64,10 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
   app/storage/     ObjectStorage protocol, S3 + filesystem backends, key namespace
   app/models/      LLM gateway, registry.yaml, routing, provider adapters
                    (NOT the ORM — that is app/db/models/)
+  app/sources/     the only module that talks to the open internet: SSRF
+                   guard, guarded HTTP client, untrusted-content type,
+                   sanitiser, tools/ (search, fetch, extract, sec, arxiv,
+                   github), toolbelt
   app/agents|retrieval|sources|evidence|reports|evaluations|observability/
                    module boundaries with docstrings; filled by later phases
   migrations/      Alembic
@@ -80,7 +85,8 @@ Tailwind v4, shadcn-style components in-repo, TanStack Query 5, native `EventSou
 Zod 4. Vitest 4, Playwright 1.63.
 
 **Backend** — Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic,
-asyncpg, pgvector, Redis, aioboto3 (S3), anthropic + openai SDKs, httpx2.
+asyncpg, pgvector, Redis, aioboto3 (S3), anthropic + openai SDKs, httpx2,
+trafilatura (readability), defusedxml (untrusted XML).
 `uv` for locked deps. `ruff` + `mypy --strict`. pytest, with `moto` in server
 mode for a real S3 endpoint and `httpx2.MockTransport` for the model providers.
 
@@ -127,6 +133,9 @@ Hard-won; do not rediscover them.
   explains a provider list that looks larger than the configuration suggests.
 - **Both vendor SDKs are built on `httpx2`, not `httpx`.** `httpx` is a test-only
   dependency (the ASGI client); runtime HTTP is `httpx2` everywhere.
+- **A few tests make real DNS and HTTP calls.** The SSRF guard's allow-path test
+  resolves a real hostname (it skips cleanly with no DNS). Everything else uses
+  `httpx2.MockTransport`.
 - **The repo path contains a space.** Vitest's `forks` pool cannot hand off to
   workers, so the config pins `pool: 'threads'`.
 - **npm cold resolve crashes** (arborist bug in the vitest peer graph) without

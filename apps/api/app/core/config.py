@@ -129,9 +129,40 @@ class Settings(BaseSettings):
     #: rest queue (TDD 6.3). Without it, fan-out becomes a rate-limit wall.
     llm_max_concurrent_calls: int = 8
 
-    # --- research tools (used from Phase 6) -------------------------------
+    # --- research tools (Phase 6) -----------------------------------------
+    search_provider: Literal["tavily", "brave"] = "tavily"
     tavily_api_key: SecretStr | None = None
+    brave_api_key: SecretStr | None = None
     github_token: SecretStr | None = None
+
+    #: SEC's access terms require a descriptive User-Agent with a contact
+    #: address; anonymous scrapers get blocked. Also sent on ordinary fetches,
+    #: because being identifiable is how a crawler keeps its access.
+    sec_user_agent: str = "AetherResearch/0.1 (contact@example.com)"
+
+    # Bounds on every outbound fetch. None of these is optional: an unbounded
+    # fetch is a research run that hangs on a slow server, and an unbounded
+    # response is one hostile page away from an out-of-memory kill.
+    fetch_connect_timeout_seconds: float = 5.0
+    fetch_read_timeout_seconds: float = 20.0
+    fetch_max_response_bytes: int = 5 * 1024 * 1024
+    fetch_max_redirects: int = 5
+
+    tool_timeout_seconds: float = 30.0
+    tool_max_attempts: int = 3
+    tool_max_concurrent_calls: int = 8
+
+    #: Per-deployment SSRF policy (TDD 15.2). `allowed_domains` empty means "any
+    #: public host"; setting it turns the fetcher into an allowlist-only client,
+    #: which is what a locked-down deployment wants.
+    allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    blocked_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("allowed_domains", "blocked_domains", mode="before")
+    @classmethod
+    def _split_domains(cls, value: object) -> object:
+        """Same comma-separated form as CORS origins, for the same reason."""
+        return cls._split_origins(value)
 
     @field_validator("cors_allow_origins", mode="before")
     @classmethod

@@ -27,6 +27,7 @@ from app.observability.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.research.events import InMemoryEventBroker
+from app.sources import build_toolbelt
 from app.storage import build_object_storage
 from app.workers.queue import InMemoryJobQueue, JobQueue, RedisJobQueue, build_redis
 
@@ -68,6 +69,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One gateway per process: it owns the concurrency semaphore, and a
     # per-request gateway would give each request its own, which is none.
     app.state.gateway = build_gateway(settings)
+    # One toolbelt per process: it owns the guarded HTTP client, its connection
+    # pool, the robots.txt cache and the concurrency semaphore. A per-request
+    # belt would give each request its own of each, which is none of them.
+    app.state.toolbelt = build_toolbelt(settings)
     app.state.broker = InMemoryEventBroker(buffer_size=settings.sse_replay_buffer_size)
 
     logger.info(
@@ -85,6 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.queue.close()
         await app.state.broker.close()
         await app.state.gateway.close()
+        await app.state.toolbelt.close()
         await app.state.storage.close()
         await app.state.database.dispose()
         logger.info("api stopped")
