@@ -23,6 +23,7 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.core.config import Settings
 from app.core.enums import ToolName
 from app.core.logging import get_logger
 from app.sources.base import CallRecorder, ToolExecutor, ToolResult
@@ -192,21 +193,12 @@ class Toolbelt:
 
 
 def build_toolbelt(
-    settings: object,
+    settings: Settings,
     *,
     recorder: CallRecorder | None = None,
     permitted: frozenset[ToolName] = RESEARCH_TOOLS,
 ) -> Toolbelt:
-    """Assemble a toolbelt from configuration.
-
-    Typed loosely on ``settings`` to keep ``app.sources`` importable without a
-    settings instance; the concrete type is ``app.core.config.Settings`` and the
-    attributes read here are all declared there.
-    """
-    from app.core.config import Settings
-
-    assert isinstance(settings, Settings)  # noqa: S101 - narrows for mypy at the boundary
-
+    """Assemble a toolbelt from configuration."""
     client = SafeHttpClient(
         connect_timeout_seconds=settings.fetch_connect_timeout_seconds,
         read_timeout_seconds=settings.fetch_read_timeout_seconds,

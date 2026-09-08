@@ -179,6 +179,28 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in raw.split(",") if origin.strip()]
         return value
 
+    @field_validator("cors_allow_origins", mode="after")
+    @classmethod
+    def _reject_wildcard_origin(cls, value: list[str]) -> list[str]:
+        """A wildcard origin is refused, because this API sends credentials.
+
+        Starlette treats `allow_origins=["*"]` with `allow_credentials=True` by
+        echoing whatever Origin the request carried - so every website a user
+        visits could make authenticated requests on their behalf. Browsers do
+        not stop it, because the response looks like a specific-origin grant.
+
+        Refusing at startup rather than documenting it: `CORS_ALLOW_ORIGINS=*`
+        is exactly what someone types when a deployment's CORS is "not working",
+        and it must not be the thing that quietly succeeds.
+        """
+        if any(origin.strip() == "*" for origin in value):
+            raise ValueError(
+                "CORS_ALLOW_ORIGINS cannot be '*': this API is called with "
+                "credentials, and a wildcard origin would let any site make "
+                "authenticated requests. List the exact origins instead."
+            )
+        return value
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

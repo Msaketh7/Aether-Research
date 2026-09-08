@@ -147,6 +147,33 @@ Hashed session tokens at rest, rotation on privilege change, revocation list
 visible to the user in `/settings`, `HttpOnly`/`Secure`/`SameSite` cookies,
 HSTS, CSP, `X-Content-Type-Options`, and a strict CORS origin allowlist.
 
+### 3.8 Development affordances reaching a real deployment
+
+**Threat.** The scaffolding that makes a half-built system workable — a
+development identity, a mock backend, a permissive CORS setting — survives into
+an environment that is reachable from the internet. This is not a hypothetical
+class: every item below was a live gap found in the pre-release audit of this
+repository, not a risk imagined in advance.
+
+**Controls.** Each gate is an allowlist, so an environment or value nobody
+anticipated lands on the closed side.
+
+| Affordance                           | Gate                                                                                                              |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `X-Aether-User` development identity | permitted only in `local` and `test`; every other environment returns 401                                         |
+| Mock API under `/api/mock/v1`        | Next.js middleware returns 404 whenever `NEXT_PUBLIC_API_MODE=live`                                               |
+| `CORS_ALLOW_ORIGINS=*`               | refused by the settings validator — a wildcard with `allow_credentials` lets any site make authenticated requests |
+| Filesystem object-storage backend    | refused in production (ADR 0010)                                                                                  |
+| `assert` as a runtime check          | none in production code; `python -O` would strip it                                                               |
+
+**Why the auth gate is an allowlist and not `!is_production`.** The original
+check refused only `production`, which left `staging` open — and a staging
+deployment is usually internet-reachable with a copy of real data, so
+`X-Aether-User: <any uuid>` there was a complete authentication bypass. Under a
+"not production" rule a newly added environment is open by default; under an
+allowlist it is closed. `tests/test_security_hardening.py` asserts that property
+directly, so adding an environment without deciding about it fails the build.
+
 ## 4. STRIDE summary
 
 | Threat                     | Primary control                                              |
