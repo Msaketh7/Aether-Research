@@ -1,21 +1,73 @@
-MIT License
+Aether Research - Proprietary License
 
-Copyright (c) 2026 Aether Research contributors
+Copyright (c) 2026 Msaketh7. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This repository and everything in it - source code, documentation, designs,
+architecture decision records, prompts, tests, data and all other materials
+(together, "the Software") - is the original work of the copyright holder and
+is protected by copyright law and international copyright treaties.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The Software is NOT open source. No license is granted except as set out
+below, and every right not expressly granted is reserved.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. PERMITTED USE
+
+   You may:
+
+   (a) view the Software on GitHub, to the extent GitHub's Terms of Service
+       provide for public repositories; and
+
+   (b) download or clone the Software solely to review and evaluate the
+       copyright holder's work - for example as part of a hiring, academic
+       or technical review - provided you do not share, publish or otherwise
+       use it beyond that review, and delete your copy when the review ends.
+
+2. PROHIBITED USE
+
+   Without prior written permission from the copyright holder, you may not:
+
+   (a) copy the Software, in whole or in part, into any other repository,
+       project, product or service;
+   (b) publish, redistribute, mirror, sublicense, sell, rent or lease the
+       Software or any part of it;
+   (c) modify the Software or create derivative works based on it;
+   (d) use the Software, or any part of it, for any commercial purpose or to
+       provide a service to others;
+   (e) present the Software, or any part of it, as your own work, or remove,
+       obscure or alter any copyright, license or attribution notice; or
+   (f) use the Software, or any part of it, to train, fine-tune or evaluate
+       machine-learning models, or include it in any dataset.
+
+3. FORKS
+
+   GitHub may allow a public repository to be forked. A fork grants no right
+   beyond section 1(a). In particular it does not permit you to use, modify,
+   redistribute or republish the Software outside GitHub's own display of
+   that fork.
+
+4. THIRD-PARTY COMPONENTS
+
+   Some portions of the Software are derived from third-party open-source
+   software and remain under their original licenses, listed in
+   THIRD_PARTY_NOTICES.md. Packages installed by a package manager are
+   governed by their own licenses. Nothing in this license limits any right
+   you have under those licenses for those portions.
+
+5. TERMINATION
+
+   Any use of the Software in breach of this license immediately ends the
+   permissions in section 1. The copyright holder may pursue every remedy
+   available at law, including the takedown of infringing copies.
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+7. PERMISSIONS
+
+   To request any use not permitted above, contact the copyright holder via
+   https://github.com/Msaketh7.

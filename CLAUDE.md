@@ -33,6 +33,12 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 Nothing fabricates data to fill a gap. No benchmark has been executed.
 
+**Licensing.** Proprietary, all rights reserved - see [`LICENSE`](LICENSE). The
+repository is public on GitHub for reading, not reuse. Never add an open-source
+license or `"license": "MIT"` to a manifest; `apps/api/tests/test_licensing.py`
+fails the build if one appears. Code copied in from open-source projects must be
+listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Specifications (authoritative)
 
 | Document                                       | Contents                                                                |

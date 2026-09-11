@@ -2,6 +2,10 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+> **© 2026 Msaketh7. All rights reserved.** This is proprietary software, not
+> open source. You may read it here; you may not copy, redistribute, modify or
+> reuse it without written permission. See [`LICENSE`](LICENSE).
+
 **Autonomous Multi-Agent Research Platform**
 
 Ask a complex research question. Aether decomposes it, researches multiple
@@ -608,6 +612,17 @@ failing loudly.
 | **Confidence score**             | A 0-1 number saying how sure the system is about a claim.                                                                      |
 | **Citation**                     | The `[n]` marker in the report that links a statement to its source and exact supporting quote.                                |
 
-## License
+## Copyright and license
 
-See [`LICENSE`](LICENSE).
+© 2026 Msaketh7. All rights reserved.
+
+This project is **proprietary**. It is published so that it can be read and
+evaluated - by reviewers, recruiters and anyone assessing the work - not so that
+it can be reused. Without written permission you may not copy it into another
+repository, redistribute it, modify it, use it commercially, present it as your
+own, or use it to train machine-learning models.
+
+The full terms are in [`LICENSE`](LICENSE). Portions derived from open-source
+projects remain under their own licenses, listed in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). To ask for permission,
+contact [@Msaketh7](https://github.com/Msaketh7).

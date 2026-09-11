@@ -1,9 +1,9 @@
 {
   "name": "aether-research",
   "private": true,
+  "license": "UNLICENSED",
   "version": "0.1.0",
   "description": "Aether Research - autonomous multi-agent research platform (monorepo root)",
-  "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
   },

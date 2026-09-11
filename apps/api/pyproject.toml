@@ -4,7 +4,13 @@ version = "0.1.0"
 description = "Aether Research API and worker (one codebase, two process types - see ADR 0001)"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "Proprietary. Copyright (c) 2026 Msaketh7. All rights reserved. See LICENSE." }
+classifiers = [
+  "License :: Other/Proprietary License",
+  # PyPI rejects any upload carrying this classifier, so the package cannot be
+  # published by accident.
+  "Private :: Do Not Upload",
+]
 
 dependencies = [
   "fastapi>=0.141.1",

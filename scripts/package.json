@@ -1,6 +1,7 @@
 {
   "name": "aether-doc-tools",
   "private": true,
+  "license": "UNLICENSED",
   "version": "1.0.0",
   "description": "Documentation build tooling for Aether Research (Markdown -> DOCX).",
   "scripts": {
