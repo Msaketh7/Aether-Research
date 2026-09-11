@@ -218,6 +218,15 @@ class LLMGateway:
                     run_id=run_id,
                 )
 
+    def embedding_model(self) -> ModelSpec:
+        """The model every embedding is produced with.
+
+        Exposed so the ingestion pipeline can compare its declared width with
+        the vector column once, when it is built, instead of learning about a
+        mismatch from a failed write.
+        """
+        return self._router.embedding_model()
+
     async def embed(
         self,
         texts: Sequence[str],
@@ -226,27 +235,60 @@ class LLMGateway:
     ) -> EmbeddingResult:
         """Embed texts with the one configured embedding model.
 
-        Not routed by role: vectors from different models are not comparable, so
-        an index built from a mixture is not searchable.
+        Not routed by role, and never failed over: vectors from different models
+        are not comparable, so an index built from a mixture is not searchable,
+        and a "successful" fallback would quietly corrupt it. Failures a pause
+        can fix are retried on the same model with the same backoff as
+        generation, and every attempt is recorded - the failed ones included.
+
+        Phase 7 made this the first real caller and found it had none of that:
+        no gateway timeout, no retry, and a failed call left no record.
         """
         spec = self._router.embedding_model()
         provider = self._provider_for(spec)
 
-        async with self._semaphore:
-            result = await provider.embed(texts, model=spec.model_id)
+        for attempt in range(1, self._max_attempts + 1):
+            started = asyncio.get_running_loop().time()
+            try:
+                async with self._semaphore:
+                    async with asyncio.timeout(self._timeout):
+                        result = await provider.embed(texts, model=spec.model_id)
+            except (ModelError, TimeoutError) as exc:
+                error = _as_model_error(exc, spec)
+                await self._record(
+                    spec=spec,
+                    decision=None,
+                    operation="embed",
+                    status=LlmCallStatus.ERROR,
+                    usage=TokenUsage(prompt_tokens=0, completion_tokens=0),
+                    latency_ms=int((asyncio.get_running_loop().time() - started) * 1000),
+                    prompt_version="n/a",
+                    attempt=attempt,
+                    error_code=error.code,
+                    run_id=run_id,
+                )
+                if error.retryable and attempt < self._max_attempts:
+                    await asyncio.sleep(self._backoff(attempt, error))
+                    continue
+                raise error from exc
 
-        await self._record(
-            spec=spec,
-            decision=None,
-            operation="embed",
-            status=LlmCallStatus.OK,
-            usage=result.usage,
-            latency_ms=result.latency_ms,
-            prompt_version="n/a",
-            attempt=1,
-            run_id=run_id,
+            await self._record(
+                spec=spec,
+                decision=None,
+                operation="embed",
+                status=LlmCallStatus.OK,
+                usage=result.usage,
+                latency_ms=result.latency_ms,
+                prompt_version="n/a",
+                attempt=attempt,
+                run_id=run_id,
+            )
+            return result
+
+        raise ModelNotConfigured(  # pragma: no cover - the loop returns or raises
+            "The embedding retry loop ended without a result or an error.",
+            context={"model": spec.key},
         )
-        return result
 
     async def count_tokens(
         self,

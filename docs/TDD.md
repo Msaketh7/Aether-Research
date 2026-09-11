@@ -5,7 +5,7 @@
 | **Working name**    | Aether Research                                                                                    |
 | **Document status** | Draft                                                                                              |
 | **Version**         | 1.0                                                                                                |
-| **Last updated**    | 2026-09-05                                                                                         |
+| **Last updated**    | 2026-09-10                                                                                         |
 | **Owner**           | Engineering                                                                                        |
 | **Related**         | [`PRD.md`](PRD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md`, `ADRs/` |
 
@@ -336,15 +336,27 @@ it._
 - `POST /research/{id}/cancel`, cooperative cancel via a Redis flag the graph
   checks between steps.
 
-### 3.5 File API (`apps/api/app/api` + `sources`)
+### 3.5 File API (`apps/api/app/api` + `retrieval`)
 
-_Plain terms: upload a PDF; the system reads it, cleans it, indexes it, and adds
-it to the research material._
+_Plain terms: upload a document and it is checked and kept. When a research run
+that names it starts, the system reads it, cleans it, cuts it into pieces,
+indexes them, and adds it to that run's research material._
 
-- `POST /files`, presigned S3 upload; on completion, enqueue an ingestion job
-  that parses the PDF, normalizes content, chunks + embeds, and creates
-  `sources` / `documents` / `document_chunks` rows with `source_type = upload`.
-- Size/type limits enforced before the presigned URL is issued.
+- `POST /files`, with the raw file as the request body: `Content-Type` is its
+  type and `Content-Disposition` its name. The size ceiling is enforced while
+  the body is read, and the bytes are checked against the declared type before
+  anything is stored. PDF, HTML, Markdown and plain text are accepted. Returns
+  `201`, or `200` with the existing record when the same user uploads the same
+  bytes again.
+- `GET /files` and `GET /files/{id}` list and fetch the caller's uploads.
+- `POST /research` accepts up to 10 upload ids in `document_ids`. They are
+  checked against the caller's uploads and recorded with the run; when the run
+  executes, each is ingested into that run's corpus as a `source_type = upload`
+  source (Section 8.1).
+- Changed from the original presigned-S3 design (ADR 0012). At a 25 MiB ceiling
+  the API can stream the body with a hard cap, the type check happens before
+  storage rather than after, and the filesystem storage backend cannot presign.
+  Presigning remains the path if files outgrow the proxy.
 
 ### 3.6 Redis
 
@@ -620,7 +632,8 @@ a user's data, expiring artifacts by age and attributing storage cost to a run
 are all prefix operations rather than joins:
 
 ```
-runs/{run_id}/{kind}/{name}          kind ∈ raw-html | pdf | document | screenshot | report
+runs/{run_id}/{kind}/{name}          kind ∈ raw-html | pdf | markdown | text | document | screenshot | report
+uploads/{user_id}/{kind}/{name}      a user's files, before a run uses them (ADR 0012)
 evaluations/{evaluation_id}/{name}
 ```
 
@@ -747,19 +760,22 @@ Indexes: `(run_id)`, `(canonical_url)`, `(content_hash)`, `(dedup_cluster_id)`,
 _Plain terms: the actual cleaned-up text of a source, plus a pointer to the raw
 file in S3._
 
-| Column             | Type     | Notes                             |
-| ------------------ | -------- | --------------------------------- |
-| source_id          | `uuid`   | → sources                         |
-| storage_key        | `text`   | S3 key for raw + parsed artifacts |
-| mime_type          | `text`   |                                   |
-| raw_size_bytes     | `bigint` |                                   |
-| normalized_content | `text`   | boilerplate-stripped text         |
-| language           | `text`   | ISO code from language detection  |
-| extraction_method  | `text`   | reader/parser used                |
-| token_count        | `int`    |                                   |
-| content_hash       | `text`   | sha256 (idempotent ingestion key) |
+| Column             | Type     | Notes                                         |
+| ------------------ | -------- | --------------------------------------------- |
+| source_id          | `uuid`   | → sources                                     |
+| storage_key        | `text`   | S3 key for raw + parsed artifacts             |
+| mime_type          | `text`   |                                               |
+| raw_size_bytes     | `bigint` |                                               |
+| normalized_content | `text`   | boilerplate-stripped text                     |
+| language           | `text`   | ISO code from language detection              |
+| extraction_method  | `text`   | reader/parser used                            |
+| token_count        | `int`    |                                               |
+| content_hash       | `text`   | sha256 (idempotent ingestion key)             |
+| metadata           | `jsonb`  | page count, language method, chunker settings |
 
-Unique: `(content_hash)`.
+Unique: `(source_id, content_hash)`. Per source, not global: two runs holding the
+same document keep their own rows, so one user deleting a run can never cascade
+into another user's evidence (ADR 0012).
 
 #### `document_chunks`
 
@@ -779,6 +795,39 @@ meaning-vector and a keyword index._
 
 Indexes: `USING hnsw (embedding vector_cosine_ops)`, `USING gin (tsv)`,
 `(document_id, chunk_index)`, `gin (metadata)`.
+
+`EMBED_DIM` is 768, the width of the one declared embedding model
+(`nomic-embed-text`). The ingestion pipeline refuses to start against a model of
+another width; changing model families means a migration and a re-embed
+(ADR 0012). `embedding_model` is written in the same statement as `embedding`,
+so a null `embedding_model` marks a chunk that is still waiting for its vector.
+
+#### `uploads`
+
+_Plain terms: a file a user uploaded, kept until a research run uses it._
+
+| Column       | Type     | Notes                                           |
+| ------------ | -------- | ----------------------------------------------- |
+| user_id      | `uuid`   | → users                                         |
+| filename     | `text`   | cleaned for display; never used to build a path |
+| format       | `text`   | `pdf` \| `html` \| `markdown` \| `text`         |
+| mime_type    | `text`   | canonical for the format, not the client's      |
+| size_bytes   | `bigint` |                                                 |
+| content_hash | `text`   | sha256 of the bytes as uploaded                 |
+| storage_key  | `text`   | under `uploads/{user_id}/`                      |
+| charset      | `text`   | declared charset of a text format, nullable     |
+
+Unique: `(user_id, content_hash)`, per user and never global. Indexes:
+`(user_id, created_at desc, id)`.
+
+#### `research_run_uploads`
+
+_Plain terms: which uploaded files a run was created with._
+
+| Column    | Type   | Notes               |
+| --------- | ------ | ------------------- |
+| run_id    | `uuid` | → research_runs, PK |
+| upload_id | `uuid` | → uploads, PK       |
 
 #### `claims`
 
@@ -985,18 +1034,35 @@ Built on LlamaIndex.
 ### 8.1 Ingestion
 
 ```
-document (from fetcher or upload)
-  → parse (reader per file type)
-  → normalize (strip menus/ads/boilerplate, fix whitespace/encoding)
-  → language detection
-  → dedup check (content_hash; skip if already seen)
-  → chunk (structure-aware; ~512–1024 tokens, with overlap)
-  → embed (batched; embedding cache by text_hash + model)
-  → write document + document_chunks (embedding + tsv + metadata)
+document (a fetched page, or an upload attached to the run)
+  → copy the raw bytes under runs/{run_id}/ (content-addressed)
+  → parse in a killable child process (pypdf / readability / strict decoding)
+  → normalize (sanitized; this is documents.normalized_content, never rewritten)
+  → language detection (py3langid; under 0.80 confidence recorded as unknown)
+  → chunk (LlamaIndex SentenceSplitter + MarkdownNodeParser; 512 tokens, 64 overlap)
+  → write source + document + document_chunks (tsv generated; no vectors yet)
+  → embed in batches through the gateway → write vectors
 ```
 
-Idempotent: keyed on `documents.content_hash`. Re-ingesting the same content is a
-no-op.
+- **Isolated parsing.** Each document is parsed by a fresh Python process with a
+  scrubbed environment and network access refused, killed at
+  `PARSE_TIMEOUT_SECONDS`, and on POSIX run under an address-space and CPU
+  ceiling (threat model 3.6, ADR 0012).
+- **Exact offsets.** Every chunk records `char_start` and `char_end` into the
+  normalized text, and `text[start:end]` is the chunk. Positions are computed
+  and checked rather than trusted from the splitter, and only whitespace may
+  fall between chunks, so nothing is lost. Evidence spans resolve through these
+  offsets.
+- **Two writes.** Chunks are committed before they are embedded, a batch per
+  transaction. A failed embedding call costs one batch; the retry embeds only
+  the chunks whose `embedding_model` is still null.
+- **Idempotent.** A source is found by run and canonical URL before one is
+  created, under a transaction advisory lock, and a document is unique per
+  (source, content hash). Re-ingesting the same content is a no-op, including
+  when a job is delivered twice at once.
+- **Chunk size.** 512/64 is a documented default, not a measurement. Each chunk
+  records the settings that produced it, and Phase 8's retrieval benchmark
+  measures size against recall.
 
 ### 8.2 Retrieval
 
@@ -1409,7 +1475,8 @@ rubric for correctness / faithfulness, sampled and spot-audited by a human.
 | `GET`  | `/research/{id}/report`                         | report + sections + citations    |
 | `POST` | `/research/{id}/followup`                       | conversational child run         |
 | `POST` | `/research/{id}/cancel`                         | cooperative cancel               |
-| `POST` | `/files`                                        | presigned upload + ingestion     |
+| `POST` | `/files`                                        | upload a document (Section 3.5)  |
+| `GET`  | `/files` / `/files/{id}`                        | the caller's uploads             |
 | `POST` | `/feedback`                                     | rate a report                    |
 | `GET`  | `/evaluations`                                  | dashboard data                   |
 | `POST` | `/evaluations/run`                              | (admin) trigger a benchmark      |
@@ -1545,7 +1612,8 @@ aether-research/
 
 ## 24. Open technical questions
 
-- Embedding model + dimension (`EMBED_DIM`) and reranker choice.
+- Reranker choice. (The embedding model and dimension were settled in Phase 7:
+  `nomic-embed-text`, 768 dimensions; ADR 0012.)
 - Web-search vendor (Tavily / Exa / Brave) and its rate/cost envelope.
 - Celery vs ARQ for the queue (both fit; ARQ is lighter, Celery has more
   tooling).

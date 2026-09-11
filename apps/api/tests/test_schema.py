@@ -35,11 +35,13 @@ EXPECTED_TABLES = {
     "report_sections",
     "reports",
     "research_projects",
+    "research_run_uploads",
     "research_runs",
     "research_tasks",
     "sessions",
     "sources",
     "tool_calls",
+    "uploads",
     "users",
 }
 
@@ -129,8 +131,8 @@ async def test_the_migrations_and_the_models_agree(
         differences = await connection.run_sync(diff)
 
     if not postgres.has_pgvector:
-        # Without the extension the suite stops at 0001, so the embedding column
-        # is legitimately absent. Asserting that it is the *only* difference is
+        # Without the extension the suite migrates only the relational line, so
+        # the embedding column is legitimately absent. Asserting that it is the *only* difference is
         # stronger than skipping: real drift anywhere else still fails here.
         expected = [("add_column", None, "document_chunks")]
         actual = [
@@ -421,3 +423,65 @@ async def test_the_embedding_column_exists_when_pgvector_does(
     assert index is not None
     assert "hnsw" in index.lower()
     assert "vector_cosine_ops" in index.lower()
+
+    width = await raw.fetchval(
+        """
+        SELECT format_type(atttypid, atttypmod) FROM pg_attribute
+        WHERE attrelid = 'document_chunks'::regclass AND attname = 'embedding'
+        """
+    )
+    # Sized for the declared embedding model by 0004; 0002 created it at 1536,
+    # which no declared model could fill.
+    assert width == "vector(768)"
+
+
+# --- ingestion (Phase 7) --------------------------------------------------
+
+_INSERT_UPLOAD = (
+    "INSERT INTO uploads "
+    "(user_id, filename, format, mime_type, size_bytes, content_hash, storage_key) "
+    "VALUES ($1, 'f', $2, 'application/pdf', 10, 'same-hash', 'k')"
+)
+
+
+async def seed_source(raw: asyncpg.Connection, run_id: uuid.UUID) -> uuid.UUID:
+    return await raw.fetchval(
+        """
+        INSERT INTO sources
+            (run_id, url, canonical_url, domain, source_type, title, accessed_at, content_hash)
+        VALUES ($1, 'https://example.com', 'https://example.com', 'example.com', 'web', 'T',
+                now(), 'h')
+        RETURNING id
+        """,
+        run_id,
+    )
+
+
+async def test_a_document_is_unique_per_source_not_per_database(raw: asyncpg.Connection):
+    """Phase 3 made content_hash unique across every user's runs; the same PDF
+    could then exist once in the whole system."""
+    user = await seed_user(raw)
+    first = await seed_source(raw, await seed_run(raw, user))
+    second = await seed_source(raw, await seed_run(raw, user))
+    insert = (
+        "INSERT INTO documents (source_id, normalized_content, content_hash) "
+        "VALUES ($1, 'text', 'same-hash')"
+    )
+    await raw.execute(insert, first)
+    await raw.execute(insert, second)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await raw.execute(insert, first)
+
+
+async def test_an_upload_is_unique_per_user_not_globally(raw: asyncpg.Connection):
+    alice = await seed_user(raw, "alice@example.com")
+    bob = await seed_user(raw, "bob@example.com")
+    await raw.execute(_INSERT_UPLOAD, alice, "pdf")
+    await raw.execute(_INSERT_UPLOAD, bob, "pdf")
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await raw.execute(_INSERT_UPLOAD, alice, "pdf")
+
+
+async def test_an_upload_format_outside_the_vocabulary_is_refused(raw: asyncpg.Connection):
+    with pytest.raises(asyncpg.CheckViolationError):
+        await raw.execute(_INSERT_UPLOAD, await seed_user(raw), "docx")

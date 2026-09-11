@@ -12,6 +12,7 @@ a caller might forget - it is part of every signature.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -63,6 +64,18 @@ class ResearchRepository(Protocol):
         request away (ADR 0005). That is a domain requirement, not a
         persistence detail, which is why it is on the interface.
         """
+        ...
+
+
+class UploadAttachments(Protocol):
+    """What run creation needs from the uploads store (``document_ids``)."""
+
+    async def owned_ids(self, user_id: UUID, upload_ids: Sequence[UUID]) -> set[UUID]:
+        """The subset of ``upload_ids`` that are this user's uploads."""
+        ...
+
+    async def attach(self, run_id: UUID, upload_ids: Sequence[UUID]) -> None:
+        """Record the attachment, in the same transaction as the run."""
         ...
 
 

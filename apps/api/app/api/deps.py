@@ -23,11 +23,13 @@ from app.core.config import Settings
 from app.core.logging import user_id_var
 from app.core.pagination import PageParams
 from app.db.repositories.research import SqlAlchemyResearchRepository
+from app.db.repositories.uploads import SqlAlchemyUploadRepository
 from app.db.repositories.user import UserRepository
 from app.db.session import Database
 from app.models import LLMGateway
 from app.research.events import EventBroker
 from app.research.service import ResearchService
+from app.retrieval.uploads import UploadService
 from app.sources import Toolbelt
 from app.storage import ObjectStorage
 from app.workers.queue import JobQueue
@@ -122,18 +124,37 @@ def get_research_repository(session: SessionDep) -> SqlAlchemyResearchRepository
     return SqlAlchemyResearchRepository(session)
 
 
+def get_upload_repository(session: SessionDep) -> SqlAlchemyUploadRepository:
+    return SqlAlchemyUploadRepository(session)
+
+
 def get_research_service(
     repository: Annotated[SqlAlchemyResearchRepository, Depends(get_research_repository)],
+    uploads: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
     queue: Annotated[JobQueue, Depends(get_queue)],
     broker: Annotated[EventBroker, Depends(get_broker)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> ResearchService:
-    """Composed per request, because the repository is session-scoped.
+    """Composed per request, because the repositories are session-scoped.
 
-    Cheap: the service holds references, opens no connections and does no work
-    until a method is called.
+    Both repositories share the request's one session - FastAPI resolves the
+    session dependency once - so a run and its document attachments commit or
+    roll back together. Cheap: the service holds references, opens no
+    connections and does no work until a method is called.
     """
-    return ResearchService(repository=repository, queue=queue, broker=broker, settings=settings)
+    return ResearchService(
+        repository=repository, uploads=uploads, queue=queue, broker=broker, settings=settings
+    )
+
+
+def get_upload_service(
+    repository: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
+    storage: Annotated[ObjectStorage, Depends(get_object_storage)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> UploadService:
+    return UploadService(
+        repository=repository, storage=storage, max_bytes=settings.upload_limit_bytes
+    )
 
 
 def get_page_params(
@@ -159,5 +180,6 @@ ObjectStorageDep = Annotated[ObjectStorage, Depends(get_object_storage)]
 GatewayDep = Annotated[LLMGateway, Depends(get_gateway)]
 ToolbeltDep = Annotated[Toolbelt, Depends(get_toolbelt)]
 ResearchServiceDep = Annotated[ResearchService, Depends(get_research_service)]
+UploadServiceDep = Annotated[UploadService, Depends(get_upload_service)]
 CurrentUser = Annotated[Principal, Depends(get_current_user)]
 PageParamsDep = Annotated[PageParams, Depends(get_page_params)]

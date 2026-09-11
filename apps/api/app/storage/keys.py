@@ -6,11 +6,13 @@ asks for their data to go away. So keys are *derived here and only here*, from
 a fixed layout:
 
     runs/{run_id}/{kind}/{name}
+    uploads/{user_id}/{kind}/{name}
     evaluations/{evaluation_id}/{name}
 
 Two properties follow from that shape and both are load-bearing:
 
-* **Everything a run produced shares one prefix.** Deleting a run, expiring old
+* **Everything a run produced shares one prefix**, and so does everything a
+  user uploaded. Deleting a run, deleting a user's files, expiring old
   artifacts, or totalling a run's storage is a prefix operation rather than a
   join against the database.
 * **The kind is in the path.** A lifecycle rule can expire raw HTML after 30
@@ -46,8 +48,8 @@ _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 class ArtifactKind(StrEnum):
     """What an artifact is, which determines where it lives and how it expires.
 
-    The six kinds are the ones the platform actually writes; a seventh should be
-    added here rather than by passing a string through.
+    These are the kinds the platform actually writes; another should be added
+    here rather than by passing a string through.
     """
 
     #: The unmodified HTML of a fetched page, kept so an extraction can be
@@ -56,6 +58,10 @@ class ArtifactKind(StrEnum):
     RAW_HTML = "raw-html"
     #: A source document downloaded as a PDF.
     PDF = "pdf"
+    #: A Markdown file, byte for byte as it arrived.
+    MARKDOWN = "markdown"
+    #: A plain-text file, byte for byte as it arrived.
+    TEXT = "text"
     #: The normalised, boilerplate-stripped form of a document.
     DOCUMENT = "document"
     #: A rendered capture of a page, for evidence a reader can see.
@@ -73,6 +79,10 @@ class ArtifactKind(StrEnum):
 DEFAULT_CONTENT_TYPES: dict[ArtifactKind, str] = {
     ArtifactKind.RAW_HTML: "text/html; charset=utf-8",
     ArtifactKind.PDF: "application/pdf",
+    # No charset: the bytes are kept as they arrived, in whatever encoding the
+    # uploader declared, and a default here would misstate it.
+    ArtifactKind.MARKDOWN: "text/markdown",
+    ArtifactKind.TEXT: "text/plain",
     ArtifactKind.DOCUMENT: "application/json",
     ArtifactKind.SCREENSHOT: "image/png",
     ArtifactKind.REPORT: "text/markdown; charset=utf-8",
@@ -84,6 +94,8 @@ DEFAULT_CONTENT_TYPES: dict[ArtifactKind, str] = {
 EXTENSIONS: dict[ArtifactKind, str] = {
     ArtifactKind.RAW_HTML: ".html",
     ArtifactKind.PDF: ".pdf",
+    ArtifactKind.MARKDOWN: ".md",
+    ArtifactKind.TEXT: ".txt",
     ArtifactKind.DOCUMENT: ".json",
     ArtifactKind.SCREENSHOT: ".png",
     ArtifactKind.REPORT: ".md",
@@ -91,6 +103,7 @@ EXTENSIONS: dict[ArtifactKind, str] = {
 }
 
 RUNS_PREFIX = "runs"
+UPLOADS_PREFIX = "uploads"
 EVALUATIONS_PREFIX = "evaluations"
 
 
@@ -130,6 +143,23 @@ def evaluation_artifact_key(*, evaluation_id: UUID, name: str) -> str:
     their own top-level prefix rather than being forced into the run layout.
     """
     return validate_key(f"{EVALUATIONS_PREFIX}/{evaluation_id}/{name}")
+
+
+def user_uploads_prefix(user_id: UUID) -> str:
+    """Everything one user uploaded. The unit of deletion for their files."""
+    return f"{UPLOADS_PREFIX}/{user_id}/"
+
+
+def upload_artifact_key(*, user_id: UUID, kind: ArtifactKind, name: str) -> str:
+    """The key for a file a user uploaded, before any run uses it.
+
+    Scoped by user rather than by run, because an upload precedes the runs that
+    use it - they name it in ``document_ids`` when they are created - and may be
+    attached to several. A run that ingests it copies the bytes under its own
+    prefix, so deleting a run never removes a user's file and deleting a file
+    never breaks a finished run.
+    """
+    return validate_key(f"{UPLOADS_PREFIX}/{user_id}/{kind.value}/{name}")
 
 
 def validate_key(key: str) -> str:

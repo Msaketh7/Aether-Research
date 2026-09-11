@@ -41,6 +41,10 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export const SOURCE_TYPES = ['web', 'sec', 'arxiv', 'github', 'upload'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
+/** What an uploaded or fetched document was read as (Phase 7). */
+export const DOCUMENT_FORMATS = ['pdf', 'html', 'markdown', 'text'] as const;
+export type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
+
 export const CLAIM_TYPES = ['quantitative', 'qualitative', 'event'] as const;
 export type ClaimType = (typeof CLAIM_TYPES)[number];
 

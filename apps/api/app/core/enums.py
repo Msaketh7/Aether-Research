@@ -65,6 +65,20 @@ class SourceType(StrEnum):
     UPLOAD = "upload"
 
 
+class DocumentFormat(StrEnum):
+    """What an ingested file was read as (Phase 7).
+
+    Four formats, each with its own reader. The upload endpoint refuses anything
+    else by name rather than guessing, and the check constraint on ``uploads``
+    holds the same list.
+    """
+
+    PDF = "pdf"
+    HTML = "html"
+    MARKDOWN = "markdown"
+    TEXT = "text"
+
+
 class ClaimType(StrEnum):
     QUANTITATIVE = "quantitative"
     QUALITATIVE = "qualitative"

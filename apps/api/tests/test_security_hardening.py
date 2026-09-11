@@ -108,6 +108,12 @@ def test_specific_origins_are_still_accepted(monkeypatch):
 
 # --- no unguarded escape hatches ------------------------------------------
 
+#: The one module allowed to start a process (ADR 0012). It runs this
+#: repository's own parser module with a fixed argv, no shell and a scrubbed
+#: environment - to *contain* hostile documents, the opposite of an escape
+#: hatch. test_the_one_process_launch_is_fixed_and_isolated holds it to that.
+SANDBOXED_PROCESS_MODULES = frozenset({"retrieval/isolation.py"})
+
 
 def test_production_code_contains_no_asserts():
     """`python -O` strips `assert`, so an assert is not a check - it is a check
@@ -135,14 +141,40 @@ def test_no_dynamic_execution_primitives_in_production_code():
 
     app_root = pathlib.Path(__file__).resolve().parents[1] / "app"
     forbidden = re.compile(r"\b(eval|exec)\s*\(|\bpickle\.|subprocess\.|os\.system\(|shell=True")
+    # The sandboxed parser may start a process; nothing else may. Exempted by
+    # file rather than by pattern, so a second use anywhere still fails - and
+    # eval, exec, pickle and shell=True stay forbidden in that file too.
+    without_subprocess = re.compile(r"\b(eval|exec)\s*\(|\bpickle\.|os\.system\(|shell=True")
     offenders = [
         f"{path.relative_to(app_root)}:{number}"
         for path in app_root.rglob("*.py")
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-        if forbidden.search(line)
+        if (
+            without_subprocess
+            if path.relative_to(app_root).as_posix() in SANDBOXED_PROCESS_MODULES
+            else forbidden
+        ).search(line)
     ]
 
     assert offenders == []
+
+
+def test_the_one_process_launch_is_fixed_and_isolated():
+    """What the exemption above relies on, asserted rather than trusted: the
+    parser runs this repository's own module, in isolated mode, with an argv
+    that nothing a caller supplies can change."""
+    import sys
+
+    from app.retrieval.isolation import WORKER_MODULE, IsolatedParser
+    from app.retrieval.parsers import ParseLimits
+
+    parser = IsolatedParser(
+        limits=ParseLimits(max_pdf_pages=1, max_chars=1),
+        timeout_seconds=1.0,
+        max_memory_bytes=1,
+        max_concurrent=1,
+    )
+    assert parser.command == (sys.executable, "-I", "-m", WORKER_MODULE)
 
 
 def test_settings_are_the_only_reader_of_the_environment():
@@ -173,6 +205,11 @@ def test_every_declared_secret_is_a_secret_str():
 
     for name, field in Settings.model_fields.items():
         if not any(marker in name for marker in secret_ish):
+            continue
+        # A number cannot carry a credential: `chunk_size_tokens` counts
+        # tokens, it is not one. Only a field that can hold text must be a
+        # SecretStr.
+        if field.annotation in (int, float, bool):
             continue
         annotation = str(field.annotation)
         if SecretStr.__name__ not in annotation:

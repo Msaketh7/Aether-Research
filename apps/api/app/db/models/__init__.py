@@ -11,6 +11,7 @@ from app.db.models.report import CitationRow, ReportRow, ReportSectionRow
 from app.db.models.research import ResearchProjectRow, ResearchRunRow, ResearchTaskRow
 from app.db.models.source import DocumentChunkRow, DocumentRow, SourceRow
 from app.db.models.trace import AgentRunRow, LlmCallRow, ToolCallRow
+from app.db.models.upload import ResearchRunUploadRow, UploadRow
 from app.db.models.user import SessionRow, UserRow
 
 __all__ = [
@@ -28,9 +29,11 @@ __all__ = [
     "ReportSectionRow",
     "ResearchProjectRow",
     "ResearchRunRow",
+    "ResearchRunUploadRow",
     "ResearchTaskRow",
     "SessionRow",
     "SourceRow",
     "ToolCallRow",
+    "UploadRow",
     "UserRow",
 ]

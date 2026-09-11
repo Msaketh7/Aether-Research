@@ -141,6 +141,17 @@ the client. Production secrets come from AWS Secrets Manager.
 caps, parsing in a resource-limited path, uploads stored in S3 and never
 executed, and a parse timeout that classifies rather than crashes.
 
+_Implemented in Phase 7 (ADR 0012)._ The declared type must agree with the bytes
+before anything is stored, and a binary labelled as text is refused by name. The
+size ceiling is enforced while the upload is read, not after. Each document is
+parsed in a fresh child process that is killed at a deadline, inherits only an
+allowlist of operating-system variables (no API keys, no database URL), refuses
+Python-level network access, and on POSIX runs under address-space and CPU
+ceilings. Page, character and chunk caps bound the work per document, and HTML
+uploads get the same hidden-markup stripping as fetched pages (section 3.1).
+Residual: the network refusal is Python-level, and Windows development machines
+have no resource ceiling, only the deadline.
+
 ### 3.7 Session and transport (boundaries 1, 2)
 
 Hashed session tokens at rest, rotation on privilege change, revocation list

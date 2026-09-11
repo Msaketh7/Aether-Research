@@ -37,10 +37,11 @@ DESCRIPTION = """
 Autonomous multi-agent research: decomposition, parallel retrieval, evidence
 extraction, contradiction detection and citation-validated reports.
 
-**This build is Phase 3 (data layer).** The API surface, validation,
-authorisation, error contract, progress stream and Postgres persistence are
-real. There is no worker consuming the queue yet, so a created run stays
-`queued`, and endpoints for data a run has not produced return empty results or
+**This build is Phase 7 (document ingestion).** The API surface, validation,
+authorisation, error contract, progress stream, Postgres persistence and document
+uploads are real. There is no worker consuming the queue yet, so a created run
+stays `queued`, an uploaded document is stored but not yet ingested into a run,
+and endpoints for data a run has not produced return empty results or
 `not_implemented` rather than fabricated content.
 """.strip()
 
@@ -124,7 +125,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=resolved.cors_allow_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "Last-Event-ID", "X-Aether-User"],
+        # Content-Disposition carries an upload's filename (POST /files).
+        allow_headers=[
+            "Content-Type",
+            "Content-Disposition",
+            "Authorization",
+            "Last-Event-ID",
+            "X-Aether-User",
+        ],
         expose_headers=[REQUEST_ID_HEADER],
         max_age=600,
     )

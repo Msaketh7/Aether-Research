@@ -22,6 +22,8 @@ from app.core.enums import ResearchMode, RunStatus, TaskPriority, TaskStatus
 MIN_QUESTION_LENGTH = 15
 MAX_QUESTION_LENGTH = 2000
 MAX_DOMAINS = 10
+#: Uploaded documents one run may be created with.
+MAX_DOCUMENTS = 10
 MIN_DEPTH = 1
 MAX_DEPTH = 5
 
@@ -52,8 +54,16 @@ class CreateResearchRequest(BaseModel):
     domains: list[str] = Field(default_factory=list, max_length=MAX_DOMAINS)
     date_range_start: date | None = None
     date_range_end: date | None = None
-    document_ids: list[UUID] = Field(default_factory=list)
+    #: Ids from ``POST /files``. Checked against the caller's uploads when the
+    #: run is created and recorded with it; ingested when the run executes.
+    document_ids: list[UUID] = Field(default_factory=list, max_length=MAX_DOCUMENTS)
     parent_run_id: UUID | None = None
+
+    @field_validator("document_ids")
+    @classmethod
+    def _dedupe_documents(cls, value: list[UUID]) -> list[UUID]:
+        """The same upload named twice is one attachment, not an error."""
+        return list(dict.fromkeys(value))
 
     @field_validator("question")
     @classmethod

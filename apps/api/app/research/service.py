@@ -22,15 +22,16 @@ from app.core.errors import (
     RunNotCancellable,
     RunNotFound,
     TooManyConcurrentRuns,
+    ValidationFailed,
 )
 from app.core.ids import new_id
 from app.core.logging import get_logger
-from app.core.pagination import Page, PageParams, decode_cursor, encode_cursor
+from app.core.pagination import Page, PageParams, decode_cursor_id, encode_cursor
 from app.evidence.schemas import EvidenceResponse
 from app.reports.schemas import ReportResponse
 from app.research.activity import ActivityResponse
 from app.research.events import EventBroker, ResearchEvent, ResearchEventType
-from app.research.repository import ResearchRepository, utcnow
+from app.research.repository import ResearchRepository, UploadAttachments, utcnow
 from app.research.schemas import (
     CreateResearchRequest,
     CreateResearchResponse,
@@ -56,11 +57,13 @@ class ResearchService:
         self,
         *,
         repository: ResearchRepository,
+        uploads: UploadAttachments,
         queue: JobQueue,
         broker: EventBroker,
         settings: Settings,
     ) -> None:
         self._repository = repository
+        self._uploads = uploads
         self._queue = queue
         self._broker = broker
         self._settings = settings
@@ -83,6 +86,24 @@ class ResearchService:
             parent = await self._repository.get(request.parent_run_id, user_id=user_id)
             if parent is None:
                 raise RunNotFound("The run this follow-up refers to does not exist.")
+
+        if request.document_ids:
+            # Until Phase 7 these ids were accepted and silently dropped - the
+            # failure the request schema's extra="forbid" exists to prevent,
+            # reached by a field that *was* declared.
+            owned = await self._uploads.owned_ids(user_id, request.document_ids)
+            missing = [upload_id for upload_id in request.document_ids if upload_id not in owned]
+            if missing:
+                # Another user's upload is reported exactly like one that does
+                # not exist, so an id cannot be probed for existence.
+                raise ValidationFailed(
+                    "Some attached documents could not be found.",
+                    details={
+                        "document_ids": [
+                            f"No uploaded document with id {upload_id}." for upload_id in missing
+                        ]
+                    },
+                )
 
         now = utcnow()
         run = ResearchRun(
@@ -112,6 +133,7 @@ class ResearchService:
         )
 
         await self._repository.add(run)
+        await self._uploads.attach(run.id, request.document_ids)
         # Commit before dispatching. Two things depend on this ordering: a
         # worker can never dequeue an id that does not resolve yet, and a
         # failure to dispatch leaves a durable `queued` run rather than
@@ -201,7 +223,7 @@ class ResearchService:
     ) -> Page[ResearchRunSummary]:
         after_id: UUID | None = None
         if params.cursor:
-            after_id = UUID(decode_cursor(params.cursor))
+            after_id = decode_cursor_id(params.cursor)
 
         runs, has_more = await self._repository.list_for_user(
             user_id,

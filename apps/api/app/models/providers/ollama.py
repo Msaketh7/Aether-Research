@@ -144,7 +144,14 @@ class OllamaProvider:
 
     async def embed(self, texts: Sequence[str], *, model: str) -> EmbeddingResult:
         started = time.perf_counter()
-        body = await self._post("/api/embed", {"model": model, "input": list(texts)}, model=model)
+        # `truncate: false` turns an over-long input into an error. Ollama's
+        # default is to cut it to the context window and embed the prefix, which
+        # would store a vector for text the chunk no longer matches - silently.
+        body = await self._post(
+            "/api/embed",
+            {"model": model, "input": list(texts), "truncate": False},
+            model=model,
+        )
         vectors = body.get("embeddings") or []
         return EmbeddingResult(
             vectors=vectors,

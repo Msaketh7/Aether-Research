@@ -64,6 +64,11 @@ class RunNotFound(NotFound):
     message = "No research run with that id."
 
 
+class UploadNotFound(NotFound):
+    code = "upload_not_found"
+    message = "No uploaded document with that id."
+
+
 class ReportNotReady(NotFound):
     """Distinct from `run_not_found`: the run exists, the report does not yet.
 

@@ -40,13 +40,17 @@ api-lint: ## Format check, lint and typecheck the API
 api-test: ## Run the API test suite
 	cd $(API) && uv run pytest
 
+# Migrations form two branches: `core` (relational) and `vector` (needs
+# pgvector). See apps/api/migrations/versions/0003_document_ingestion.py.
+HEAD ?= core@head
+
 .PHONY: migrate
-migrate: ## Apply database migrations
-	cd $(API) && uv run alembic upgrade head
+migrate: ## Apply database migrations (both branches)
+	cd $(API) && uv run alembic upgrade heads
 
 .PHONY: migration
-migration: ## Autogenerate a migration from the models: make migration m="add x"
-	cd $(API) && uv run alembic revision --autogenerate -m "$(m)"
+migration: ## Autogenerate a migration: make migration m="add x" [HEAD=vector@head]
+	cd $(API) && uv run alembic revision --autogenerate --head $(HEAD) -m "$(m)"
 
 .PHONY: migrate-check
 migrate-check: ## Verify migrations are reversible against a throwaway database

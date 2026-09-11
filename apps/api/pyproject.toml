@@ -29,6 +29,9 @@ dependencies = [
   "types-pyyaml>=6.0.12",
   "trafilatura>=2.0.0",
   "defusedxml>=0.7.1",
+  "llama-index-core>=0.14.24",
+  "pypdf>=6.18.0",
+  "py3langid>=0.4.0",
 ]
 
 [dependency-groups]
@@ -100,6 +103,11 @@ exclude = ["^migrations/"]
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# Ships no type information. Used behind one function in app/retrieval/language.py.
+module = ["py3langid.*"]
+ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
 # Tests

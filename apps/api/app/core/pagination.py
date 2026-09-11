@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +34,21 @@ def decode_cursor(cursor: str) -> str:
     try:
         return base64.urlsafe_b64decode(cursor + padding).decode()
     except (binascii.Error, UnicodeDecodeError) as exc:
+        raise ValidationFailed(
+            "That pagination cursor is not valid.",
+            details={"cursor": ["Malformed cursor."]},
+        ) from exc
+
+
+def decode_cursor_id(cursor: str) -> UUID:
+    """The id inside a keyset cursor. A cursor holding anything else is a 422.
+
+    Found in Phase 7: base64 of any string is a well-formed cursor, and it used
+    to reach ``UUID()`` unguarded and surface as a 500.
+    """
+    try:
+        return UUID(decode_cursor(cursor))
+    except ValueError as exc:
         raise ValidationFailed(
             "That pagination cursor is not valid.",
             details={"cursor": ["Malformed cursor."]},

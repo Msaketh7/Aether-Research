@@ -14,7 +14,7 @@ export interface CreateResearchRequest {
   domains?: string[];
   date_range_start?: IsoDate | null;
   date_range_end?: IsoDate | null;
-  /** Ids of documents already uploaded via POST /files. */
+  /** Ids of documents already uploaded via POST /files. At most 10. */
   document_ids?: Uuid[];
   /** Set for follow-up runs; the planner is seeded with this run's evidence. */
   parent_run_id?: Uuid | null;

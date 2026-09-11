@@ -39,6 +39,8 @@ from app.storage.keys import (
     kind_prefix,
     run_artifact_key,
     run_prefix,
+    upload_artifact_key,
+    user_uploads_prefix,
     validate_key,
 )
 from app.storage.s3 import S3ObjectStorage
@@ -98,5 +100,7 @@ __all__ = [
     "kind_prefix",
     "run_artifact_key",
     "run_prefix",
+    "upload_artifact_key",
+    "user_uploads_prefix",
     "validate_key",
 ]

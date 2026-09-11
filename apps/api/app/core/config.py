@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # apps/api/app/core/config.py -> repository root
@@ -158,6 +159,35 @@ class Settings(BaseSettings):
     allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     blocked_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # --- document ingestion (Phase 7, ADR 0012) ---------------------------
+    #: Largest file the upload endpoint accepts, enforced while the body is
+    #: read rather than after it is buffered. ``None`` means the artifact
+    #: ceiling: an upload that could not be stored must not be accepted.
+    max_upload_bytes: int | None = None
+
+    #: Each document is parsed in a child process that is killed at this
+    #: deadline (threat model 3.6). Not a retry budget: a document that hangs
+    #: the parser once hangs it every time.
+    parse_timeout_seconds: float = 60.0
+    #: Parser processes one worker may run at once. Parsing is CPU-bound, so
+    #: more than the core count only adds contention.
+    max_concurrent_parses: int = 2
+    #: Address-space ceiling for the parser process, where the OS has one.
+    parse_max_memory_bytes: int = 2 * 1024 * 1024 * 1024
+    max_pdf_pages: int = 1000
+    #: Normalised characters per document. Bounds chunking time - linear in
+    #: size, but slowest on unbroken text - and the embedding bill.
+    max_document_chars: int = 2_000_000
+
+    #: Chunk size and overlap in cl100k tokens. Why these values, and how they
+    #: will be measured rather than asserted, is recorded in ADR 0012.
+    chunk_size_tokens: int = 512
+    chunk_overlap_tokens: int = 64
+    max_chunks_per_document: int = 2000
+    #: Texts per embedding request. Larger batches amortise the round trip;
+    #: smaller ones lose less work to a failure.
+    embedding_batch_size: int = 64
+
     @field_validator("allowed_domains", "blocked_domains", mode="before")
     @classmethod
     def _split_domains(cls, value: object) -> object:
@@ -201,6 +231,43 @@ class Settings(BaseSettings):
             )
         return value
 
+    @model_validator(mode="after")
+    def _check_ingestion_bounds(self) -> Settings:
+        """Refuse ingestion limits that contradict each other.
+
+        Each of these is a deployment that starts, accepts work, and then fails
+        on it: an upload ceiling above the artifact ceiling accepts files that
+        cannot be stored, and an overlap as large as the chunk never advances.
+        """
+        if self.max_upload_bytes is not None and not (
+            0 < self.max_upload_bytes <= self.max_artifact_bytes
+        ):
+            raise ValueError(
+                "MAX_UPLOAD_BYTES must be positive and cannot exceed MAX_ARTIFACT_BYTES: "
+                "an accepted upload could not be stored."
+            )
+        if not 0 <= self.chunk_overlap_tokens < self.chunk_size_tokens:
+            raise ValueError(
+                "CHUNK_OVERLAP_TOKENS must be at least 0 and smaller than CHUNK_SIZE_TOKENS."
+            )
+        for name in (
+            "max_concurrent_parses",
+            "max_pdf_pages",
+            "max_document_chars",
+            "max_chunks_per_document",
+            "embedding_batch_size",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name.upper()} must be at least 1.")
+        if self.parse_timeout_seconds <= 0:
+            raise ValueError("PARSE_TIMEOUT_SECONDS must be positive.")
+        return self
+
+    @property
+    def upload_limit_bytes(self) -> int:
+        """The upload ceiling actually enforced."""
+        return self.max_upload_bytes or self.max_artifact_bytes
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
@@ -231,3 +298,31 @@ def get_settings() -> Settings:
     can clear the cache to swap configuration deterministically.
     """
     return Settings()
+
+
+#: Operating-system variables the document parser's child process inherits
+#: (ADR 0012). An allowlist, not a denylist: a secret added to the deployment
+#: later is withheld from the parser without anyone having to remember it here.
+PARSER_ENVIRONMENT_ALLOWLIST = (
+    "PATH",
+    "SYSTEMROOT",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+)
+
+
+def parser_environment() -> dict[str, str]:
+    """The environment for the parser child process: the allowlist, nothing else.
+
+    Here rather than beside the parser because this module is the one place
+    that reads the process environment, so auditing what leaves the process
+    means reading one file. It reads in order to withhold: the worker's
+    environment carries the database URL and every provider key, and code
+    running in the parser should find none of them.
+    """
+    return {name: os.environ[name] for name in PARSER_ENVIRONMENT_ALLOWLIST if name in os.environ}

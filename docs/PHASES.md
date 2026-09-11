@@ -20,8 +20,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 4   | Storage                    | Done     |
 | 5   | Model abstraction          | Done     |
 | 6   | Web research tools         | Done     |
-| 7   | Document ingestion         | **Next** |
-| 8   | Retrieval                  | Planned  |
+| 7   | Document ingestion         | Done     |
+| 8   | Retrieval                  | **Next** |
 | 9   | LangGraph agent system     | Planned  |
 | 10  | Agents                     | Planned  |
 | 11  | Evidence system            | Planned  |
@@ -239,14 +239,83 @@ Verified end to end against the live internet as well as against mocks: a real
 130 KB page fetched over real DNS and TLS with robots.txt honoured, extracted to
 4.7 KB of article text, while the same client refused the metadata endpoint.
 
-## Phase 7 — Document ingestion · **Next**
+## Phase 7 — Document ingestion · **Done**
 
 Upload, parsing, metadata extraction, chunking, embedding, indexing — using
 LlamaIndex where appropriate (ADR 0003). Support PDF, HTML, Markdown, TXT.
 pgvector initially. Store document, chunk, embedding, metadata. Metadata
 filtering.
 
-## Phase 8 — Retrieval · Planned
+_Landed:_ ADR 0012. `app/retrieval/` holds the pipeline, `POST`/`GET /files`
+the upload surface, and `document_ids` on `POST /research` now attaches uploads
+to a run. Uploads belong to users; each attached upload is ingested into the
+run's own corpus as an ordinary `upload` source, so no provenance chain crosses
+users.
+
+The pipeline: the declared type checked against the bytes; parsing in a
+killable child process (`pypdf`; the Phase 6 readability extractor for HTML, so
+hidden markup is stripped for uploads too; strict decoding for Markdown and
+text); language detection (`py3langid`, "unknown" below 0.80 confidence);
+LlamaIndex chunking at 512/64 tokens with every chunk's offsets computed and
+verified; then two writes. Source, document and chunks commit first, and the
+vectors follow a batch per transaction, so a failed embedding call costs one
+batch and the retry embeds only what is missing. Idempotent at every step,
+including two deliveries of one job at the same moment (a transaction advisory
+lock). `ChunkFilter` narrows a run's chunks by source type, format, language,
+page range, section, publication date and embedding state, using the chunk
+metadata's GIN index where it can.
+
+The parser child inherits only an allowlist of operating-system variables (no
+API keys, no database URL), has Python-level network access refused, is killed
+at a deadline, and on POSIX runs under address-space and CPU ceilings. It is
+the one module permitted to start a process: the security tests exempt it by
+file, keep `eval`/`exec`/`pickle`/`shell=True` forbidden there too, and assert
+its argv is fixed.
+
+Migrations now form two branches: `core` (relational: 0003) and `vector` (needs
+pgvector: 0002, 0004). Chaining relational work after 0002 would have made the
+whole schema depend on the extension; as branches, the relational schema stays
+buildable and testable without it. `alembic upgrade heads` applies both.
+
+165 new tests, 577 total; the three that need pgvector skip locally and run in
+CI. Verified on real input as well as in the suite: the
+production path, isolated parser included, ingested this repository's TDD,
+README and threat model (153 KB of Markdown with tables, code fences and deep
+heading trees) into 147 chunks, every offset exact and none over 511 tokens.
+
+Eight defects found while building and running it:
+
+- The embedding column was `vector(1536)`, but the only declared embedding model
+  produces 768 dimensions, so no vector could ever have been stored. Migration
+  0004 resizes it, and the pipeline checks the model's width at startup.
+- `documents.content_hash` was unique across the whole database. The same PDF
+  in two users' runs collided, and a shared row would have let one user's
+  deletion cascade into another's evidence. It is now unique per source.
+- `POST /research` accepted `document_ids` and silently dropped them.
+- `gateway.embed()` had no gateway timeout and no retry, and a failed call left
+  no record. It now retries like generation and records every attempt. It never
+  fails over, because vectors from two models are not comparable.
+- Ollama truncates an over-long embedding input by default, which would store a
+  vector for text the chunk no longer matches. `truncate: false` makes it an
+  error.
+- LlamaIndex places each chunk at the first match after the previous one. In
+  repetitive text that piles chunks at the start and leaves the rest uncovered
+  (caught by the coverage check on the unbroken-text test). Chunks are now
+  placed by alignment against the window a consecutive chunk must fall in.
+- LlamaIndex joins heading paths with "/", so a heading naming a directory came
+  back as several levels (caught by ingesting the TDD). Section labels are now
+  built from the headings themselves.
+- A cursor that is valid base64 but not an id reached `UUID()` unguarded and
+  returned a 500, on `GET /research` as well as the new `GET /files`.
+
+Stated rather than implied: nothing ingests at runtime until the worker exists
+(Phase 13). `GET /research/{id}/sources` stays empty until relevance and
+credibility are measured, because the `Source` DTO would otherwise display the
+schema's placeholder 0.50 as a score. The vector-writing path runs in CI only,
+since pgvector is not installed on this machine. No embedding model has been run
+live: Ollama is installed but has not pulled `nomic-embed-text`.
+
+## Phase 8 — Retrieval · **Next**
 
 Hybrid retrieval: dense vector search, BM25/lexical, metadata filtering, rank
 fusion, reranking. A `Retriever` interface with `retrieve()`,

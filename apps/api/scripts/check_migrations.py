@@ -41,10 +41,12 @@ def main() -> int:
             print("No Postgres available; cannot verify migrations.", file=sys.stderr)
             return 3
 
-        target = "head" if database.has_pgvector else "0001_core_schema"
-        if target != "head":
+        # Two branches (see 0003_document_ingestion): `heads` applies both, and
+        # `core@head` the relational line alone, which needs no extension.
+        target = "heads" if database.has_pgvector else "core@head"
+        if target != "heads":
             print(
-                "pgvector is unavailable here, so 0002_pgvector_embeddings is not "
+                "pgvector is unavailable here, so the vector line (0002, 0004) is not "
                 "exercised. Run against the pgvector/pgvector image to cover it.",
                 file=sys.stderr,
             )
@@ -72,8 +74,8 @@ def main() -> int:
         problems.append(f"downgrade left tables behind: {remaining}")
     if first != second:
         problems.append(f"re-upgrade produced a different schema: {set(first) ^ set(second)}")
-    if len(first) < 19:
-        problems.append(f"expected at least 19 tables, found {len(first)}")
+    if len(first) < 21:
+        problems.append(f"expected at least 21 tables, found {len(first)}")
 
     for problem in problems:
         print(f"FAIL: {problem}", file=sys.stderr)

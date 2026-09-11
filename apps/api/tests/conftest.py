@@ -28,7 +28,9 @@ from httpx import ASGITransport, AsyncClient
 from app.auth.principal import DEV_USER_HEADER, DEV_USER_ID
 from app.core.config import Settings, get_settings
 from app.db.base import Base
+from app.db.session import Database
 from app.main import create_app
+from app.storage import ObjectStorage, build_object_storage
 from tests.support.postgres import SKIP_REASON, ProvisionedDatabase, provision_database
 from tests.support.s3 import S3Server, run_s3_server
 
@@ -36,9 +38,10 @@ BASE_URL = "http://testserver"
 API = "/api/v1"
 API_ROOT = Path(__file__).resolve().parents[1]
 
-#: The revision to migrate to when pgvector is unavailable. The core schema
-#: stands on its own; only the embedding column needs the extension.
-CORE_SCHEMA_REVISION = "0001_core_schema"
+#: What to migrate to when pgvector is unavailable: the head of the relational
+#: line. Migrations form two branches (see 0003_document_ingestion); only the
+#: ``vector`` line needs the extension.
+CORE_SCHEMA_TARGET = "core@head"
 
 
 def _apply_migrations(database: ProvisionedDatabase) -> None:
@@ -55,7 +58,7 @@ def _apply_migrations(database: ProvisionedDatabase) -> None:
     os.environ["DATABASE_URL"] = database.url
     get_settings.cache_clear()
     try:
-        command.upgrade(config, "head" if database.has_pgvector else CORE_SCHEMA_REVISION)
+        command.upgrade(config, "heads" if database.has_pgvector else CORE_SCHEMA_TARGET)
     finally:
         if previous is None:
             os.environ.pop("DATABASE_URL", None)
@@ -165,6 +168,22 @@ async def tolerant_client(settings: Settings) -> AsyncIterator[AsyncClient]:
         app.router.lifespan_context(app),
     ):
         yield http
+
+
+@pytest.fixture
+async def database(settings: Settings) -> AsyncIterator[Database]:
+    """A handle on the test database, for tests that read or write rows directly."""
+    handle = Database(settings)
+    try:
+        yield handle
+    finally:
+        await handle.dispose()
+
+
+@pytest.fixture
+def artifact_store(settings: Settings) -> ObjectStorage:
+    """The object store the app uses under these settings: same root, same bytes."""
+    return build_object_storage(settings)
 
 
 @pytest.fixture(scope="session")

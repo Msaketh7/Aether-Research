@@ -10,6 +10,7 @@ export * from './enums';
 export * from './user';
 export * from './research';
 export * from './source';
+export * from './files';
 export * from './evidence';
 export * from './report';
 export * from './activity';

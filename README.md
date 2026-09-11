@@ -452,20 +452,26 @@ aether-research/
 
 ## Current status
 
-**Phases 0-3 are complete.** The repository, documentation and local
-infrastructure exist; the frontend is a working product; it talks to a real
-FastAPI backend; and that backend persists to PostgreSQL. Switching the
-frontend between fixtures and the live API is one environment variable, with no
-code change ([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
+**Phases 0-7 of 25 are complete** ([build plan](docs/PHASES.md)). The frontend
+is a working product; it talks to a real FastAPI backend that persists to
+PostgreSQL; and behind it are object storage, a provider-neutral model gateway,
+six research tools behind an SSRF guard, and a document ingestion pipeline.
+Switching the frontend between fixtures and the live API is one environment
+variable, with no code change
+([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
 
-| Phase | Scope                                                                                                        | Status  |
-| ----- | ------------------------------------------------------------------------------------------------------------ | ------- |
-| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                              | Done    |
-| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                       | Done    |
-| 2     | Backend foundation: FastAPI, typed settings, error contract, authorisation, health probes, research API, SSE | Done    |
-| 3     | Data layer: 19-table PostgreSQL schema, Alembic migrations, pgvector, repositories, pooling                  | Done    |
-| 4     | Object storage: S3-compatible abstraction, MinIO locally                                                     | Next    |
-| 5+    | Model gateway, research tools, RAG, LangGraph agents, evaluation, observability, load testing, deployment    | Planned |
+| Phase | Scope                                                                                                             | Status  |
+| ----- | ----------------------------------------------------------------------------------------------------------------- | ------- |
+| 0     | Monorepo, tooling, local stack, ADRs, architecture/threat-model/evaluation docs                                   | Done    |
+| 1     | Frontend product prototype against a mock API, unit + end-to-end tests                                            | Done    |
+| 2     | Backend foundation: FastAPI, typed settings, error contract, authorisation, health probes, research API, SSE      | Done    |
+| 3     | Data layer: PostgreSQL schema, Alembic migrations, pgvector, repositories, pooling                                | Done    |
+| 4     | Object storage: S3-compatible abstraction, MinIO locally, a filesystem backend for tests                          | Done    |
+| 5     | Model gateway: Anthropic, OpenAI and Ollama behind one interface, with routing, retry, failover and a call ledger | Done    |
+| 6     | Research tools: search, fetch, parse, SEC, arXiv and GitHub behind an SSRF guard and an untrusted-content type    | Done    |
+| 7     | Document ingestion: uploads, isolated parsing, offset-exact chunking, embeddings, metadata filtering              | Done    |
+| 8     | Hybrid retrieval: vector and lexical search, rank fusion, reranking, a retrieval benchmark                        | Next    |
+| 9+    | LangGraph agents, evidence, reports, workers, evaluation, observability, load testing, deployment                 | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -478,10 +484,12 @@ In **live mode** the same UI runs against the real stack: runs are validated,
 authorised, written to Postgres and queued, `POST /research` returns `202`, the
 SSE stream is real, and a run survives a restart of the API process.
 
-**There is no worker yet**, so a created run stays `queued`. The tables for
-sources, evidence, reports and traces exist and are fully constrained, but
-nothing writes to them until Phases 6-12, and the endpoints return empty
-collections rather than inventing content. Capabilities whose phase has not
+**There is no worker yet**, so a created run stays `queued`, and a document
+attached to a run is stored but not yet ingested: the ingestion pipeline exists
+and is tested end to end, and the worker that runs it when a run starts is
+Phase 13. The tables for evidence, reports and traces exist and are fully
+constrained, but nothing writes to them until Phases 9-12, and the endpoints
+return empty collections rather than inventing content. Capabilities whose phase has not
 landed return `501 not_implemented`, so "not built yet" is always
 distinguishable from "no results".
 
