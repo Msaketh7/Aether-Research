@@ -19,6 +19,11 @@ Embeddings take a chunk's raw characters, not the delimited ``for_prompt()``
 form (ADR 0011). An embedding model has no instruction channel to inject into,
 and wrapping each chunk in the standing data notice would make every vector
 partly a vector of the notice.
+
+The one thing that *is* added is the model's own task prefix, and the gateway
+adds it from the registry (Phase 8). ``purpose`` is how a caller says which one:
+a stored passage and a question asked of it want different prefixes on an
+asymmetric model, and getting that wrong costs recall without failing anything.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from collections.abc import Sequence
 from uuid import UUID
 
 from app.db.models.source import EMBEDDING_DIMENSIONS
-from app.models import LLMGateway
+from app.models import EmbeddingPurpose, LLMGateway
 from app.retrieval.errors import EmbeddingDimensionMismatch, EmbeddingResponseInvalid
 
 
@@ -73,7 +78,13 @@ class ChunkEmbedder:
     def batch_size(self) -> int:
         return self._batch_size
 
-    async def embed(self, texts: Sequence[str], *, run_id: UUID | None = None) -> list[list[float]]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        purpose: EmbeddingPurpose = EmbeddingPurpose.DOCUMENT,
+        run_id: UUID | None = None,
+    ) -> list[list[float]]:
         """One vector per text, in order, each checked. At most ``batch_size`` texts."""
         if not texts:
             return []
@@ -82,7 +93,7 @@ class ChunkEmbedder:
                 f"At most {self._batch_size} texts per call; batch them before embedding."
             )
 
-        result = await self._gateway.embed(texts, run_id=run_id)
+        result = await self._gateway.embed(texts, purpose=purpose, run_id=run_id)
         vectors = list(result.vectors)
         if len(vectors) != len(texts):
             raise EmbeddingResponseInvalid(
@@ -111,3 +122,29 @@ class ChunkEmbedder:
                 )
             checked.append(values)
         return checked
+
+
+class QueryEmbedder:
+    """One vector for a query, from the embedder that produced the chunks.
+
+    Built from a ``ChunkEmbedder`` rather than from the gateway, and that is the
+    whole point of the class: a query vector is only meaningful in the space the
+    stored vectors occupy, so the two must come from the same model with the
+    same width checks. Composing them makes that structural instead of a
+    convention two call sites are expected to keep.
+
+    The one thing that differs is the task prefix, and the gateway applies it
+    from the registry - see ``EmbeddingPurpose``.
+    """
+
+    def __init__(self, embedder: ChunkEmbedder) -> None:
+        self._embedder = embedder
+
+    @property
+    def model_label(self) -> str:
+        """The ``document_chunks.embedding_model`` value a search may compare against."""
+        return self._embedder.model_label
+
+    async def embed(self, query: str, *, run_id: UUID | None = None) -> list[float]:
+        vectors = await self._embedder.embed([query], purpose=EmbeddingPurpose.QUERY, run_id=run_id)
+        return vectors[0]

@@ -31,7 +31,7 @@ import yaml
 
 from app.core.enums import LlmProvider
 from app.core.logging import get_logger
-from app.models.base import TokenUsage
+from app.models.base import EmbeddingPurpose, TokenUsage
 from app.models.errors import ModelNotConfigured
 
 logger = get_logger(__name__)
@@ -111,6 +111,19 @@ class ModelSpec:
     supports_token_counting: bool = False
     supports_embeddings: bool = False
     embedding_dimensions: int | None = None
+    #: Task prefixes for an asymmetric embedding model, prepended by the gateway
+    #: (see ``EmbeddingPurpose``). Empty for a symmetric model, which is why they
+    #: default to empty rather than to a guess: a prefix a model was not trained
+    #: with is noise added to every vector.
+    embedding_document_prefix: str = ""
+    embedding_query_prefix: str = ""
+
+    def embedding_prefix(self, purpose: EmbeddingPurpose) -> str:
+        return (
+            self.embedding_document_prefix
+            if purpose is EmbeddingPurpose.DOCUMENT
+            else self.embedding_query_prefix
+        )
 
     @property
     def is_priced(self) -> bool:
@@ -244,6 +257,8 @@ def _parse_spec(entry: Mapping[str, Any], source: Path) -> ModelSpec:
                 if entry.get("embedding_dimensions") is not None
                 else None
             ),
+            embedding_document_prefix=str(entry.get("embedding_document_prefix", "")),
+            embedding_query_prefix=str(entry.get("embedding_query_prefix", "")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Invalid model entry in {source}: {entry!r} ({exc})") from exc

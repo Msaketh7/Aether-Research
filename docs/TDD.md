@@ -1060,19 +1060,49 @@ document (a fetched page, or an upload attached to the run)
   created, under a transaction advisory lock, and a document is unique per
   (source, content hash). Re-ingesting the same content is a no-op, including
   when a job is delivered twice at once.
-- **Chunk size.** 512/64 is a documented default, not a measurement. Each chunk
-  records the settings that produced it, and Phase 8's retrieval benchmark
-  measures size against recall.
+- **Chunk size.** 512/64, now measured rather than assumed: Phase 8's benchmark
+  sweeps the size over a labelled corpus, and 512/64 ranks best of the three
+  sizes tried on the metrics that read order. Each chunk still records the
+  settings that produced it. The numbers, and what they are and are not worth,
+  are in `data/eval/retrieval/README.md`.
 
 ### 8.2 Retrieval
 
-- **Hybrid:** vector search (pgvector cosine, "by meaning") + BM25 / full-text
-  (`tsv`, "by keyword"), fused with Reciprocal Rank Fusion.
-- **Metadata filters:** `source_type`, `published_at` range, domain, run scope.
-- **Reranking:** a cross-encoder reranker re-scores the fused candidate set
-  (top ~50 → top ~8-12) by true relevance.
+```
+query
+  → embed it with the query prefix (asymmetric models want a different one
+    from the passages they are compared against)
+  → dense arm: pgvector cosine over chunks embedded by the same model
+  ‖ lexical arm: the generated `tsv` column, query terms OR-ed, ts_rank_cd
+  → fuse by reciprocal rank (k = 60, per-arm weights)
+  → rerank for diversity (MMR) → top ~8-12
+```
+
+- **Hybrid:** vector search (pgvector cosine, "by meaning") + Postgres
+  full-text (`tsv`, "by keyword"), fused with Reciprocal Rank Fusion. The arms
+  run concurrently, so a hybrid call costs the slower of the two.
+- **Lexical, not BM25.** `ts_rank_cd` over the generated column, with the
+  query's terms **OR-ed**: `websearch_to_tsquery` combines them with AND, which
+  means a natural-language question matches nothing. Fusion consumes ranks
+  rather than scores, so what this arm has to get right is the ordering.
+  Reasoning and the measurement are in ADR 0013.
+- **Metadata filters:** every filter in `ChunkFilter`, and both arms narrow
+  through one builder so a filter cannot be honoured by one and ignored by the
+  other. Run scope and `user_id` ownership are in the same WHERE clause.
+- **Reranking:** `Reranker` is the seam. What ships is **MMR**, a *diversity*
+  reranker, because the top of a fused list is full of near-duplicates. A
+  cross-encoder re-scores true relevance and is the right eventual answer for a
+  different problem; it drops in behind the same interface, and the benchmark
+  decides whether it earns its latency (ADR 0013).
+- **Honest emptiness:** an arm that could not run says so, with a reason. No
+  embedding model configured, nothing embedded yet, an arm weighted to zero -
+  each is a *skipped* arm on the result, never a quietly shorter list.
+- **Benchmarked:** `scripts/benchmark_retrieval.py` scores the strategies and
+  sweeps the chunk size against recall. Labels, method and the measured
+  baseline are in `data/eval/retrieval/`.
 - **Per-document query engines:** for targeted questions against a single filing
-  or paper.
+  or paper. Available through `ChunkFilter(document_ids=...)`; a dedicated
+  engine object is not built.
 - **Knowledge graph:** entities (companies, products, people, funding rounds) and
   relations extracted during claim normalization, stored as claim
   subject/predicate/object plus a lightweight `kg_edges` projection; used to

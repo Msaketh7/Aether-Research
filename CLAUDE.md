@@ -17,22 +17,25 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–7 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–8 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
 | Layer                       | State                                                                                                                                                                                                                                               |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Frontend (`apps/web`)       | Complete product surface, 99 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                        |
-| API (`apps/api`)            | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 577 tests.                                                                                                                                              |
+| API (`apps/api`)            | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 669 tests.                                                                                                                                              |
 | Database                    | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). Runs survive restart.                                                                                   |
 | Object storage              | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                |
 | Model gateway               | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Ingestion calls its embed path; generation has no caller until Phase 10.                                                                 |
 | Research tools              | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. No caller yet — Phase 10.                                                                                  |
 | Ingestion (`app/retrieval`) | Upload API; PDF, HTML, Markdown and text parsed in a killable, scrubbed child process; offset-exact LlamaIndex chunking; gateway embeddings; chunk metadata filters. No runtime caller yet: the worker ingests a run's attached uploads (Phase 13). |
+| Retrieval (`app/retrieval`) | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. No caller until Phase 10. |
 | Worker / agents             | **Does not exist.** A created run stays `queued`. Phases 9 and 13.                                                                                                                                                                                  |
 | Everything else             | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                         |
 
-Nothing fabricates data to fill a gap. No benchmark has been executed.
+Nothing fabricates data to fill a gap. The only benchmark executed so far is
+the retrieval benchmark (Phase 8, lexical arm only); no end-to-end evaluation
+has run.
 
 **Licensing.** Proprietary, all rights reserved - see [`LICENSE`](LICENSE). The
 repository is public on GitHub for reading, not reuse. Never add an open-source
@@ -50,7 +53,7 @@ listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 | [`docs/architecture.md`](docs/architecture.md) | System map                                                              |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE per trust boundary; prompt injection and SSRF                    |
 | [`docs/evaluation.md`](docs/evaluation.md)     | Metrics, thresholds, the no-fabricated-numbers rule                     |
-| [`docs/ADRs/`](docs/ADRs/)                     | 12 accepted decisions. New irreversible choice ⇒ new ADR.               |
+| [`docs/ADRs/`](docs/ADRs/)                     | 13 accepted decisions. New irreversible choice ⇒ new ADR.               |
 
 ## Repository structure
 
@@ -75,9 +78,10 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
                    guard, guarded HTTP client, untrusted-content type,
                    sanitiser, tools/ (search, fetch, extract, sec, arxiv,
                    github), toolbelt
-  app/retrieval/   document ingestion: formats, parsers, the isolated parser
-                   child (parse_worker), chunking, embedding, the pipeline,
-                   uploads, chunk filters. Phase 8 adds the Retriever.
+  app/retrieval/   ingestion (formats, parsers, the isolated parser child
+                   parse_worker, chunking, embedding, the pipeline, uploads)
+                   and retrieval (filters, retriever, fusion, rerank, metrics,
+                   benchmark). Phase 8's Retriever is the seam ADR 0003 named.
   app/agents|evidence|reports|evaluations|observability/
                    module boundaries with docstrings; filled by later phases
   migrations/      Alembic, two branches: core (relational) and vector
@@ -117,6 +121,7 @@ make ci             # format, lint, typecheck, unit tests, both stacks
 make test-e2e       # Playwright
 make migrate-check  # migration upgrade/downgrade round trip
 make migration m="add x"   # autogenerate on the core line; HEAD=vector@head for pgvector
+make benchmark-retrieval   # measure the retrieval strategies and the chunk size
 ```
 
 Point the frontend at the real API with `NEXT_PUBLIC_API_MODE=live` and

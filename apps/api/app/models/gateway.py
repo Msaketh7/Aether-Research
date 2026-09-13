@@ -44,6 +44,7 @@ from app.models.base import (
     Completion,
     CompletionChunk,
     CompletionRequest,
+    EmbeddingPurpose,
     EmbeddingResult,
     LLMProvider,
     Prompt,
@@ -231,6 +232,7 @@ class LLMGateway:
         self,
         texts: Sequence[str],
         *,
+        purpose: EmbeddingPurpose = EmbeddingPurpose.DOCUMENT,
         run_id: UUID | None = None,
     ) -> EmbeddingResult:
         """Embed texts with the one configured embedding model.
@@ -241,18 +243,25 @@ class LLMGateway:
         can fix are retried on the same model with the same backoff as
         generation, and every attempt is recorded - the failed ones included.
 
+        ``purpose`` selects the model's task prefix (Phase 8). An asymmetric
+        model wants a different one on a stored passage and on a question, and
+        the registry is where that is declared - so a caller embeds a query by
+        saying it is a query, not by knowing which models need which string.
+
         Phase 7 made this the first real caller and found it had none of that:
         no gateway timeout, no retry, and a failed call left no record.
         """
         spec = self._router.embedding_model()
         provider = self._provider_for(spec)
+        prefix = spec.embedding_prefix(purpose)
+        prepared = [prefix + text for text in texts] if prefix else list(texts)
 
         for attempt in range(1, self._max_attempts + 1):
             started = asyncio.get_running_loop().time()
             try:
                 async with self._semaphore:
                     async with asyncio.timeout(self._timeout):
-                        result = await provider.embed(texts, model=spec.model_id)
+                        result = await provider.embed(prepared, model=spec.model_id)
             except (ModelError, TimeoutError) as exc:
                 error = _as_model_error(exc, spec)
                 await self._record(

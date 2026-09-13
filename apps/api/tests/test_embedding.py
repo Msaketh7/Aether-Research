@@ -21,7 +21,7 @@ from app.models import (
     ProviderTimeout,
     build_gateway,
 )
-from app.retrieval.embedding import ChunkEmbedder
+from app.retrieval.embedding import ChunkEmbedder, QueryEmbedder
 from app.retrieval.errors import EmbeddingDimensionMismatch, EmbeddingResponseInvalid
 from tests.support import llm
 
@@ -174,3 +174,72 @@ async def test_an_over_long_input_fails_loudly_and_never_fails_over():
     with pytest.raises(ContextWindowExceeded):
         await gateway_for(llm.always(too_long), recorder).embed(["a"])
     assert len(recorder.calls) == 1
+
+
+# --- task prefixes (Phase 8) ------------------------------------------------
+
+
+async def test_a_chunk_is_embedded_with_the_models_document_prefix():
+    """nomic-embed-text is asymmetric: it is trained with a task prefix on every
+    input. Omitting it fails nothing - it just puts stored passages slightly
+    away from the questions asked of them, and retrieval quietly gets worse."""
+    seen: list[dict] = []
+    embedder = ChunkEmbedder(gateway_for(embeddings(seen=seen)), batch_size=8)
+
+    await embedder.embed(["revenue rose in the quarter"])
+
+    assert seen[0]["input"] == ["search_document: revenue rose in the quarter"]
+
+
+async def test_a_query_is_embedded_with_the_other_prefix():
+    seen: list[dict] = []
+    embedder = ChunkEmbedder(gateway_for(embeddings(seen=seen)), batch_size=8)
+
+    vector = await QueryEmbedder(embedder).embed("how did revenue change?")
+
+    assert seen[0]["input"] == ["search_query: how did revenue change?"]
+    assert len(vector) == DIMENSIONS
+
+
+async def test_a_query_embedder_reports_the_model_its_chunks_were_embedded_with():
+    """The label a dense search filters on. If the two disagreed, a search would
+    compare vectors from two models, which share a column but not a space."""
+    embedder = ChunkEmbedder(gateway_for(embeddings()), batch_size=8)
+    assert QueryEmbedder(embedder).model_label == embedder.model_label
+
+
+SYMMETRIC_REGISTRY = """
+models:
+  - key: ollama:embed
+    provider: ollama
+    model_id: nomic-embed-text
+    tier: small
+    context_window: 8192
+    max_output_tokens: 1
+    supports_chat: false
+    supports_embeddings: true
+    embedding_dimensions: 768
+"""
+
+
+async def test_a_model_that_declares_no_prefix_is_sent_the_text_unchanged(tmp_path):
+    """A prefix a model was not trained with is noise added to every vector, so
+    an undeclared prefix is empty rather than a guess. Driven from a registry
+    file, because whether a model is asymmetric is data, not code."""
+    path = tmp_path / "registry.yaml"
+    path.write_text(SYMMETRIC_REGISTRY, encoding="utf-8")
+    seen: list[dict] = []
+    provider = OllamaProvider(
+        base_url="http://ollama.test",
+        timeout_seconds=5,
+        transport=llm.transport(embeddings(seen=seen)),
+    )
+    gateway = build_gateway(
+        Settings(app_env="test", model_registry_path=path),
+        providers={LlmProvider.OLLAMA: provider},
+        recorder=CollectingCallRecorder(),
+    )
+
+    await ChunkEmbedder(gateway, batch_size=8).embed(["revenue rose"])
+
+    assert seen[0]["input"] == ["revenue rose"]

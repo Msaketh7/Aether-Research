@@ -56,6 +56,10 @@ migration: ## Autogenerate a migration: make migration m="add x" [HEAD=vector@he
 migrate-check: ## Verify migrations are reversible against a throwaway database
 	cd $(API) && uv run python scripts/check_migrations.py
 
+.PHONY: benchmark-retrieval
+benchmark-retrieval: ## Measure the retrieval strategies and the chunk size (ADR 0013)
+	cd $(API) && uv run python scripts/with_test_db.py uv run python scripts/benchmark_retrieval.py
+
 # --- frontend --------------------------------------------------------------
 .PHONY: dev
 dev: ## Run the Next.js app in development (mock API mode)

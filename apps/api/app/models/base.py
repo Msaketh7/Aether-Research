@@ -140,6 +140,24 @@ class CompletionChunk:
         return self.usage is not None or self.finish_reason is not None
 
 
+class EmbeddingPurpose(StrEnum):
+    """What an embedding is for, which for some models changes the input.
+
+    Asymmetric embedding models - ``nomic-embed-text`` among them - are trained
+    with a task prefix on every input, a different one for the passage being
+    stored and for the question being asked. Omitting them does not fail: it
+    quietly puts queries and documents in slightly different places in the same
+    space, and retrieval simply gets worse. The prefixes are declared per model
+    in the registry and applied by the gateway, so no caller has to know which
+    models need them.
+    """
+
+    #: A passage being indexed.
+    DOCUMENT = "document"
+    #: A question being asked of the index.
+    QUERY = "query"
+
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingResult:
     vectors: Sequence[Sequence[float]]

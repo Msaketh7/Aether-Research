@@ -53,6 +53,14 @@ low-coverage report rather than a confident one.
 Measured per retrieval strategy (dense, lexical, hybrid, hybrid + rerank) so
 that ADR-level choices are backed by numbers rather than by preference.
 
+Implemented in `app/retrieval/metrics.py` as pure functions and run by
+`scripts/benchmark_retrieval.py`. Two conventions there matter more than the
+formulae: recall divides by the number of chunks the labels name rather than by
+`k`, and **a query with no labelled relevant chunk returns nothing, not zero** -
+it is unmeasurable, and averaging it in as zero would let an incompletely
+labelled dataset make every strategy look equally bad. The labelled datasets,
+the method, and the first measured baseline are in `data/eval/retrieval/`.
+
 ### 3.2 Generation
 
 | Metric             | Definition                                                                      |

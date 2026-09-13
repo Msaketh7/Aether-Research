@@ -1,0 +1,88 @@
+{
+  "dataset": "repo-docs",
+  "version": 1,
+  "corpus": [
+    "docs/PRD.md",
+    "docs/TDD.md",
+    "docs/architecture.md",
+    "docs/threat-model.md",
+    "docs/evaluation.md"
+  ],
+  "notes": "Hand-labelled. Each anchor is a verbatim single-line substring of the corpus; a chunk containing one is relevant. Anchors stay within one source line so that a Markdown list marker or blockquote prefix on the next line cannot break the match.",
+  "cases": [
+    {
+      "id": "sse-heartbeat",
+      "question": "How often does the event stream send a heartbeat to keep the connection open?",
+      "anchors": ["A heartbeat comment every 15 s keeps intermediaries from closing the stream."],
+      "notes": "A specific number in a specific sentence; the easiest kind of case."
+    },
+    {
+      "id": "dead-letter-queue",
+      "question": "What happens to a background job after it has exhausted all of its retries?",
+      "anchors": ["Jobs that exhaust retries land on a dead-letter queue with full context for"]
+    },
+    {
+      "id": "ssrf-redirects",
+      "question": "Is the SSRF check repeated when a fetch is redirected somewhere else?",
+      "anchors": ["re-validate after each redirect; refuse non-http(s) schemes."],
+      "notes": "The answer is one clause inside a longer bullet, so precision matters."
+    },
+    {
+      "id": "injection-system-prompt",
+      "question": "How are the agents told that text fetched from the web must not be obeyed?",
+      "anchors": ["System prompts state explicitly that document content is untrusted data"]
+    },
+    {
+      "id": "tool-permissions",
+      "question": "Which tools are research agents forbidden from having?",
+      "anchors": ["No shell, no filesystem writes, no admin"]
+    },
+    {
+      "id": "contradiction-policy",
+      "question": "What does the system do when two sources report different revenue figures?",
+      "anchors": ["if one source says revenue was $200M and another says"],
+      "notes": "Phrased as a scenario rather than with the document's own vocabulary."
+    },
+    {
+      "id": "resume-after-crash",
+      "question": "How does a research run survive a worker crash or a deploy?",
+      "anchors": ["full graph state is persisted after each"]
+    },
+    {
+      "id": "hybrid-fusion",
+      "question": "How are keyword search results and vector search results combined?",
+      "anchors": ["fused with Reciprocal Rank Fusion."]
+    },
+    {
+      "id": "chunk-size",
+      "question": "What chunk size and overlap does ingestion use?",
+      "anchors": ["512 tokens, 64 overlap"]
+    },
+    {
+      "id": "isolated-parsing",
+      "question": "Where is an uploaded PDF actually parsed, and why there?",
+      "anchors": ["Each document is parsed by a fresh Python process with a"]
+    },
+    {
+      "id": "report-structure",
+      "question": "What sections does a finished research report contain, and in what order?",
+      "anchors": ["The report contains, in order:"]
+    },
+    {
+      "id": "ingestion-idempotence",
+      "question": "What stops one document from being counted as two sources when a job is delivered twice?",
+      "anchors": ["under a transaction advisory lock"]
+    },
+    {
+      "id": "verbatim-spans",
+      "question": "What prevents a model from inventing a claim that no source actually supports?",
+      "anchors": ["Every claim must carry a verbatim span that is verified to exist in the stored"]
+    },
+    {
+      "id": "recall-gate",
+      "question": "Why is retrieval recall one of the metrics that can fail the build?",
+      "anchors": ["below this, synthesis cannot succeed"],
+      "notes": "The answer lives in a table cell, which chunks differently from prose."
+    }
+  ]
+}

@@ -188,6 +188,26 @@ class Settings(BaseSettings):
     #: smaller ones lose less work to a failure.
     embedding_batch_size: int = 64
 
+    # --- retrieval (Phase 8, ADR 0013) ------------------------------------
+    #: Chunks a retrieval call returns, and candidates each arm fetches before
+    #: fusion - the TDD's "top ~50 -> top ~8-12". Both are documented starting
+    #: points that `python -m app.retrieval.benchmark` measures, not tuned
+    #: values; the plan's own bounds are in app/retrieval/query.py.
+    retrieval_limit: int = 10
+    retrieval_candidates: int = 50
+    #: Reciprocal Rank Fusion's rank constant, from the paper that introduced it.
+    retrieval_rrf_k: int = 60
+    #: Relative trust in each arm. A deployment whose corpus the lexical index
+    #: cannot stem, or one with no embeddings, tilts these rather than editing
+    #: code - and setting one to zero disables that arm honestly, as a skipped
+    #: arm on the result rather than as a silently shorter list.
+    retrieval_dense_weight: float = 1.0
+    retrieval_lexical_weight: float = 1.0
+    #: Whether the configured reranker runs, and how far it trades relevance for
+    #: coverage. 1.0 is pure relevance; see app/retrieval/rerank.py.
+    retrieval_rerank: bool = True
+    retrieval_mmr_lambda: float = 0.7
+
     @field_validator("allowed_domains", "blocked_domains", mode="before")
     @classmethod
     def _split_domains(cls, value: object) -> object:
@@ -261,6 +281,36 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name.upper()} must be at least 1.")
         if self.parse_timeout_seconds <= 0:
             raise ValueError("PARSE_TIMEOUT_SECONDS must be positive.")
+        return self
+
+    @model_validator(mode="after")
+    def _check_retrieval_bounds(self) -> Settings:
+        """Refuse a retrieval configuration that cannot answer what it promises.
+
+        Restated here rather than imported from ``RetrievalPlan``, which is the
+        authority on them: settings is a leaf that the retrieval layer reads,
+        and importing back into it would invert that and drag the ingestion
+        modules into every process that reads configuration. A test asserts the
+        two agree, which is the part that would otherwise drift.
+        """
+        if self.retrieval_candidates < self.retrieval_limit:
+            raise ValueError(
+                "RETRIEVAL_CANDIDATES must be at least RETRIEVAL_LIMIT: fusion cannot "
+                "return more chunks than the arms fetched."
+            )
+        if not self.retrieval_dense_weight and not self.retrieval_lexical_weight:
+            raise ValueError(
+                "RETRIEVAL_DENSE_WEIGHT and RETRIEVAL_LEXICAL_WEIGHT cannot both be zero: "
+                "that configuration would search nothing."
+            )
+        for name in ("retrieval_limit", "retrieval_candidates", "retrieval_rrf_k"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name.upper()} must be at least 1.")
+        for name in ("retrieval_dense_weight", "retrieval_lexical_weight"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name.upper()} cannot be negative.")
+        if not 0.0 <= self.retrieval_mmr_lambda <= 1.0:
+            raise ValueError("RETRIEVAL_MMR_LAMBDA must be between 0 and 1.")
         return self
 
     @property

@@ -200,6 +200,11 @@ Each feature below has a one-line plain explanation.
 | Recall@K / Precision@K / MRR / NDCG | standard search-quality scores                  | ,         | `[benchmark]` |
 | Agent task success / recovery rate  | sub-tasks completed / failures recovered from   | ,         | `[benchmark]` |
 
+The retrieval half of that scoreboard exists and has been run: the first
+measured numbers, the labelled questions behind them, and an honest account of
+what they are worth are in [`data/eval/retrieval/`](data/eval/retrieval/). The
+rest of the table waits on the agents.
+
 ---
 
 ## Infrastructure
@@ -470,8 +475,9 @@ variable, with no code change
 | 5     | Model gateway: Anthropic, OpenAI and Ollama behind one interface, with routing, retry, failover and a call ledger | Done    |
 | 6     | Research tools: search, fetch, parse, SEC, arXiv and GitHub behind an SSRF guard and an untrusted-content type    | Done    |
 | 7     | Document ingestion: uploads, isolated parsing, offset-exact chunking, embeddings, metadata filtering              | Done    |
-| 8     | Hybrid retrieval: vector and lexical search, rank fusion, reranking, a retrieval benchmark                        | Next    |
-| 9+    | LangGraph agents, evidence, reports, workers, evaluation, observability, load testing, deployment                 | Planned |
+| 8     | Hybrid retrieval: vector and lexical search, rank fusion, reranking, a retrieval benchmark                        | Done    |
+| 9     | LangGraph agent system: typed research state, the graph, bounded loops                                            | Next    |
+| 10+   | Agents, evidence, reports, workers, evaluation, observability, load testing, deployment                           | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -493,7 +499,8 @@ return empty collections rather than inventing content. Capabilities whose phase
 landed return `501 not_implemented`, so "not built yet" is always
 distinguishable from "no results".
 
-No benchmark has been executed, and the evaluations page says so.
+The one benchmark executed so far is the retrieval benchmark (Phase 8, lexical
+arm only). No end-to-end evaluation has run, and the evaluations page says so.
 
 ---
 

@@ -109,6 +109,14 @@ models:
     supports_structured_output: false
     supports_embeddings: true
     embedding_dimensions: 768
+    # nomic-embed-text is asymmetric: it is trained with a task prefix on every
+    # input, and the prefix differs between the passage being stored and the
+    # question being asked. Leaving them off is not an error anywhere - it just
+    # makes retrieval quietly worse - so they are declared here, where the model
+    # is, and applied by the gateway.
+    # Source: nomic-ai/nomic-embed-text-v1.5 model card, task instruction prefixes.
+    embedding_document_prefix: "search_document: "
+    embedding_query_prefix: "search_query: "
     pricing:
       input_usd_per_mtok: 0.0
       output_usd_per_mtok: 0.0
@@ -150,4 +158,6 @@ models:
   #   supports_structured_output: false
   #   supports_embeddings: true
   #   embedding_dimensions: <the model's dimension count>
+  #   # OpenAI's embedding models are symmetric - no task prefix. Leave
+  #   # embedding_document_prefix and embedding_query_prefix unset.
   #   pricing: ...

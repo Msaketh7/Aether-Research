@@ -21,8 +21,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 5   | Model abstraction          | Done     |
 | 6   | Web research tools         | Done     |
 | 7   | Document ingestion         | Done     |
-| 8   | Retrieval                  | **Next** |
-| 9   | LangGraph agent system     | Planned  |
+| 8   | Retrieval                  | Done     |
+| 9   | LangGraph agent system     | **Next** |
 | 10  | Agents                     | Planned  |
 | 11  | Evidence system            | Planned  |
 | 12  | Report generation          | Planned  |
@@ -315,7 +315,7 @@ schema's placeholder 0.50 as a score. The vector-writing path runs in CI only,
 since pgvector is not installed on this machine. No embedding model has been run
 live: Ollama is installed but has not pulled `nomic-embed-text`.
 
-## Phase 8 — Retrieval · **Next**
+## Phase 8 — Retrieval · **Done**
 
 Hybrid retrieval: dense vector search, BM25/lexical, metadata filtering, rank
 fusion, reranking. A `Retriever` interface with `retrieve()`,
@@ -323,7 +323,76 @@ fusion, reranking. A `Retriever` interface with `retrieve()`,
 hard-code a chunk size without documenting the decision. Retrieval evaluation
 tests.
 
-## Phase 9 — LangGraph agent system · Planned
+_Landed:_ ADR 0013. `PostgresRetriever` behind the `Retriever` Protocol, two
+arms run concurrently and fused by reciprocal rank, then reranked; the metrics
+of evaluation §3.1 as pure functions; and a benchmark that produced the first
+measured retrieval numbers in this repository.
+
+The dense arm is pgvector cosine over chunks embedded by the same model, with
+the query vector bound as text and cast twice so no codec is needed on the
+driver, and `hnsw.ef_search` widened to cover the request. The lexical arm is
+`ts_rank_cd` over the generated `tsv` column. Both narrow through one filter
+builder — `_chunk_selection` — so a filter, and `user_id` ownership, cannot be
+honoured by one path and ignored by another. A result carries each arm's
+outcome and each chunk's per-arm rank, because "the lexical arm found this at
+rank 1 and the dense arm never saw it" is the shape of a retrieval bug and is
+invisible once scores are fused.
+
+Reranking is MMR — a *diversity* reranker, named for what it does. The top of a
+fused list is full of near-duplicates by construction: chunks overlap by 64
+tokens, filings restate themselves, one wire story gets reposted. The
+cross-encoder the TDD describes solves a different problem, is a model this
+repository cannot yet run or price, and drops in behind the same interface once
+the benchmark can say whether it earns its latency.
+
+92 new tests, 669 total; the five that need pgvector skip locally and run in CI.
+
+**The first measured retrieval numbers** (`data/eval/retrieval/`, 14
+hand-labelled questions over this repository's own docs, lexical arm only):
+
+| chunk / overlap | chunks | recall@10 |   MRR | nDCG@10 |
+| --------------- | -----: | --------: | ----: | ------: |
+| 256 / 32        |    247 |     0.714 | 0.331 |   0.423 |
+| 512 / 64        |    195 |     0.714 | 0.342 |   0.427 |
+| 1024 / 128      |    189 |     0.714 | 0.298 |   0.395 |
+
+So 512/64 stays, now for a measured reason rather than a documented guess — the
+open question ADR 0012 deferred to this phase. The same four questions are
+missed at every size, and all four are vocabulary mismatches: exactly what the
+dense arm exists for. The baseline shows what hybrid retrieval has to buy
+without yet being able to price it.
+
+Four defects found while building and running it:
+
+- **The lexical arm matched almost nothing.** `websearch_to_tsquery` — the
+  obvious function, and what this used first — combines unquoted words with
+  AND. Retrieval here is given questions, not keyword lists, so "inference
+  pricing memory export" required one chunk to contain every one of those stems
+  and returned zero rows. The terms are now OR-ed, over lexemes Postgres itself
+  produced from the bound parameter.
+- **The benchmark could not reproduce its own numbers.** Ties in `ts_rank_cd`
+  are common and broke on `document_id`, which is generated per ingestion, so
+  the same corpus ingested twice ranked differently and MRR moved between runs
+  of one measurement. The tiebreak is now the source's canonical URL, a
+  property of the document rather than of the row.
+- **`nomic-embed-text` is asymmetric and nothing said so.** It is trained with a
+  task prefix on every input, a different one for a stored passage and for a
+  question asked of it. Omitting them fails nothing — it just puts queries
+  slightly away from the documents they should match. The prefixes are now
+  declared per model in the registry and applied by the gateway, so a caller
+  embeds a query by saying it is a query.
+- **A top-50 would have returned 40.** pgvector's `hnsw.ef_search` defaults to
+  40, and a metadata filter is applied after the index scan, so the configured
+  candidate count was never going to be met.
+
+Stated rather than implied: no dense or hybrid quality number exists. No
+embedding model has been run against a real corpus here, and pgvector cannot be
+built on this machine, so those rows report *not measured* with the reason. The
+dense SQL is exercised in CI against the pgvector image with a deterministic
+stand-in embedder — which proves the SQL, and makes no claim about quality.
+Nothing calls the retriever at runtime until the agents exist (Phases 9-10).
+
+## Phase 9 — LangGraph agent system · **Next**
 
 LangGraph as the orchestration layer (ADR 0002). A typed `ResearchState` holding
 `research_id`, `query`, `research_plan`, `subtasks`, `sources`, `claims`,
