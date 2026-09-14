@@ -567,20 +567,27 @@ failing loudly.
 ## Build roadmap
 
 > **In plain terms:** build it in slices. Each row adds one capability on top of
-> the last. Nothing after row 0 is attempted until row 0 works.
+> the last. This is the plain-language version of the plan. The working plan is
+> [`docs/PHASES.md`](docs/PHASES.md), which splits the same work into 25 phases
+> and builds each row's parts before the agents that use them, so its phase
+> numbers are not the row numbers here.
 
-| Phase | Scope                                                                                         | Status |
-| ----- | --------------------------------------------------------------------------------------------- | ------ |
-| 0     | Product prototype, website with fake data, so the experience is real before the engine exists | ☑      |
-| 1     | Basic backend, accounts, database, create/read research                                       | ☐      |
-| 2     | First AI, one Planner + Researcher + Synthesizer, single straight-line path                   | ☐      |
-| 3     | Web research, real searching, fetching, parsing, and citations                                | ☐      |
-| 4     | RAG, indexing and smart retrieval over collected documents                                    | ☐      |
-| 5     | Multi-agent, add Critic + Verifier, run researchers in parallel                               | ☐      |
-| 6     | Durable execution, save-points, queue, background workers, resume                             | ☐      |
-| 7     | Evaluation, the test set, the scoreboard, the release gate                                    | ☐      |
-| 8     | Production engineering, monitoring, rate limits, caching, load tests, security                | ☐      |
-| 9     | Deployment, cloud hosting, infrastructure-as-code, automated deploys, monitoring              | ☐      |
+**Done** means built and tested. **Partly** means some of the row is built, and
+the note says which part. The research tools, retrieval and the research graph
+are built but nothing calls them yet: the agents that use them are Phase 10.
+
+| Row | Scope                                                                                         | Status      | Where it stands in `docs/PHASES.md`                                                                                                                                                                        |
+| --- | --------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Product prototype, website with fake data, so the experience is real before the engine exists | Done        | Phase 1                                                                                                                                                                                                    |
+| 1   | Basic backend, accounts, database, create/read research                                       | Partly      | Backend, database and creating and reading research are built (Phases 2-3). Real sign-in is Phase 20.                                                                                                      |
+| 2   | First AI, one Planner + Researcher + Synthesizer, single straight-line path                   | Not started | The model gateway the agents will call is built (Phase 5). No agent exists yet (Phase 10).                                                                                                                 |
+| 3   | Web research, real searching, fetching, parsing, and citations                                | Partly      | Searching, fetching and parsing are built (Phase 6). Citations are Phases 11-12.                                                                                                                           |
+| 4   | RAG, indexing and smart retrieval over collected documents                                    | Partly      | Indexing and hybrid retrieval are built (Phases 7-8). Nothing feeds them collected documents until Phases 10 and 13.                                                                                       |
+| 5   | Multi-agent, add Critic + Verifier, run researchers in parallel                               | Partly      | The graph that runs researchers in parallel and loops under a critic is built (Phase 9). The agents that fill it are Phase 10.                                                                             |
+| 6   | Durable execution, save-points, queue, background workers, resume                             | Partly      | Runs are queued (Phase 2), and save-points and resuming from them are built (Phase 9). The background worker that runs them is Phase 13.                                                                   |
+| 7   | Evaluation, the test set, the scoreboard, the release gate                                    | Not started | Only the retrieval benchmark has run (Phase 8). The test set, scoreboard and release gate are Phase 18.                                                                                                    |
+| 8   | Production engineering, monitoring, rate limits, caching, load tests, security                | Partly      | Security groundwork is built: authorisation, request validation, the SSRF guard and untrusted-content handling (Phases 2-6). Caching, monitoring, rate limits and load tests are Phases 15, 17, 20 and 21. |
+| 9   | Deployment, cloud hosting, infrastructure-as-code, automated deploys, monitoring              | Not started | Nothing is hosted or deployed (Phases 23-24). CI already runs the tests on pushes to `main` and on pull requests.                                                                                          |
 
 ---
 
