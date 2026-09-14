@@ -114,6 +114,15 @@ and estimated cost; per-user rate limits and concurrent-run limits; cost is
 accumulated per LLM call and checked at every node boundary; exceeding a ceiling
 ends the run _safely_ with a partial report rather than by crashing.
 
+**Status (Phase 9).** The research graph enforces these at every node boundary
+(`app/agents/budget.py`, ADR 0014). Cost, runtime, sources and searches end
+discovery, and the run proceeds to a partial report with a caveat. An uncosted
+model call ends discovery at the end of its round, because a ceiling that cannot
+be measured cannot be enforced. Every node runs under a timeout, and LangGraph's
+recursion limit is derived from the run's shape as a backstop. The overshoot is
+bounded by one step. Spend is summed from what nodes report until Phase 16
+reconciles it against the model-call ledger.
+
 ### 3.4 Broken object-level authorization (boundary 2)
 
 **Threat.** User A reads user B's run by guessing an id.
@@ -185,16 +194,50 @@ deployment is usually internet-reachable with a copy of real data, so
 allowlist it is closed. `tests/test_security_hardening.py` asserts that property
 directly, so adding an environment without deciding about it fails the build.
 
+### 3.9 Tampered checkpoints (boundary 5)
+
+**Threat.** A research run's progress is saved as rows in `checkpoint_blobs` and
+`checkpoint_writes`, and LangGraph's serializer by default imports and constructs
+whatever class a stored value names. Anyone able to write those rows chooses what
+a worker constructs when it resumes the run.
+
+**Controls.**
+
+- Deserialization is allowlisted to exactly the classes a research state can
+  hold, derived from the state's own annotations, and pickle fallback is off
+  (`app/agents/checkpoint.py`).
+- A test round-trips every allowed type and asserts the allowlist holds only
+  this application's classes. A type added to the state cannot silently widen
+  it, and one left off fails a test instead of degrading to a `dict` when a run
+  resumes.
+- The checkpoint schema is created by Alembic and version-checked when a worker
+  opens it; the library's own `setup()` is never called.
+
+**Status (Phase 9).** Implemented and tested against Postgres. Least-privilege
+database roles, which would narrow who can write those rows at all, are
+Phase 20.
+
+### 3.10 Research content leaving through an observability library (boundary 4)
+
+**Threat.** LangSmith, a dependency of LangGraph, sends traces - prompts, and the
+retrieved documents inside them - to a third-party service whenever
+`LANGSMITH_TRACING` is set in the environment. It reads that variable itself,
+past the typed settings layer.
+
+**Controls.** Every graph invocation runs with tracing explicitly disabled, and a
+test sets the variable and asserts that no node sees tracing enabled. Turning
+tracing on is a deliberate decision for Phase 17.
+
 ## 4. STRIDE summary
 
-| Threat                     | Primary control                                              |
-| -------------------------- | ------------------------------------------------------------ |
-| **S**poofing               | Auth.js sessions, hashed tokens, ownership checks            |
-| **T**ampering              | Content hashes on every document; append-only evidence trail |
-| **R**epudiation            | Audit log of auth and research mutations; full agent trace   |
-| **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side     |
-| **D**enial of service      | Rate limits, run ceilings, bounded queues, timeouts          |
-| **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles         |
+| Threat                     | Primary control                                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **S**poofing               | Auth.js sessions, hashed tokens, ownership checks                                                    |
+| **T**ampering              | Content hashes on every document; append-only evidence trail; allowlisted checkpoint deserialization |
+| **R**epudiation            | Audit log of auth and research mutations; full agent trace                                           |
+| **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side, third-party tracing off                    |
+| **D**enial of service      | Rate limits, run ceilings, bounded queues, timeouts                                                  |
+| **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles                                                 |
 
 ## 5. What is explicitly out of scope for v1
 

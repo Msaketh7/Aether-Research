@@ -157,6 +157,15 @@ class SqlAlchemyResearchRepository:
             return None
         return self._to_dto(row, has_report=await self._has_report(row.id))
 
+    async def status_of(self, run_id: uuid.UUID, *, user_id: uuid.UUID) -> RunStatus | None:
+        """One column by primary key. A running graph reads it at every node boundary."""
+        statement = select(ResearchRunRow.status).where(
+            ResearchRunRow.id == run_id,
+            ResearchRunRow.user_id == user_id,
+        )
+        value = (await self._session.execute(statement)).scalar_one_or_none()
+        return RunStatus(value) if value is not None else None
+
     def _base_query(
         self,
         user_id: uuid.UUID,

@@ -17,21 +17,22 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–8 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–9 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
-| Layer                       | State                                                                                                                                                                                                                                               |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend (`apps/web`)       | Complete product surface, 99 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                        |
-| API (`apps/api`)            | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 669 tests.                                                                                                                                              |
-| Database                    | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). Runs survive restart.                                                                                   |
-| Object storage              | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                |
-| Model gateway               | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Ingestion calls its embed path; generation has no caller until Phase 10.                                                                 |
-| Research tools              | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. No caller yet — Phase 10.                                                                                  |
-| Ingestion (`app/retrieval`) | Upload API; PDF, HTML, Markdown and text parsed in a killable, scrubbed child process; offset-exact LlamaIndex chunking; gateway embeddings; chunk metadata filters. No runtime caller yet: the worker ingests a run's attached uploads (Phase 13). |
-| Retrieval (`app/retrieval`) | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. No caller until Phase 10. |
-| Worker / agents             | **Does not exist.** A created run stays `queued`. Phases 9 and 13.                                                                                                                                                                                  |
-| Everything else             | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                         |
+| Layer                         | State                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend (`apps/web`)         | Complete product surface, 99 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                      |
+| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 776 tests.                                                                                                                                                                                                                            |
+| Database                      | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). Runs survive restart.                                                                                                                                                                 |
+| Object storage                | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                              |
+| Model gateway                 | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Ingestion calls its embed path; generation has no caller until Phase 10.                                                                                                                                               |
+| Research tools                | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. No caller yet — Phase 10.                                                                                                                                                                |
+| Ingestion (`app/retrieval`)   | Upload API; PDF, HTML, Markdown and text parsed in a killable, scrubbed child process; offset-exact LlamaIndex chunking; gateway embeddings; chunk metadata filters. No runtime caller yet: the worker ingests a run's attached uploads (Phase 13).                                                                               |
+| Retrieval (`app/retrieval`)   | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. No caller until Phase 10.                                                                             |
+| Research graph (`app/agents`) | LangGraph `StateGraph` over a typed, checkpointed `ResearchState`: parallel researchers via `Send`; every node wrapped with cancellation, the FR-8 ceilings, a timeout and usage accounting; Postgres checkpoints whose tables Alembic owns, read back through a derived allowlist. Nodes are Protocols, implemented in Phase 10. |
+| Worker / agents               | No agents yet (Phase 10) and no worker to run the graph (Phase 13): a created run stays `queued`.                                                                                                                                                                                                                                 |
+| Everything else               | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                                                                                                       |
 
 Nothing fabricates data to fill a gap. The only benchmark executed so far is
 the retrieval benchmark (Phase 8, lexical arm only); no end-to-end evaluation
@@ -53,7 +54,7 @@ listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 | [`docs/architecture.md`](docs/architecture.md) | System map                                                              |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE per trust boundary; prompt injection and SSRF                    |
 | [`docs/evaluation.md`](docs/evaluation.md)     | Metrics, thresholds, the no-fabricated-numbers rule                     |
-| [`docs/ADRs/`](docs/ADRs/)                     | 13 accepted decisions. New irreversible choice ⇒ new ADR.               |
+| [`docs/ADRs/`](docs/ADRs/)                     | 14 accepted decisions. New irreversible choice ⇒ new ADR.               |
 
 ## Repository structure
 
@@ -82,7 +83,9 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
                    parse_worker, chunking, embedding, the pipeline, uploads)
                    and retrieval (filters, retriever, fusion, rerank, metrics,
                    benchmark). Phase 8's Retriever is the seam ADR 0003 named.
-  app/agents|evidence|reports|evaluations|observability/
+  app/agents/      the research graph: state, node contracts, loop control,
+                   checkpointer, runner. The agents themselves are Phase 10.
+  app/evidence|reports|evaluations|observability/
                    module boundaries with docstrings; filled by later phases
   migrations/      Alembic, two branches: core (relational) and vector
                    (needs pgvector). `alembic upgrade heads` applies both.
@@ -102,13 +105,13 @@ Zod 4. Vitest 4, Playwright 1.63.
 **Backend** — Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic,
 asyncpg, pgvector, Redis, aioboto3 (S3), anthropic + openai SDKs, httpx2,
 trafilatura (readability), defusedxml (untrusted XML), llama-index-core
-(chunking only, imported lazily), pypdf, py3langid (language detection).
+(chunking only, imported lazily), pypdf, py3langid (language detection), LangGraph with its Postgres checkpointer
+(psycopg 3, in its own pool).
 `uv` for locked deps. `ruff` + `mypy --strict`. pytest, with `moto` in server
 mode for a real S3 endpoint and `httpx2.MockTransport` for the model providers.
 
-**Planned** — LangGraph (orchestration, ADR 0002), LlamaIndex (ingestion/retrieval,
-ADR 0003), OpenTelemetry,
-Prometheus/Grafana, AWS ECS Fargate via Terraform (ADR 0008).
+**Planned** — OpenTelemetry, Prometheus/Grafana, AWS ECS Fargate via Terraform
+(ADR 0008).
 
 ## Commands
 
@@ -177,6 +180,25 @@ Hard-won; do not rediscover them.
   whole-file diff. Write with `newline="
 "`, or check `git diff --stat`
   before committing.
+- **psycopg's async mode refuses Windows' default (proactor) event loop.**
+  LangGraph's Postgres checkpointer runs on psycopg, so the tests that open it
+  live in `apps/api/tests/checkpointer/`, whose conftest gives them a selector
+  loop. It is scoped by directory, not by marker: once a pytest-asyncio
+  loop-factory hook exists it must return a mapping for every test it sees. A
+  worker run locally on Windows needs
+  `asyncio.run(..., loop_factory=asyncio.SelectorEventLoop)`.
+- **LangGraph's Postgres checkpointer stores `str`, `int`, `float` and `bool`
+  values inline as JSON**, subclasses included, so a `StrEnum` at the top of the
+  graph state comes back as a plain string. Keep enums inside models;
+  `tests/test_graph_state.py` fails on a top-level field that breaks this.
+- **`langgraph` depends on `langgraph-sdk`, which pins `websockets` below 17**,
+  so the lockfile holds 16.x. uvicorn needs 13 or later.
+- **LangSmith caches environment reads** (`langsmith.utils.get_env_var` is an
+  `lru_cache`). A test that sets `LANGSMITH_TRACING` must clear the cache before
+  and after, or every later test in the process sees tracing on.
+- **`npm run format:check` covers Markdown and YAML across the repo**, backend
+  docs included. Run it after editing docs; Phase 8 shipped five files that
+  failed it.
 
 ## Engineering rules (non-negotiable)
 

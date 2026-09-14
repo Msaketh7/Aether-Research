@@ -97,6 +97,21 @@ class Settings(BaseSettings):
     max_runtime_seconds: int = 300
     max_estimated_cost_usd: float = 2.00
 
+    # --- research graph (Phase 9, ADR 0014) -------------------------------
+    #: Subtasks one planning round may dispatch. A plan may propose up to 20;
+    #: the rest wait for a later round, highest priority first.
+    max_subtasks_per_iteration: int = 8
+    #: Researchers that run at once. The gateway already caps concurrent model
+    #: calls; this also caps a run's concurrent fetches and database sessions.
+    graph_max_concurrency: int = 4
+    #: The most any one node - a single researcher included - may run. The
+    #: run's runtime ceiling is checked between nodes; this is what bounds a
+    #: node that never returns.
+    graph_node_timeout_seconds: float = 120.0
+    #: Connections the checkpointer may hold. psycopg rather than asyncpg,
+    #: because LangGraph's Postgres checkpointer is written against it.
+    checkpoint_pool_size: int = 4
+
     # Per-user guardrails on the API surface itself.
     max_concurrent_runs_per_user: int = 3
     default_page_size: int = 20
@@ -281,6 +296,38 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name.upper()} must be at least 1.")
         if self.parse_timeout_seconds <= 0:
             raise ValueError("PARSE_TIMEOUT_SECONDS must be positive.")
+        return self
+
+    @model_validator(mode="after")
+    def _check_graph_bounds(self) -> Settings:
+        """Refuse run and graph ceilings that could not bound anything.
+
+        A ceiling of zero is not "unlimited" here - it is a run that stops before
+        it starts - and a negative one is a typo. Both are refused at startup.
+
+        ``20`` is restated from ``app.agents.schemas.MAX_PLANNED_SUBTASKS``
+        rather than imported, for the same reason the retrieval bounds are: this
+        module is a leaf. A test asserts the two agree.
+        """
+        for name in (
+            "max_research_iterations",
+            "max_sources",
+            "max_search_queries",
+            "max_runtime_seconds",
+            "max_subtasks_per_iteration",
+            "graph_max_concurrency",
+            "checkpoint_pool_size",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name.upper()} must be at least 1.")
+        if self.max_estimated_cost_usd <= 0:
+            raise ValueError("MAX_ESTIMATED_COST_USD must be positive.")
+        if self.graph_node_timeout_seconds <= 0:
+            raise ValueError("GRAPH_NODE_TIMEOUT_SECONDS must be positive.")
+        if self.max_subtasks_per_iteration > 20:
+            raise ValueError(
+                "MAX_SUBTASKS_PER_ITERATION cannot exceed 20, the most subtasks a plan may propose."
+            )
         return self
 
     @model_validator(mode="after")

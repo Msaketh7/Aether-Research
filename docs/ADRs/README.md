@@ -19,3 +19,4 @@ accepted; a changed mind means a new ADR that supersedes the old one.
 | [0011](0011-untrusted-content-boundary.md) | Retrieved content is a type, not a convention                                 | Accepted |
 | [0012](0012-document-ingestion.md)         | Document ingestion: user-owned uploads, isolated parsing, offset-exact chunks | Accepted |
 | [0013](0013-hybrid-retrieval.md)           | Hybrid retrieval: OR-ed lexical search, rank fusion, diversity reranking      | Accepted |
+| [0014](0014-research-graph.md)             | The research graph: typed state, bounded loops, checkpoints Alembic owns      | Accepted |

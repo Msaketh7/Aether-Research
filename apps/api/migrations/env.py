@@ -9,6 +9,7 @@ different database than the service, and no connection string is committed.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from logging.config import fileConfig
 
 from alembic import context
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 import app.db.models  # noqa: F401
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.external import EXTERNALLY_OWNED_TABLES
 
 config = context.config
 
@@ -33,6 +35,18 @@ config.set_main_option("sqlalchemy.url", get_settings().database_url)
 target_metadata = Base.metadata
 
 
+def include_name(name: str | None, type_: str, parent_names: Mapping[str, str | None]) -> bool:
+    """Leave tables Alembic creates but the ORM does not model out of autogenerate.
+
+    Without this, every autogenerate would propose dropping LangGraph's
+    checkpoint tables, because nothing in ``Base.metadata`` describes them. See
+    ``app.db.external`` and ADR 0014.
+    """
+    if type_ == "table":
+        return name not in EXTERNALLY_OWNED_TABLES
+    return parent_names.get("table_name") not in EXTERNALLY_OWNED_TABLES
+
+
 def run_migrations_offline() -> None:
     """Emit SQL without a connection, for review or for a DBA-run deploy."""
     context.configure(
@@ -41,6 +55,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -54,6 +69,7 @@ def do_run_migrations(connection: Connection) -> None:
         # missed by autogenerate.
         compare_type=True,
         compare_server_default=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()

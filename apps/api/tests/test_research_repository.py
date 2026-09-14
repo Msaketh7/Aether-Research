@@ -124,7 +124,13 @@ async def test_the_limits_in_force_are_frozen_with_the_run(
 ):
     """A later configuration change must not rewrite what a finished run was
     allowed to do."""
-    tight = RunLimits(max_iterations=1, max_sources=5, max_runtime_seconds=30, max_cost_usd=0.10)
+    tight = RunLimits(
+        max_iterations=1,
+        max_sources=5,
+        max_search_queries=6,
+        max_runtime_seconds=30,
+        max_cost_usd=0.10,
+    )
     run = make_run(owner, limits=tight)
     await repository.add(run)
 

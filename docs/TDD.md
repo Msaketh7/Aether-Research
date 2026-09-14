@@ -466,50 +466,87 @@ how powerful a model it needs._
 _Plain terms: the shared "clipboard" every worker reads from and writes to. It is
 saved after every step._
 
+Implemented in `app/agents/state.py` (ADR 0014). Every value it holds is a
+frozen, closed Pydantic model from `app/agents/schemas.py`, with bounded
+collections.
+
 ```python
-class ResearchState(TypedDict):
-    run_id: str
-    question: str
-    mode: Literal["quick", "deep", "conversational"]
-    depth: int
-    domains: list[str]
-    date_range: tuple[date | None, date | None]
-    parent_run_id: str | None
+class ResearchState(TypedDict, total=False):
+    # what was asked - written once
+    research_id: UUID
+    user_id: UUID
+    query: str
+    parameters: RunParameters                           # mode, depth, domains, dates, parent run
+    budget: RunBudget                                   # the run's frozen FR-8 limits
 
-    plan: ResearchPlan | None
-    subtask_results: Annotated[list[SubtaskResult], operator.add]
-    claims: Annotated[list[Claim], merge_claims]
-    evidence: Annotated[list[Evidence], operator.add]
-    contradictions: list[Contradiction]
-
+    # the work
     iteration: int
-    budget_spent: BudgetLedger            # cost, tokens, sources, elapsed
-    critic_verdict: CriticVerdict | None
+    research_plan: Plan | None
+    subtasks: Annotated[list[Subtask], operator.add]
+    sources: Annotated[list[SourceRef], merge_sources]  # one entry per source
+    completed_tasks: Annotated[list[TaskOutcome], operator.add]
+    failed_tasks: Annotated[list[NodeError], operator.add]
+    evidence: Annotated[list[EvidenceItem], merge_by_id]
+    claims: Annotated[list[ClaimItem], merge_by_id]     # a re-scored claim replaces its candidate
+    contradictions: Annotated[list[ContradictionItem], merge_by_id]
+    critique: Critique | None
+    report: ReportDraft | None
+    citation_check: CitationCheck | None
+    citation_repairs: int
 
-    report_sections: list[ReportSection] | None
-    citation_report: CitationValidationReport | None
-    status: str
-    errors: list[NodeError]
+    # accounting and control
+    token_usage: Annotated[TokenCount, add_tokens]
+    estimated_cost: Annotated[CostEstimate, add_cost]   # dollars, plus calls that could not be costed
+    search_queries: Annotated[int, operator.add]
+    clock: Annotated[RunClock, latest_clock]            # active time only
+    stop: Annotated[Stop | None, keep_stop]             # the first reason, with its caveat
+    errors: Annotated[list[NodeError], operator.add]
 ```
 
-- **Parallelism:** the planner node returns LangGraph `Send` objects, one per
-  subtask, fanning out to a pool of researcher executions that reduce back via
-  `operator.add` / a custom claim-merge reducer.
-- **Quick mode** uses a trimmed graph: Planner → Researcher(s) → Synthesizer →
-  Citation Validator (no verification/contradiction/critic loop).
+- **Parallelism:** the planner's conditional edge returns one LangGraph `Send`
+  per dispatched subtask, carrying a `SubtaskAssignment` with that researcher's
+  share of the remaining query, source and time budget. Researchers write
+  concurrently only to fields that have reducers; LangGraph refuses anything else.
+- **Quick mode** uses a trimmed graph: Planner → Researcher(s) → Evidence
+  Extractor → Claim Normalization → Synthesizer → Citation Validator. Evidence and
+  claims are kept because a citation resolves through them; verification, the
+  contradiction check and the critic are skipped (PRD 5.1).
+- **Checkpoints** are written after every node (`durability="sync"`) into tables
+  Alembic creates (migration 0005), and read back through a serializer that
+  revives only the types this state can hold.
+
+- **No top-level field subclasses a JSON primitive.** LangGraph's Postgres
+  checkpointer writes `str`, `int`, `float` and `bool` values inline as JSON, so a
+  `StrEnum` at the top of the state is read back as a plain string. Enums live
+  inside models (`RunParameters`, `Stop`), and a test enforces the rule.
 
 ### 4.4 Loop control
 
 _Plain terms: the guardrails checked between every step so the job can never run
 forever or overspend._
 
+Implemented in `app/agents/budget.py` and applied by the node wrappers in
+`app/agents/graph.py`:
+
 ```
-if iteration > max_iterations          -> force route to Synthesizer (with caveat)
-if budget_spent.sources >= max_sources -> stop discovery, allow synthesis
-if budget_spent.cost_usd >= max_cost   -> abort discovery, synthesize what exists
-if elapsed >= max_runtime              -> abort discovery, synthesize what exists
-if cancel_flag(run_id)                 -> checkpoint + mark cancelled
+at every node:        cancelled                         -> do nothing; route to END
+at a discovery node:  cost >= max_cost                  -> stop discovery, synthesize
+                      runtime >= max_runtime            -> stop discovery, synthesize
+                      sources >= max_sources            -> stop discovery, synthesize
+                      searches >= max_search_queries    -> stop discovery, synthesize
+                      an uncosted call, at a round end  -> stop discovery, synthesize
+at the critic:        insufficient, no rounds left      -> stop discovery, synthesize
+around every call:    the node timeout (a researcher: also the run's time left)
+LangGraph:            recursion_limit derived from the mode and max_iterations
 ```
+
+- A stopped run records its first reason and a coverage caveat built from
+  measured values; the graph writes the caveat into the report itself.
+- A step that starts under a ceiling may finish over it. The overshoot is one
+  step, and a round of researchers is held to per-researcher allowances.
+- Runtime counts active time: a resumed run's clock is re-anchored when a new
+  process picks it up, so downtime is not charged against `max_runtime`.
+- Citation validation may send a draft back to the synthesizer once.
 
 ---
 
@@ -1089,14 +1126,14 @@ query
 - **Metadata filters:** every filter in `ChunkFilter`, and both arms narrow
   through one builder so a filter cannot be honoured by one and ignored by the
   other. Run scope and `user_id` ownership are in the same WHERE clause.
-- **Reranking:** `Reranker` is the seam. What ships is **MMR**, a *diversity*
+- **Reranking:** `Reranker` is the seam. What ships is **MMR**, a _diversity_
   reranker, because the top of a fused list is full of near-duplicates. A
   cross-encoder re-scores true relevance and is the right eventual answer for a
   different problem; it drops in behind the same interface, and the benchmark
   decides whether it earns its latency (ADR 0013).
 - **Honest emptiness:** an arm that could not run says so, with a reason. No
   embedding model configured, nothing embedded yet, an arm weighted to zero -
-  each is a *skipped* arm on the result, never a quietly shorter list.
+  each is a _skipped_ arm on the result, never a quietly shorter list.
 - **Benchmarked:** `scripts/benchmark_retrieval.py` scores the strategies and
   sweeps the chunk size against recall. Labels, method and the measured
   baseline are in `data/eval/retrieval/`.
@@ -1221,8 +1258,10 @@ worker:
 verifying, synthesizing)` with a stale heartbeat and re-enqueues them; the
   graph resumes from the last checkpoint (no repeated side effects because
   ingestion and writes are idempotent on hashes / natural keys).
-- `POST /research/{id}/cancel` sets a Redis flag; the graph checks it between
-  nodes, writes a final checkpoint, and sets `status = cancelled`.
+- `POST /research/{id}/cancel` sets `status = cancelled` on the run. The graph
+  reads that column at every node boundary and stops without further work
+  (`app/research/cancellation.py`): one source of truth, rather than a Redis flag
+  that could disagree with it.
 - Human-in-the-loop: the graph supports an interrupt before `Synthesizer` in a
   "review the plan first" configuration (off by default; used for high-stakes
   runs).

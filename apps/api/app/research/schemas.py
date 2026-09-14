@@ -142,6 +142,9 @@ class RunLimits(ApiModel):
 
     max_iterations: int
     max_sources: int
+    #: Frozen here since Phase 9 like the others; before that it was read from
+    #: configuration only, so a deployment could change it under a queued run.
+    max_search_queries: int
     max_runtime_seconds: int
     max_cost_usd: float
 
@@ -149,16 +152,20 @@ class RunLimits(ApiModel):
     def for_mode(cls, mode: ResearchMode, settings: Settings) -> RunLimits:
         if mode is ResearchMode.QUICK:
             # A quick run does one retrieval round with no critic loop, so its
-            # ceilings are tighter than the global maxima by design.
+            # ceilings are tighter than the global maxima by design. Searches
+            # are not tightened separately: the round's source, time and cost
+            # ceilings already bound how many a single round can use.
             return cls(
                 max_iterations=1,
                 max_sources=min(12, settings.max_sources),
+                max_search_queries=settings.max_search_queries,
                 max_runtime_seconds=min(60, settings.max_runtime_seconds),
                 max_cost_usd=min(0.50, settings.max_estimated_cost_usd),
             )
         return cls(
             max_iterations=settings.max_research_iterations,
             max_sources=settings.max_sources,
+            max_search_queries=settings.max_search_queries,
             max_runtime_seconds=settings.max_runtime_seconds,
             max_cost_usd=settings.max_estimated_cost_usd,
         )

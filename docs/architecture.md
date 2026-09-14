@@ -75,6 +75,7 @@ START
   -> Evidence Extraction  claim + verbatim span + source
   -> Claim Normalization  atomic statements, dedupe key
   -> Verification         corroboration, calibrated confidence
+  -> Contradictions       disagreements recorded, never resolved silently
   -> Critic               is coverage sufficient?
        |-- insufficient and within limits --> back to Planner (bounded)
        '-- sufficient or limit reached ----v
@@ -83,9 +84,12 @@ START
 END
 ```
 
-Every loop is bounded by `max_iterations`, `max_sources`, `max_runtime` and
-`max_estimated_cost`. Hitting a limit is a normal outcome: the run proceeds to
-synthesis and the report carries an explicit coverage caveat.
+Every loop is bounded by `max_iterations`, `max_sources`, `max_search_queries`,
+`max_runtime` and `max_estimated_cost`, checked at every node boundary, and every
+node by a timeout. Hitting a limit is a normal outcome: discovery stops, the run
+proceeds to synthesis, and the report carries an explicit coverage caveat.
+Cancellation stops the run at the next node. The graph checkpoints after every
+node and resumes from the last checkpoint (ADR 0014).
 
 ## 5. Data flow of one claim
 

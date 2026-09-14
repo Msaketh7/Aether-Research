@@ -32,6 +32,7 @@ export interface CreateResearchResponse {
 export interface RunLimits {
   max_iterations: number;
   max_sources: number;
+  max_search_queries: number;
   max_runtime_seconds: number;
   max_cost_usd: number;
 }

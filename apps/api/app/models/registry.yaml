@@ -115,8 +115,8 @@ models:
     # makes retrieval quietly worse - so they are declared here, where the model
     # is, and applied by the gateway.
     # Source: nomic-ai/nomic-embed-text-v1.5 model card, task instruction prefixes.
-    embedding_document_prefix: "search_document: "
-    embedding_query_prefix: "search_query: "
+    embedding_document_prefix: 'search_document: '
+    embedding_query_prefix: 'search_query: '
     pricing:
       input_usd_per_mtok: 0.0
       output_usd_per_mtok: 0.0

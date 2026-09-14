@@ -22,8 +22,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 6   | Web research tools         | Done     |
 | 7   | Document ingestion         | Done     |
 | 8   | Retrieval                  | Done     |
-| 9   | LangGraph agent system     | **Next** |
-| 10  | Agents                     | Planned  |
+| 9   | LangGraph agent system     | Done     |
+| 10  | Agents                     | **Next** |
 | 11  | Evidence system            | Planned  |
 | 12  | Report generation          | Planned  |
 | 13  | Background workers         | Planned  |
@@ -338,7 +338,7 @@ outcome and each chunk's per-arm rank, because "the lexical arm found this at
 rank 1 and the dense arm never saw it" is the shape of a retrieval bug and is
 invisible once scores are fused.
 
-Reranking is MMR — a *diversity* reranker, named for what it does. The top of a
+Reranking is MMR — a _diversity_ reranker, named for what it does. The top of a
 fused list is full of near-duplicates by construction: chunks overlap by 64
 tokens, filings restate themselves, one wire story gets reposted. The
 cross-encoder the TDD describes solves a different problem, is a model this
@@ -387,12 +387,12 @@ Four defects found while building and running it:
 
 Stated rather than implied: no dense or hybrid quality number exists. No
 embedding model has been run against a real corpus here, and pgvector cannot be
-built on this machine, so those rows report *not measured* with the reason. The
+built on this machine, so those rows report _not measured_ with the reason. The
 dense SQL is exercised in CI against the pgvector image with a deterministic
 stand-in embedder — which proves the SQL, and makes no claim about quality.
 Nothing calls the retriever at runtime until the agents exist (Phases 9-10).
 
-## Phase 9 — LangGraph agent system · **Next**
+## Phase 9 — LangGraph agent system · **Done**
 
 LangGraph as the orchestration layer (ADR 0002). A typed `ResearchState` holding
 `research_id`, `query`, `research_plan`, `subtasks`, `sources`, `claims`,
@@ -405,7 +405,84 @@ Citation Validation → END. Researchers run in parallel where possible. **Bound
 every loop**: `MAX_RESEARCH_ITERATIONS`, `MAX_SOURCES`, `MAX_SEARCH_QUERIES`,
 `MAX_RUNTIME`, `MAX_ESTIMATED_COST`.
 
-## Phase 10 — Agents · Planned
+_Landed:_ ADR 0014. `app/agents/` holds the graph, and nothing in it pretends to
+be an agent. `state.py` is `ResearchState` with the fields above and the
+reducers that make parallel writes safe; `nodes.py` is one Protocol per node,
+implemented in Phase 10; `budget.py` is loop control as pure functions;
+`graph.py` is the topology and the wrapper around every node; `checkpoint.py`
+configures LangGraph's Postgres checkpointer for this system; `runtime.py`
+starts a run, or resumes it from its last checkpoint.
+
+The graph: planner → researchers in parallel (one `Send` per dispatched subtask,
+each carrying its share of the remaining budget) → evidence → claim
+normalization → verification → contradiction check → critic → re-plan or
+synthesis → citation validation, with at most one repair. A quick run skips
+verification, the contradiction check and the critic, but keeps evidence and
+claims, because a citation resolves through them.
+
+The wrapper around each node is where the guarantees live, so a Phase 10 agent
+cannot opt out: the cancel flag and the FR-8 ceilings at entry, a timeout around
+the call (a researcher is also held to the run's remaining time), usage and the
+run clock at exit. A reached ceiling ends discovery, not the run: the report is
+still written, with a caveat built from measured values that the graph - not the
+synthesizer - puts in it. Every loop ends: rounds, searches, sources, runtime,
+cost, one citation repair, and a recursion limit derived from the run's shape as
+a backstop. Runtime counts active time only, so a crashed worker's downtime is
+not charged to the run.
+
+Checkpoints are written after every node, into tables migration 0005 creates
+from a frozen copy of the library's DDL - a test fails when an upgrade changes
+it - and read back through a serializer that revives only the types a state can
+hold, derived from the state's own annotations. Cancellation reads the run's
+status column, the one `POST /research/{id}/cancel` already writes.
+
+107 new tests, 776 total: 768 pass, and the eight that skip locally are the
+same eight that skipped before this phase. The checkpointer tests run against
+real Postgres.
+
+Found while building and running it:
+
+- **LangGraph's checkpoint serializer constructs any class a checkpoint names**,
+  logging a warning. A checkpoint is a table row, so whoever can write the row
+  chooses what a worker constructs. Deserialization is now allowlisted.
+- **An allowlist fails silently.** A stored model whose class is not on it comes
+  back as a plain `dict`, with only a log line, and one that no longer validates
+  is rebuilt without validation. A probe showed this before the state was
+  written, which is why the allowlist is derived rather than hand-kept and a test
+  round-trips every type.
+- **The Postgres checkpointer read the run's stop reason back as a string.** It
+  stores top-level `str`, `int`, `float` and `bool` values inline as JSON,
+  subclasses included, so a `StrEnum` lost its type - only on Postgres, since the
+  in-memory saver serializes everything. The graph compares
+  `stop is StopReason.CANCELLED` by identity, so a cancelled run resumed from
+  Postgres would not have been recognised by its routing; only the database
+  probe inside each node would still have stopped it spending. Enums now live
+  inside models, and a test fails on any top-level field that would lose its
+  type.
+- **The checkpointer migrates its own schema**, including three
+  `CREATE INDEX CONCURRENTLY` statements that cannot run in a transaction. Alembic
+  now owns those tables, and the worker never calls `setup()`.
+- **LangGraph's default recursion limit of 25 ends a four-round deep run with an
+  exception.** The limit is derived per run.
+- **`max_search_queries` was the one FR-8 ceiling not frozen on a run**, so a
+  deployment could change it under a queued run. It is now part of `RunLimits` in
+  Python, the TypeScript contract and the mock fixtures; migration 0006 backfills
+  existing runs, checked on real rows in both directions.
+- **A pytest-asyncio loop-factory hook must answer for every test.** Returning
+  nothing for tests that did not need a selector loop broke collection of the
+  whole suite, so the hook is scoped to `tests/checkpointer/` by directory.
+- **Phase 8 shipped five files that failed `npm run format:check`**, which CI
+  runs: `registry.yaml`, `CLAUDE.md`, ADR 0013, the retrieval dataset README and
+  this file. They are formatted, and CLAUDE.md now says to run the check.
+
+Stated rather than implied: nothing runs the graph yet. Every node is a Protocol
+until Phase 10 implements it, and the worker that would pick a run up is Phase
+13\. Cost and search ceilings are enforced from what nodes report, so a node that
+raises loses its usage from the total until Phase 16 reconciles against the
+model-call ledger. LangSmith tracing is forced off. `langgraph-sdk` pins
+`websockets` to 16.x.
+
+## Phase 10 — Agents · **Next**
 
 `PlannerAgent`, `WebResearchAgent`, `DocumentResearchAgent`, `DataResearchAgent`,
 `EvidenceAgent`, `VerificationAgent`, `CriticAgent`, `SynthesisAgent`,

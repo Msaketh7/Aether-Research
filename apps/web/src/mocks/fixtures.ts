@@ -94,8 +94,20 @@ export function runDurationMs(mode: ResearchMode): number {
 /** The FR-8 ceilings. Quick runs get tighter ones because they do one pass. */
 function limitsFor(mode: ResearchMode) {
   return mode === 'quick'
-    ? { max_iterations: 1, max_sources: 12, max_runtime_seconds: 60, max_cost_usd: 0.5 }
-    : { max_iterations: 4, max_sources: 50, max_runtime_seconds: 300, max_cost_usd: 2 };
+    ? {
+        max_iterations: 1,
+        max_sources: 12,
+        max_search_queries: 30,
+        max_runtime_seconds: 60,
+        max_cost_usd: 0.5,
+      }
+    : {
+        max_iterations: 4,
+        max_sources: 50,
+        max_search_queries: 30,
+        max_runtime_seconds: 300,
+        max_cost_usd: 2,
+      };
 }
 
 // --------------------------------------------------------------------------

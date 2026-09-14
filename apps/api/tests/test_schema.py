@@ -19,6 +19,7 @@ from alembic.migration import MigrationContext
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.db.base import Base
+from app.db.external import EXTERNALLY_OWNED_TABLES
 from tests.support.postgres import ProvisionedDatabase
 
 EXPECTED_TABLES = {
@@ -104,6 +105,17 @@ async def test_every_table_from_the_design_exists(engine: AsyncEngine):
     assert names >= EXPECTED_TABLES, f"missing: {sorted(EXPECTED_TABLES - names)}"
 
 
+def _modelled_only(name: str | None, type_: str, parent_names: dict[str, str | None]) -> bool:
+    """The drift check covers what the ORM models.
+
+    The checkpoint tables are LangGraph's: Alembic creates them, no model
+    describes them, and ``app.db.external`` names them (ADR 0014).
+    """
+    if type_ == "table":
+        return name not in EXTERNALLY_OWNED_TABLES
+    return parent_names.get("table_name") not in EXTERNALLY_OWNED_TABLES
+
+
 # Alembic notes that it cannot emit an ALTER for a generated column's default.
 # That is information about what autogenerate could do, not a schema problem:
 # `tsv` is Computed and correct in both the model and the database.
@@ -123,7 +135,11 @@ async def test_the_migrations_and_the_models_agree(
     def diff(sync_connection: sa.Connection) -> list[object]:
         context = MigrationContext.configure(
             sync_connection,
-            opts={"compare_type": True, "compare_server_default": True},
+            opts={
+                "compare_type": True,
+                "compare_server_default": True,
+                "include_name": _modelled_only,
+            },
         )
         return list(compare_metadata(context, Base.metadata))
 

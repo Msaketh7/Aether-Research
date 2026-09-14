@@ -457,10 +457,12 @@ aether-research/
 
 ## Current status
 
-**Phases 0-7 of 25 are complete** ([build plan](docs/PHASES.md)). The frontend
+**Phases 0-9 of 25 are complete** ([build plan](docs/PHASES.md)). The frontend
 is a working product; it talks to a real FastAPI backend that persists to
 PostgreSQL; and behind it are object storage, a provider-neutral model gateway,
-six research tools behind an SSRF guard, and a document ingestion pipeline.
+six research tools behind an SSRF guard, a document ingestion pipeline, hybrid
+retrieval, and the research graph the agents will run in: bounded, cancellable
+and checkpointed.
 Switching the frontend between fixtures and the live API is one environment
 variable, with no code change
 ([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
@@ -476,8 +478,9 @@ variable, with no code change
 | 6     | Research tools: search, fetch, parse, SEC, arXiv and GitHub behind an SSRF guard and an untrusted-content type    | Done    |
 | 7     | Document ingestion: uploads, isolated parsing, offset-exact chunking, embeddings, metadata filtering              | Done    |
 | 8     | Hybrid retrieval: vector and lexical search, rank fusion, reranking, a retrieval benchmark                        | Done    |
-| 9     | LangGraph agent system: typed research state, the graph, bounded loops                                            | Next    |
-| 10+   | Agents, evidence, reports, workers, evaluation, observability, load testing, deployment                           | Planned |
+| 9     | LangGraph agent system: typed research state, the graph, bounded loops                                            | Done    |
+| 10    | Agents: planning, research, evidence, verification, critique, synthesis, citation validation                      | Next    |
+| 11+   | Evidence, reports, workers, evaluation, observability, load testing, deployment                                   | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -493,8 +496,10 @@ SSE stream is real, and a run survives a restart of the API process.
 **There is no worker yet**, so a created run stays `queued`, and a document
 attached to a run is stored but not yet ingested: the ingestion pipeline exists
 and is tested end to end, and the worker that runs it when a run starts is
-Phase 13. The tables for evidence, reports and traces exist and are fully
-constrained, but nothing writes to them until Phases 9-12, and the endpoints
+Phase 13. The research graph is built and tested against scripted nodes, but
+nothing runs it yet: the agents that implement its nodes are Phase 10, and the
+worker Phase 13. The tables for evidence, reports and traces exist and are fully
+constrained, but nothing writes to them until Phases 10-12, and the endpoints
 return empty collections rather than inventing content. Capabilities whose phase has not
 landed return `501 not_implemented`, so "not built yet" is always
 distinguishable from "no results".

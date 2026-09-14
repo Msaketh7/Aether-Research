@@ -18,7 +18,7 @@ running the code rather than by reading it.
 
 **`websearch_to_tsquery` combines terms with AND.** It is the obvious function
 to reach for - it takes what a person types and never raises on punctuation -
-and it is wrong here. Retrieval in this system is given *questions*, not keyword
+and it is wrong here. Retrieval in this system is given _questions_, not keyword
 lists. Measured on the fixture corpus, "inference pricing memory export"
 produced `'infer' & 'price' & 'memori' & 'export'` and matched nothing at all,
 because no chunk contains every one of those stems.
@@ -63,7 +63,7 @@ ranking's job, then fusion's, then the reranker's.
 Scoring is `ts_rank_cd` under normalisation 32, which bounds the score into
 [0, 1). This is **not BM25**, and the TDD's "BM25 / full-text" should be read as
 the latter. Bringing in a BM25 extension would be new infrastructure, and
-nothing measured yet justifies it - fusion consumes *ranks*, not scores, so what
+nothing measured yet justifies it - fusion consumes _ranks_, not scores, so what
 the lexical arm has to get right is the ordering.
 
 ### Both arms narrow through one filter builder
@@ -83,7 +83,7 @@ value from the paper that introduced the method, recorded as a documented
 default.
 
 Per-arm weights are configuration. A weight of zero removes an arm rather than
-scoring it zero, so a deployment with no embeddings reports a *skipped* arm
+scoring it zero, so a deployment with no embeddings reports a _skipped_ arm
 rather than a dense arm that appears to have searched and found nothing.
 
 ### The reranker is MMR, and it is named for what it does
@@ -97,7 +97,7 @@ construction, filings restate their own risk factors, and one wire story gets
 reposted ten times. A top-8 that is one fact eight times scores well on every
 ranking metric and starves the report of everything else.
 
-A cross-encoder is the right eventual answer for *relevance*, which is a
+A cross-encoder is the right eventual answer for _relevance_, which is a
 different job. It is also a model this repository cannot run or price today, and
 picking one before this phase's benchmark existed would be the anticipation ADR
 0004 warns against. `Reranker` is async and takes the query, so a cross-encoder
@@ -126,14 +126,14 @@ in generated identifiers.
 empty by default because a prefix a model was not trained with is noise added to
 every vector. `LLMGateway.embed()` takes an `EmbeddingPurpose` and applies the
 matching one, so a caller embeds a query by saying it is a query rather than by
-knowing which models need which string. `QueryEmbedder` is built *from* the
+knowing which models need which string. `QueryEmbedder` is built _from_ the
 `ChunkEmbedder`, which makes "the query and the chunks came from the same model"
 structural rather than a convention two call sites are expected to keep.
 
 ### The chunk size stays at 512/64, now for a measured reason
 
 `scripts/benchmark_retrieval.py` ingests a corpus at several chunk sizes and
-scores each. Relevance is labelled by *anchors*: verbatim passages from the
+scores each. Relevance is labelled by _anchors_: verbatim passages from the
 corpus that answer a question, with a chunk relevant if it contains one. That
 definition is objective, re-checkable, and survives re-chunking - which is the
 whole point, since the same labels then score a 256-token corpus and a 1024-token
@@ -153,7 +153,7 @@ one.
   `pgvector/pgvector:pg17` image, as the Phase 7 vector tests do.
 - No dense or hybrid quality number exists yet. No embedding model has been run
   against a real corpus in this repository, so the benchmark reports those rows
-  as *not measured*, with the reason, rather than as strategies that scored
+  as _not measured_, with the reason, rather than as strategies that scored
   badly.
 - Phrase and exclusion operators in a query are not honoured by the lexical arm.
   Reintroducing them means a second tsquery and a decision about how to combine

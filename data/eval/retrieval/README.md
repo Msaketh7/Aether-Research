@@ -19,7 +19,7 @@ prose of the kind the system reads, it is substantial and structured (tables,
 code fences, deep heading trees), and anyone who clones the repository can
 reproduce the measurement with no network access and no licensing question.
 
-**Labels:** 14 questions, hand-written, each with one verbatim *anchor* — a
+**Labels:** 14 questions, hand-written, each with one verbatim _anchor_ — a
 passage from the corpus that answers it. A chunk is relevant if it contains an
 anchor. Anchors stay within a single source line, so that a Markdown list marker
 or blockquote prefix on the following line cannot break the match, and they are
