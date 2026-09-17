@@ -928,17 +928,18 @@ reason._
 
 #### `reports`
 
-| Column             | Type           | Notes                                 |
-| ------------------ | -------------- | ------------------------------------- |
-| run_id             | `uuid`         | → research_runs, unique               |
-| title              | `text`         |                                       |
-| summary            | `text`         | executive summary cache               |
-| overall_confidence | `numeric(3,2)` |                                       |
-| status             | `text`         | `draft` \| `validated` \| `published` |
-| model              | `text`         | synthesizer model                     |
-| word_count         | `int`          |                                       |
-| generated_at       | `timestamptz`  |                                       |
-| validated_at       | `timestamptz`  | citation-validation pass time         |
+| Column             | Type           | Notes                                                   |
+| ------------------ | -------------- | ------------------------------------------------------- |
+| run_id             | `uuid`         | → research_runs, unique                                 |
+| title              | `text`         |                                                         |
+| summary            | `text`         | executive summary cache, markers stripped               |
+| overall_confidence | `numeric(3,2)` | mean of the cited claims; NULL if it cites none         |
+| status             | `text`         | `draft` \| `validated` \| `published`                   |
+| model              | `text`         | synthesizer model                                       |
+| word_count         | `int`          |                                                         |
+| generated_at       | `timestamptz`  |                                                         |
+| validated_at       | `timestamptz`  | citation-validation pass time                           |
+| validation         | `jsonb`        | what that pass found: checked, valid, rejected, reasons |
 
 #### `report_sections`
 

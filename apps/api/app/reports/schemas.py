@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import Field
@@ -46,7 +47,9 @@ class Report(ApiModel):
     run_id: UUID
     title: str
     summary: str
-    overall_confidence: float = Field(ge=0.0, le=1.0)
+    #: ``None`` when the report cites no claim, so there was nothing to average.
+    #: Distinct from a low score, and the reason the column is nullable.
+    overall_confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     status: ReportStatus
     model: str
     word_count: int

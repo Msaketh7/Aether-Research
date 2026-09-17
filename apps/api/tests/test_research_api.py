@@ -9,9 +9,16 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+import pytest
 from httpx import AsyncClient
 
+from app.agents.schemas import CitationCheck, ReportDraft, ReportSectionDraft
+from app.core.enums import ReportSectionKind
+from app.db.session import Database
+from app.research.recorder import RunRecorder
 from tests.conftest import API, as_user, valid_request
+from tests.support import agents as fake
+from tests.support.projection import seed_source
 
 
 async def create_run(client: AsyncClient, **overrides: object) -> dict[str, object]:
@@ -338,6 +345,57 @@ async def test_another_users_evidence_is_not_found_rather_than_forbidden(
 
     assert sources.status_code == 404
     assert evidence.status_code == 404, "a 403 would confirm the run exists"
+
+
+async def test_a_projected_report_is_served_with_its_citations(
+    client: AsyncClient, database: Database, default_user_id: UUID
+):
+    """The whole Phase 12 path over HTTP: a projected report, read back as JSON.
+
+    The repository suite covers what the rows hold; this covers that the wiring
+    between them and the endpoint exists, which is the part no unit test sees.
+    """
+    run_id = UUID(str((await create_run(client))["run_id"]))
+    source_id, document_id = await seed_source(database, run_id, "a")
+    span = fake.evidence("ev-1", quote="Inference costs $4.10 per GPU-hour.").model_copy(
+        update={"source_id": source_id, "document_id": document_id}
+    )
+    claim = fake.claim("claim-1", evidence_ids=(span.id,))
+    await RunRecorder(database).record(
+        fake.state(
+            research_id=run_id,
+            evidence=[span],
+            claims=[claim],
+            sources=[fake.source("source-a").model_copy(update={"source_id": source_id})],
+            report=ReportDraft(
+                title="Inference pricing",
+                model="test-writer-v1",
+                revision=0,
+                sections=(
+                    ReportSectionDraft(
+                        kind=ReportSectionKind.EXECUTIVE_SUMMARY,
+                        heading="Executive summary",
+                        content_md="Inference costs $4.10 per GPU-hour [1].",
+                    ),
+                ),
+                coverage_caveat=None,
+            ),
+            citation_check=CitationCheck(revision=0, checked=1, valid=1, rejected=0),
+        )
+    )
+
+    body = (await client.get(f"{API}/research/{run_id}/report")).json()
+
+    assert body["report"]["status"] == "validated"
+    assert body["report"]["overall_confidence"] == pytest.approx(claim.confidence)
+    assert [section["kind"] for section in body["sections"]] == [
+        "executive_summary",
+        "evidence",
+        "references",
+    ]
+    assert body["citations"][0]["ordinal"] == 1
+    assert body["citations"][0]["quote"] == "Inference costs $4.10 per GPU-hour."
+    assert body["validation"]["checked"] == 1
 
 
 async def test_the_report_is_not_ready_rather_than_missing(client: AsyncClient):

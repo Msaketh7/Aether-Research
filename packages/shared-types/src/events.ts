@@ -115,7 +115,8 @@ export type ResearchEvent =
       {
         report_id: Uuid;
         word_count: number;
-        overall_confidence: UnitInterval;
+        /** `null` when the report cites no claim, as on `Report`. */
+        overall_confidence: UnitInterval | null;
         cost_usd: number;
         coverage_caveat: string | null;
       }

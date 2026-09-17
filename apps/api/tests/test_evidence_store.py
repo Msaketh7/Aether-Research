@@ -13,46 +13,35 @@ is the step after it.
 
 from __future__ import annotations
 
-import datetime as dt
 import uuid
-from collections.abc import AsyncIterator
 
 import pytest
 import sqlalchemy as sa
 
 from app.agents.schemas import MAX_EVIDENCE_PER_CLAIM as graph_cap
-from app.core.enums import ClaimStatus, EvidenceStance, ResearchMode, RunStatus, SourceType
-from app.db.models.research import ResearchRunRow
-from app.db.models.source import DocumentRow, SourceRow
+from app.core.enums import ClaimStatus, EvidenceStance, SourceType
 from app.db.repositories.evidence import MAX_EVIDENCE_PER_CLAIM as repository_cap
 from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
-from app.db.repositories.user import UserRepository
 from app.db.session import Database
 from app.evidence.dedup import cluster_identity
-from app.evidence.projection import UNKNOWN_MODEL, EvidenceProjector, evidence_link_id
-from app.sources.credibility import assess
+from app.evidence.projection import UNKNOWN_MODEL, evidence_link_id
+from app.research.recorder import RunRecorder
 from tests.support import agents as fake
+from tests.support.projection import (
+    OTHER,
+    WIRE,
+    count,
+    seed_run,
+    seed_source,
+    seed_user,
+)
 
 pytestmark = pytest.mark.anyio
-
-WIRE = (
-    "The company said quarterly data center revenue reached thirty five point six "
-    "billion dollars, up from twenty two point six billion a year earlier, as "
-    "demand for inference accelerators continued to outstrip supply everywhere."
-)
-OTHER = (
-    "A research firm argued in a note that inference pricing will fall next year "
-    "as new capacity arrives, and advised clients to delay long term commitments "
-    "until the second half of the year."
-)
 
 
 @pytest.fixture
 async def owner(database: Database) -> uuid.UUID:
-    user_id = uuid.uuid4()
-    async with database.session() as session:
-        await UserRepository(session).ensure(user_id, f"{user_id}@example.test")
-    return user_id
+    return await seed_user(database)
 
 
 @pytest.fixture
@@ -60,92 +49,21 @@ async def run_id(database: Database, owner: uuid.UUID) -> uuid.UUID:
     return await seed_run(database, owner)
 
 
-async def seed_run(database: Database, user_id: uuid.UUID) -> uuid.UUID:
-    async with database.session() as session:
-        run = ResearchRunRow(
-            user_id=user_id,
-            title="Inference pricing",
-            question="What does inference cost?",
-            mode=ResearchMode.DEEP.value,
-            status=RunStatus.RESEARCHING.value,
-        )
-        session.add(run)
-        await session.flush()
-        return run.id
-
-
-async def seed_source(
-    database: Database,
-    run_id: uuid.UUID,
-    name: str,
-    *,
-    url: str | None = None,
-    digest: str | None = None,
-    excerpt: str = WIRE,
-    source_type: SourceType = SourceType.WEB,
-    domain: str = "example.test",
-    minutes: int = 0,
-) -> tuple[uuid.UUID, uuid.UUID]:
-    """One source and one document for it. Returns ``(source_id, document_id)``.
-
-    Written as rows rather than through ingestion: ingestion needs bytes, a
-    parser and object storage, and all this needs is a source with a hash and an
-    excerpt. The pipeline that really writes these has its own suite - including
-    the assertion that it stores the credibility shape used here.
-    """
-    accessed = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.UTC) + dt.timedelta(minutes=minutes)
-    credibility = assess(source_type, domain)
-    async with database.session() as session:
-        source = SourceRow(
-            run_id=run_id,
-            url=url or f"https://{name}.test/story",
-            canonical_url=url or f"https://{name}.test/story",
-            domain=domain,
-            source_type=source_type.value,
-            title=f"Report from {name}",
-            publisher=domain,
-            accessed_at=accessed,
-            content_hash=digest or f"hash-{name}",
-            credibility_score=credibility.score,
-            credibility_metadata=credibility.as_metadata(),
-            excerpt=excerpt,
-        )
-        session.add(source)
-        await session.flush()
-        document = DocumentRow(
-            source_id=source.id,
-            normalized_content=excerpt,
-            content_hash=digest or f"hash-{name}",
-        )
-        session.add(document)
-        await session.flush()
-        return source.id, document.id
-
-
 def state_with(run_id: uuid.UUID, **overrides: object) -> dict[str, object]:
     return fake.state(research_id=run_id, **overrides)
 
 
-async def count(database: Database, table: str, run_id: uuid.UUID | None = None) -> int:
-    where = " WHERE run_id = :run_id" if run_id else ""
-    async with database.session() as session:
-        result = await session.execute(
-            sa.text(f"SELECT count(*) FROM {table}{where}"),  # noqa: S608 - fixed table names
-            {"run_id": run_id} if run_id else {},
-        )
-        return int(result.scalar_one())
-
-
 @pytest.fixture
-async def projector(database: Database) -> AsyncIterator[EvidenceProjector]:
-    yield EvidenceProjector(database)
+async def projector(database: Database) -> RunRecorder:
+    """The real composition: evidence and report, one session, one transaction."""
+    return RunRecorder(database)
 
 
 # --- projecting -----------------------------------------------------------------
 
 
 async def test_a_run_becomes_claims_evidence_and_contradictions(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_a, document_a = await seed_source(database, run_id, "a")
     source_b, document_b = await seed_source(database, run_id, "b", digest="other", excerpt=OTHER)
@@ -171,14 +89,14 @@ async def test_a_run_becomes_claims_evidence_and_contradictions(
 
     projected = await projector.record(state)
 
-    assert projected.claims == 2
-    assert projected.evidence == 2
+    assert projected.evidence.claims == 2
+    assert projected.evidence.evidence == 2
     assert await count(database, "claims", run_id) == 2
     assert await count(database, "evidence") == 2
 
 
 async def test_projecting_the_same_run_twice_rewrites_rather_than_duplicates(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     # A resumed run re-projects everything its checkpoint holds: the nodes that
     # already ran are not re-run, but their output is written again.
@@ -209,7 +127,7 @@ async def test_projecting_the_same_run_twice_rewrites_rather_than_duplicates(
 
 
 async def test_one_span_behind_two_claims_is_two_rows_that_keep_their_identity(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_id, document_id = await seed_source(database, run_id, "a")
     span = fake.evidence("ev-1", quote=WIRE[:80]).model_copy(
@@ -239,7 +157,7 @@ async def test_one_span_behind_two_claims_is_two_rows_that_keep_their_identity(
 
 
 async def test_corroboration_counts_clusters_not_copies(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     # The same wire story on three sites, plus one independent account.
     original, doc_1 = await seed_source(database, run_id, "wire", digest="same")
@@ -271,7 +189,7 @@ async def test_corroboration_counts_clusters_not_copies(
 
 
 async def test_a_duplicate_source_is_recorded_with_the_rule_that_found_it(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     original, _ = await seed_source(database, run_id, "wire", digest="same")
     reprint, _ = await seed_source(database, run_id, "reprint", digest="same", minutes=1)
@@ -294,7 +212,7 @@ async def test_a_duplicate_source_is_recorded_with_the_rule_that_found_it(
 
 
 async def test_counts_are_recomputed_rather_than_incremented(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_id, document_id = await seed_source(database, run_id, "a")
     span = fake.evidence("ev-1", quote=WIRE[:80]).model_copy(
@@ -321,7 +239,7 @@ async def test_counts_are_recomputed_rather_than_incremented(
 
 
 async def test_a_source_that_supported_nothing_counts_zero_rather_than_nothing(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     await seed_source(database, run_id, "unused")
 
@@ -333,7 +251,7 @@ async def test_a_source_that_supported_nothing_counts_zero_rather_than_nothing(
 
 
 async def test_a_span_from_a_checkpoint_without_a_model_is_recorded_as_unknown(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_id, document_id = await seed_source(database, run_id, "a")
     span = fake.evidence("ev-1", quote=WIRE[:80], model="").model_copy(
@@ -356,7 +274,7 @@ async def test_a_span_from_a_checkpoint_without_a_model_is_recorded_as_unknown(
 
 
 async def test_a_contradiction_is_written_unresolved_with_both_values(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_a, document_a = await seed_source(database, run_id, "a")
     source_b, document_b = await seed_source(database, run_id, "b", digest="other", excerpt=OTHER)
@@ -409,7 +327,7 @@ async def test_a_contradiction_is_written_unresolved_with_both_values(
 
 
 async def test_a_resolution_someone_recorded_survives_the_next_projection(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_a, document_a = await seed_source(database, run_id, "a")
     source_b, document_b = await seed_source(database, run_id, "b", digest="other", excerpt=OTHER)
@@ -461,7 +379,7 @@ async def test_a_resolution_someone_recorded_survives_the_next_projection(
 
 
 async def test_a_contradiction_whose_claims_are_gone_is_not_written(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     await projector.record(
         state_with(run_id, contradictions=[fake.contradiction("c-1")], claims=[], evidence=[])
@@ -474,7 +392,7 @@ async def test_a_contradiction_whose_claims_are_gone_is_not_written(
 
 
 async def test_the_summary_counts_what_was_written_not_what_state_held(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_id, document_id = await seed_source(database, run_id, "a")
     span = fake.evidence("ev-1", quote=WIRE[:80]).model_copy(
@@ -487,7 +405,7 @@ async def test_the_summary_counts_what_was_written_not_what_state_held(
 
     projected = await projector.record(state_with(run_id, evidence=[span], claims=[claim]))
 
-    assert projected.evidence == 1
+    assert projected.evidence.evidence == 1
     assert await count(database, "evidence") == 1, "the summary is the row count, not the intent"
 
 
@@ -495,7 +413,7 @@ async def test_the_summary_counts_what_was_written_not_what_state_held(
 
 
 async def test_the_sources_page_serves_real_rows_with_their_clusters(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID, owner: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID, owner: uuid.UUID
 ):
     original, _ = await seed_source(database, run_id, "wire", digest="same")
     reprint, _ = await seed_source(database, run_id, "reprint", digest="same", minutes=1)
@@ -519,7 +437,7 @@ async def test_the_sources_page_serves_real_rows_with_their_clusters(
 
 
 async def test_the_sources_page_filters_by_type_and_pages_with_an_opaque_cursor(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID, owner: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID, owner: uuid.UUID
 ):
     for index in range(3):
         await seed_source(
@@ -557,7 +475,7 @@ async def test_the_sources_page_filters_by_type_and_pages_with_an_opaque_cursor(
 
 
 async def test_the_evidence_page_returns_claims_with_their_spans_split_by_stance(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID, owner: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID, owner: uuid.UUID
 ):
     source_a, document_a = await seed_source(database, run_id, "a")
     source_b, document_b = await seed_source(database, run_id, "b", digest="other", excerpt=OTHER)
@@ -585,7 +503,7 @@ async def test_the_evidence_page_returns_claims_with_their_spans_split_by_stance
 
 
 async def test_the_evidence_page_filters_by_claim_status(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID, owner: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID, owner: uuid.UUID
 ):
     source_id, document_id = await seed_source(database, run_id, "a")
     span = fake.evidence("ev-1", quote=WIRE[:80]).model_copy(
@@ -613,7 +531,7 @@ async def test_the_evidence_page_filters_by_claim_status(
 
 
 async def test_another_users_run_reads_as_empty_rather_than_as_someone_elses(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID
 ):
     source_id, document_id = await seed_source(database, run_id, "a")
     span = fake.evidence("ev-1", quote=WIRE[:80]).model_copy(
@@ -622,9 +540,7 @@ async def test_another_users_run_reads_as_empty_rather_than_as_someone_elses(
     await projector.record(
         state_with(run_id, evidence=[span], claims=[fake.claim("claim-1", evidence_ids=(span.id,))])
     )
-    stranger = uuid.uuid4()
-    async with database.session() as session:
-        await UserRepository(session).ensure(stranger, f"{stranger}@example.test")
+    stranger = await seed_user(database)
 
     async with database.session() as session:
         repository = SqlAlchemyEvidenceRepository(session)
@@ -638,7 +554,7 @@ async def test_another_users_run_reads_as_empty_rather_than_as_someone_elses(
 
 
 async def test_a_cursor_pointing_at_a_row_that_is_gone_ends_the_traversal(
-    database: Database, projector: EvidenceProjector, run_id: uuid.UUID, owner: uuid.UUID
+    database: Database, projector: RunRecorder, run_id: uuid.UUID, owner: uuid.UUID
 ):
     await seed_source(database, run_id, "a")
     await projector.record(state_with(run_id))

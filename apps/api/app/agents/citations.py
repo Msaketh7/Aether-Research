@@ -29,7 +29,13 @@ from uuid import UUID
 from app.agents.catalog import Catalog, claim_catalog
 from app.agents.errors import AgentError
 from app.agents.nodes import NodeResult
-from app.agents.schemas import CitationCheck, ClaimItem, EvidenceItem, NodeUsage
+from app.agents.schemas import (
+    CitationCheck,
+    ClaimItem,
+    EvidenceItem,
+    NodeUsage,
+    RejectionCount,
+)
 from app.agents.state import ResearchState
 from app.core.logging import get_logger
 
@@ -98,6 +104,13 @@ class CitationValidator:
                 checked=checked,
                 valid=valid,
                 rejected=rejected,
+                # Counted per reason and carried, not only logged: a report that
+                # exhausts its repairs ships with these rejections, and the
+                # reader is shown how many and why before the prose.
+                rejections=tuple(
+                    RejectionCount(reason=reason, count=count)
+                    for reason, count in sorted(reasons.items())
+                ),
                 repair_instructions=(
                     _instructions(rejected_markers, reasons, catalog) if rejected else None
                 ),

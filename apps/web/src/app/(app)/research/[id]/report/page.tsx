@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api/client';
-import { formatCount, formatDateTime } from '@/lib/format';
+import { NOT_MEASURED, formatCount, formatDateTime } from '@/lib/format';
 import { useResearchReport } from '@/lib/api/queries';
 
 /**
@@ -70,7 +70,15 @@ export default function RunReportPage() {
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-5">
           <div>
             <p className="text-xs text-muted-foreground">Overall confidence</p>
-            <ConfidenceMeter value={meta.overall_confidence} className="mt-1" />
+            {/* Null when the report cites no claim, so there was nothing to
+                average. Shown as not computed rather than as a low score. */}
+            {meta.overall_confidence === null ? (
+              <p className="mt-1 font-mono text-sm text-muted-foreground">
+                {NOT_MEASURED} not computed
+              </p>
+            ) : (
+              <ConfidenceMeter value={meta.overall_confidence} className="mt-1" />
+            )}
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Citations</p>
@@ -108,7 +116,7 @@ export default function RunReportPage() {
             </span>{' '}
             on {formatDateTime(validation.validated_at)}.{' '}
             {validation.rejected > 0
-              ? `${validation.rejected} were rejected and removed from the report: ${validation.rejection_reasons
+              ? `${validation.rejected} could not be resolved and are shown in the text as unresolved rather than pointed at another source: ${validation.rejection_reasons
                   .map((reason) => `${reason.reason} (${reason.count})`)
                   .join('; ')}.`
               : 'Every citation resolves to an evidence span in a retrieved source.'}

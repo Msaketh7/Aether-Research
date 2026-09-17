@@ -9,7 +9,8 @@ import { formatDistanceToNowStrict, parseISO } from 'date-fns';
  * facts, and the UI must never conflate them.
  */
 
-const NOT_MEASURED = '—';
+/** Shown wherever a number was never measured, as distinct from zero. */
+export const NOT_MEASURED = '—';
 
 export function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return NOT_MEASURED;
@@ -109,5 +110,3 @@ export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
-
-export { NOT_MEASURED };

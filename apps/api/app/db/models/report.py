@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Numeric, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import ReportSectionKind, ReportStatus
@@ -36,9 +37,10 @@ class ReportRow(Base, TimestampMixin):
 
     title: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    overall_confidence: Mapped[float] = mapped_column(
-        Numeric(3, 2), nullable=False, server_default=text("0.50")
-    )
+    #: Mean confidence of the claims this report cites. Nullable because a
+    #: report that cites none has no mean, and a placeholder there is read as a
+    #: measurement the system made (0008).
+    overall_confidence: Mapped[float | None] = mapped_column(Numeric(3, 2))
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     #: The synthesiser model, recorded so a quality change is attributable.
     model: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -48,6 +50,11 @@ class ReportRow(Base, TimestampMixin):
     #: serve an unvalidated report as final.
     validated_at: Mapped[dt.datetime | None]
     coverage_caveat: Mapped[str | None] = mapped_column(Text)
+    #: The citation validator's verdict: how many markers were checked, how many
+    #: resolved, and why the rest did not. Shown above the prose, because how
+    #: much of a report could not be verified is what a reader needs before
+    #: deciding how far to trust it. NULL means the check never ran (0008).
+    validation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     run: Mapped[ResearchRunRow] = relationship(back_populates="report")
     sections: Mapped[list[ReportSectionRow]] = relationship(

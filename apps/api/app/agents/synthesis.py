@@ -106,7 +106,8 @@ class SynthesisAgent(ModelAgent):
             contradictions=_contradictions(contradictions, claims),
             repair=_repair(state),
         )
-        output, usage = await self.ask(context, prompt=prompt, schema=ReportOutput)
+        answer = await self.ask_answer(context, prompt=prompt, schema=ReportOutput)
+        output, usage = answer.value, answer.usage
 
         sections = _sections(output, claims)
         if not sections:
@@ -131,6 +132,7 @@ class SynthesisAgent(ModelAgent):
         return NodeResult(
             value=ReportDraft(
                 title=output.title,
+                model=answer.model,
                 # Overwritten by the graph, which owns both. Zero here rather
                 # than a guess, so that a draft built outside a graph is
                 # obviously a first draft.

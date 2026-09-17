@@ -23,6 +23,7 @@ from app.core.config import Settings
 from app.core.logging import user_id_var
 from app.core.pagination import PageParams
 from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
+from app.db.repositories.reports import SqlAlchemyReportRepository
 from app.db.repositories.research import SqlAlchemyResearchRepository
 from app.db.repositories.uploads import SqlAlchemyUploadRepository
 from app.db.repositories.user import UserRepository
@@ -133,10 +134,15 @@ def get_evidence_repository(session: SessionDep) -> SqlAlchemyEvidenceRepository
     return SqlAlchemyEvidenceRepository(session)
 
 
+def get_report_repository(session: SessionDep) -> SqlAlchemyReportRepository:
+    return SqlAlchemyReportRepository(session)
+
+
 def get_research_service(
     repository: Annotated[SqlAlchemyResearchRepository, Depends(get_research_repository)],
     uploads: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
     evidence: Annotated[SqlAlchemyEvidenceRepository, Depends(get_evidence_repository)],
+    reports: Annotated[SqlAlchemyReportRepository, Depends(get_report_repository)],
     queue: Annotated[JobQueue, Depends(get_queue)],
     broker: Annotated[EventBroker, Depends(get_broker)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
@@ -152,6 +158,7 @@ def get_research_service(
         repository=repository,
         uploads=uploads,
         evidence_store=evidence,
+        report_store=reports,
         queue=queue,
         broker=broker,
         settings=settings,

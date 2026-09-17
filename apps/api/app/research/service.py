@@ -29,6 +29,7 @@ from app.core.logging import get_logger
 from app.core.pagination import Page, PageParams, decode_cursor_id, encode_cursor
 from app.evidence.repository import EvidenceStore
 from app.evidence.schemas import EvidenceResponse
+from app.reports.repository import ReportStore
 from app.reports.schemas import ReportResponse
 from app.research.activity import ActivityResponse
 from app.research.events import EventBroker, ResearchEvent, ResearchEventType
@@ -60,6 +61,7 @@ class ResearchService:
         repository: ResearchRepository,
         uploads: UploadAttachments,
         evidence_store: EvidenceStore,
+        report_store: ReportStore,
         queue: JobQueue,
         broker: EventBroker,
         settings: Settings,
@@ -67,6 +69,7 @@ class ResearchService:
         self._repository = repository
         self._uploads = uploads
         self._evidence = evidence_store
+        self._reports = report_store
         self._queue = queue
         self._broker = broker
         self._settings = settings
@@ -318,14 +321,24 @@ class ResearchService:
         return ActivityResponse(agent_runs=[], tool_calls=[], llm_calls=[])
 
     async def report(self, user_id: UUID, run_id: UUID) -> ReportResponse:
+        """The run's report, with its sections and every resolved citation.
+
+        A report that shipped with rejected citations is served, as a draft,
+        with the count of what did not resolve: the reader is told how much of
+        it could not be verified rather than shown nothing. What is refused is a
+        run that has produced no report at all.
+        """
         run = await self._require_run(user_id, run_id)
-        # A missing report is an expected state, not an error: the frontend
-        # distinguishes `report_not_ready` from `run_not_found` and renders
-        # each differently.
-        raise ReportNotReady(
-            "This run has not produced a validated report yet.",
-            context={"run_status": run.status.value},
-        )
+        stored = await self._reports.report_for(run_id, user_id=user_id)
+        if stored is None:
+            # A missing report is an expected state, not an error: the frontend
+            # distinguishes `report_not_ready` from `run_not_found` and renders
+            # each differently.
+            raise ReportNotReady(
+                "This run has not produced a validated report yet.",
+                context={"run_status": run.status.value},
+            )
+        return stored
 
     # --- events -----------------------------------------------------------
 

@@ -48,8 +48,6 @@ from app.agents.schemas import ClaimItem, ContradictionItem, EvidenceItem
 from app.agents.state import ResearchState
 from app.core.enums import AgentName, ClaimType, ContradictionResolution
 from app.core.logging import get_logger
-from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
-from app.db.session import Database
 from app.evidence.dedup import cluster_sources
 from app.evidence.repository import (
     ClaimRecord,
@@ -91,45 +89,42 @@ class Projected:
 class EvidenceProjector:
     """Writes a run's claims, spans and contradictions, and clusters its sources.
 
-    Holds a ``Database`` rather than a session: it runs outside any request, in
-    a worker that has just finished a graph, and the unit of work is the whole
-    projection. One transaction, so a reader never sees claims whose evidence has
-    not landed yet.
+    Takes a store rather than a database: the unit of work is a whole run's
+    results, and the report projected beside it cites the claims written here, so
+    the two share one session and one transaction (``app.research.recorder``). A
+    reader never sees a citation whose claim has not landed.
     """
 
-    def __init__(self, database: Database) -> None:
-        self._database = database
+    def __init__(self, store: EvidenceStore) -> None:
+        self._store = store
 
-    async def record(self, state: ResearchState) -> Projected:
+    async def record(self, state: ResearchState, *, now: dt.datetime) -> Projected:
         """Project one run's state. Safe to call again with the same state."""
         research_id = state["research_id"]
         claims = tuple(state.get("claims") or ())
         evidence = {item.id: item for item in state.get("evidence") or ()}
         contradictions = tuple(state.get("contradictions") or ())
 
-        async with self._database.session() as session:
-            store: EvidenceStore = SqlAlchemyEvidenceRepository(session)
-            clusters = cluster_sources(research_id, await store.fingerprints(research_id))
-            await store.assign_clusters(clusters)
+        store = self._store
+        clusters = cluster_sources(research_id, await store.fingerprints(research_id))
+        await store.assign_clusters(clusters)
 
-            cluster_of = {
-                source_id: cluster.cluster_id
-                for cluster in clusters
-                for source_id in cluster.source_ids
-            }
-            now = dt.datetime.now(dt.UTC)
-            claim_rows = [
-                _claim_record(claim, research_id, evidence, cluster_of, now=now) for claim in claims
-            ]
-            evidence_rows = _evidence_records(claims, evidence)
-            contradiction_rows = _contradiction_records(
-                contradictions, claims, evidence, research_id, now=now
-            )
-            await store.record_claims(claim_rows)
-            await store.record_evidence(evidence_rows)
-            await store.record_contradictions(contradiction_rows)
-            await store.refresh_counts(research_id)
-            await store.commit()
+        cluster_of = {
+            source_id: cluster.cluster_id
+            for cluster in clusters
+            for source_id in cluster.source_ids
+        }
+        claim_rows = [
+            _claim_record(claim, research_id, evidence, cluster_of, now=now) for claim in claims
+        ]
+        evidence_rows = _evidence_records(claims, evidence)
+        contradiction_rows = _contradiction_records(
+            contradictions, claims, evidence, research_id, now=now
+        )
+        await store.record_claims(claim_rows)
+        await store.record_evidence(evidence_rows)
+        await store.record_contradictions(contradiction_rows)
+        await store.refresh_counts(research_id)
 
         # Counted from the rows written, not from what the state held: both
         # builders drop what they cannot write, and a summary that reported the

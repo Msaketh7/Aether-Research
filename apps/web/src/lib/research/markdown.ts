@@ -25,7 +25,15 @@ export type Block =
   | { type: 'list'; ordered: boolean; items: string[] }
   | { type: 'table'; header: string[]; rows: string[][] };
 
-const INLINE_PATTERN = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[\d+\])/g;
+/**
+ * `\[` comes first so an escaped bracket is consumed before it can start a
+ * citation marker. The API escapes verbatim text it embeds in a section - an
+ * evidence quote, a source title - because a fetched page containing "[3]"
+ * would otherwise render as a citation pointing at whatever source 3 is. That
+ * is the one sequence in this subset that turns quoted text into a claim about
+ * provenance, so it is the one that has an escape.
+ */
+const INLINE_PATTERN = /(\\\[|\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[\d+\])/g;
 
 /** Splits one line of text into inline tokens. Unmatched text passes through. */
 export function parseInline(text: string): InlineToken[] {
@@ -37,7 +45,9 @@ export function parseInline(text: string): InlineToken[] {
     if (index > cursor) tokens.push({ kind: 'text', value: text.slice(cursor, index) });
 
     const raw = match[0];
-    if (raw.startsWith('**')) {
+    if (raw === '\\[') {
+      tokens.push({ kind: 'text', value: '[' });
+    } else if (raw.startsWith('**')) {
       tokens.push({ kind: 'bold', value: raw.slice(2, -2) });
     } else if (raw.startsWith('`')) {
       tokens.push({ kind: 'code', value: raw.slice(1, -1) });

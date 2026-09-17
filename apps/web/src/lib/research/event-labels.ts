@@ -187,7 +187,7 @@ export function describeEvent(event: ResearchEvent): EventDescription {
     case 'report_completed':
       return {
         title: 'Report complete',
-        detail: `${event.payload.word_count} words · confidence ${(event.payload.overall_confidence * 100).toFixed(0)}%`,
+        detail: `${event.payload.word_count} words · confidence ${formatPercent(event.payload.overall_confidence)}`,
         tone,
         href: null,
       };

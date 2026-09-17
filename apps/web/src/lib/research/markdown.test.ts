@@ -30,6 +30,19 @@ describe('parseInline', () => {
       { kind: 'text', value: 'an [unclosed marker' },
     ]);
   });
+
+  it('renders an escaped bracket as text rather than a citation', () => {
+    // The API escapes verbatim text it embeds in a section, because a quoted
+    // page containing "[3]" would otherwise be shown to the reader as a
+    // citation to whichever source is third.
+    // Exactly what the API emits: only the opening bracket is escaped, which is
+    // enough to stop the marker matching.
+    const tokens = parseInline('the filing said \\[3] were pending');
+    expect(tokens.some((token) => token.kind === 'citation')).toBe(false);
+    expect(tokens.map((token) => (token.kind === 'text' ? token.value : '')).join('')).toBe(
+      'the filing said [3] were pending',
+    );
+  });
 });
 
 describe('parseMarkdown', () => {

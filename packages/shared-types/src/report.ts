@@ -37,7 +37,8 @@ export interface Report {
   run_id: Uuid;
   title: string;
   summary: string;
-  overall_confidence: UnitInterval;
+  /** `null` when the report cites no claim, so there was nothing to average. */
+  overall_confidence: UnitInterval | null;
   status: ReportStatus;
   /** The synthesizer model, recorded so a quality change is attributable. */
   model: string;

@@ -17,13 +17,13 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–11 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–12 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
 | Layer                         | State                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Frontend (`apps/web`)         | Complete product surface, 99 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                   |
-| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 968 tests.                                                                                                                                                                                                                         |
+| Frontend (`apps/web`)         | Complete product surface, 100 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                  |
+| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 997 tests.                                                                                                                                                                                                                         |
 | Database                      | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). Runs survive restart.                                                                                                                                                              |
 | Object storage                | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                           |
 | Model gateway                 | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`.                                                                                                                                     |
@@ -33,6 +33,7 @@ untrusted-content handling, measured evaluation, observability, deployment.
 | Research graph (`app/agents`) | LangGraph `StateGraph` over a typed, checkpointed `ResearchState`: parallel researchers via `Send`; every node wrapped with cancellation, the FR-8 ceilings, a timeout and usage accounting; Postgres checkpoints whose tables Alembic owns, read back through a derived allowlist. Every node is implemented.                 |
 | Agents (`app/agents`)         | All nine: planner, three researchers behind a router, evidence, claim normalization, verification, contradictions, critic, synthesis, and a citation validator that calls no model. Versioned prompts as package data; a model cites by catalogue number and never emits an identifier (ADR 0015).                             |
 | Evidence (`app/evidence`)     | The chain made durable: a projection of graph state onto claims, evidence spans and contradictions, idempotent on derived ids; source deduplication into clusters, so corroboration counts distinct content rather than copies; origin credibility from a declared table. `/sources` and `/evidence` serve real rows.          |
+| Reports (`app/reports`)       | A validated draft assembled into the report a reader opens: claim numbers renumbered to citation ordinals, Evidence and References built from rows rather than written, citations whose foreign keys the database enforces. `/report` serves it with the citation check's verdict.                                             |
 | Worker                        | No worker to run the graph yet (Phase 13): a created run stays `queued`, so nothing has been projected outside the tests.                                                                                                                                                                                                      |
 | Everything else               | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                                                                                                    |
 
@@ -71,7 +72,9 @@ apps/web/          Next.js frontend
 apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
   app/api/         routing, DI, error handlers, SSE relay
   app/core/        settings, logging, errors, enums, pagination
-  app/research/    run lifecycle, repository protocol, event broker, service
+  app/research/    run lifecycle, repository protocol, event broker, service,
+                   recorder.py (a finished run's evidence and report in one
+                   transaction - the citations' foreign keys require that order)
   app/db/          base, models/, repositories/
   app/workers/     JobQueue interface, Redis + in-memory adapters
   app/storage/     ObjectStorage protocol, S3 + filesystem backends, key namespace
@@ -97,7 +100,10 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
                    contradictions onto them, repository.py is the store's
                    protocol. Never resolves a contradiction, and never
                    un-resolves one a person resolved.
-  app/reports|evaluations|observability/
+  app/reports/     assembly.py turns a validated draft into the report a reader
+                   opens - markers renumbered to citation ordinals, Evidence and
+                   References assembled from rows; projection.py writes it.
+  app/evaluations|observability/
                    module boundaries with docstrings; filled by later phases
   migrations/      Alembic, two branches: core (relational) and vector
                    (needs pgvector). `alembic upgrade heads` applies both.
@@ -217,6 +223,10 @@ Hard-won; do not rediscover them.
 - **`npm run format:check` covers Markdown and YAML across the repo**, backend
   docs included. Run it after editing docs; Phase 8 shipped five files that
   failed it.
+- **An Alembic revision id may not exceed 32 characters.** `alembic_version.version_num`
+  is `varchar(32)`, so a longer id fails on the `UPDATE alembic_version` that ends
+  the upgrade - every database-provisioning test at once, and a long way from the
+  cause (Phase 12).
 
 ## Engineering rules (non-negotiable)
 

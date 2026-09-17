@@ -25,8 +25,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 9   | LangGraph agent system     | Done     |
 | 10  | Agents                     | Done     |
 | 11  | Evidence system            | Done     |
-| 12  | Report generation          | **Next** |
-| 13  | Background workers         | Planned  |
+| 12  | Report generation          | Done     |
+| 13  | Background workers         | **Next** |
 | 14  | Streaming                  | Planned  |
 | 15  | Caching                    | Planned  |
 | 16  | Cost and token governance  | Planned  |
@@ -703,7 +703,7 @@ the graph does not write `research_tasks` rows, and `task_external_id` carries
 the link to the subtask that found a claim's first span. Relevance is not
 measured, and `citations` is Phase 12's table.
 
-## Phase 12 — Report generation · **Next**
+## Phase 12 — Report generation · **Done**
 
 Structured report: Executive Summary, Key Findings, Detailed Analysis,
 Competitive Landscape, Evidence, Contradictions, Risks, Opportunities,
@@ -712,7 +712,90 @@ A citation validator that verifies the source exists, the source was actually
 retrieved, the claim is linked to evidence, the evidence belongs to the source,
 and the citation is not fabricated.
 
-## Phase 13 — Background workers · Planned
+_Landed:_ the chain from a sentence in a report to the passage it rests on is
+complete and stored. `GET /research/{id}/report` serves a real report with its
+sections, every resolved citation, and the citation check's verdict.
+
+**Section vocabulary, stated rather than quietly resolved.** The list above is
+the original brief's. PRD FR-9 refined it - Risks and Opportunities became
+Confidence Assessment and Recommendations, and Conclusion was folded into the
+Executive Summary - and the `ReportSectionKind` enum, TDD 7.2, the shared
+TypeScript types and the frontend have all implemented FR-9's nine since Phase 1.
+This phase follows FR-9. Widening the vocabulary to twelve would mean a
+migration, a contract change and three more sections for a distinction the PRD
+deliberately removed; if the brief's list is the intended one, that is a decision
+to take deliberately rather than by inference from a heading.
+
+**`[n]` changes meaning here, and that is the point.** The synthesizer cites
+claims by catalogue number, because a model that emits identifiers can fabricate
+them (ADR 0015). A reader needs the other thing: a marker that resolves to a
+_source_ and the quote behind the sentence. So `app/reports/assembly.py` resolves
+every marker through the same catalogue the synthesizer was shown, then renumbers
+it to a citation ordinal in first-appearance order. A marker that resolves to
+nothing becomes `[0]` - an ordinal no citation can hold, so the reader sees a
+visibly broken citation. Leaving the original number would be worse than
+deleting it: `[7]` in a report with seven citations quietly becomes someone
+else's source.
+
+**Evidence and References are assembled from rows.** The synthesizer has been
+refused those two sections since Phase 10; this is what fills them. Evidence
+lists every citation with its verbatim span, References lists each cited source
+once with the markers pointing at it - one entry per source, because a list that
+named the same page twice would overstate how many sources the report rests on.
+
+**A citation is a row with foreign keys.** `citations.claim_id` and
+`citations.source_id` are `ON DELETE RESTRICT`, so a citation to a claim that
+does not exist cannot be inserted at all - the database enforcing what the
+product promises. That is why the report and the evidence chain are projected
+together in one transaction (`app/research/recorder.py`): the claims a report
+cites must be written before its citations, and a report that fails to write must
+not leave the claims behind as a run that half finished.
+
+**Verbatim text is escaped on its way into a section.** A fetched page containing
+"[3]" embedded in the Evidence section would render as a citation pointing at
+whichever source is third. The renderer now takes a backslash escape for exactly
+this sequence, and everything untrusted goes through `escape_markdown`.
+
+29 new tests, 997 total. The eight that skip locally are the same eight as
+before: they need pgvector, and CI runs them.
+
+Found while building and running it:
+
+- **A migration id longer than 32 characters cannot be applied.** Alembic's
+  `alembic_version.version_num` is `varchar(32)`, and `0008_report_confidence_unmeasured`
+  is 33. Every test that provisions a database failed at once, on the `UPDATE
+alembic_version` rather than on anything in the migration, which is a long way
+  from the cause. The revision is `0008_report_validation`.
+- **The report page told the reader that rejected citations had been "removed
+  from the report".** They are not removed - they survive as `[0]` markers,
+  which is the honest behaviour and the opposite of what the sentence said. The
+  copy now says what happens.
+- **The Markdown renderer had no escape at all**, found by reading it while
+  designing the Evidence section rather than by a failure. Every inline sequence
+  it recognises is cosmetic except `[n]`, which is a claim about provenance, so
+  that is the one that got an escape.
+- **`reports.overall_confidence` was `NOT NULL DEFAULT 0.50`** and is the mean
+  confidence of the claims a report cites. A report that cites none has no such
+  mean, and the placeholder would have been read as a measurement in the one
+  case where the number matters most. Nullable now, like
+  `sources.relevance_score` in 0007 and for the same reason.
+- **The validator's reason codes would have reached the reader as jargon**, found
+  by looking at the rendered page rather than at the JSON: the summary above the
+  prose would have said "no_such_claim (2)". The code is what is stored, and the
+  API translates it into a sentence on the way out.
+- **The projection had nowhere to put the verdict.** How many citations were
+  checked and why the rest failed lived only in the graph's checkpoint, which no
+  request can read, and only the counts are recoverable from the stored text -
+  the reasons are not. `reports.validation` holds it.
+
+Stated rather than implied: nothing runs a graph in production yet, so no report
+has been projected outside the tests - the worker is Phase 13, and a created run
+still stays `queued`. No live model call has been made on this machine. The
+frontend still runs against its fixtures by default; pointing it at the live API
+is one environment variable, and there is nothing there to read until the worker
+exists.
+
+## Phase 13 — Background workers · **Next**
 
 Redis-based workers: API → Redis queue → worker → LangGraph → PostgreSQL. Worker
 processes separate from API processes. Job statuses: queued, running, paused,
@@ -871,8 +954,8 @@ A new user must be able to:
 7. See evidence being collected — _UI done, extraction done, worker Phase 13_
 8. See contradictions — _UI done, detection done, worker Phase 13_
 9. Wait for iterative research to complete — _Phase 9_
-10. Receive a structured report — _UI done, generation Phase 12_
-11. Open citations — _UI done, validation Phase 12_
+10. Receive a structured report — _UI done, generation done, worker Phase 13_
+11. Open citations — _UI done, validation done, worker Phase 13_
 12. Inspect sources — _UI done_
 13. Inspect evidence supporting claims — _UI done_
 14. View previous research — **done**

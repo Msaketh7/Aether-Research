@@ -500,6 +500,11 @@ class ReportSectionDraft(GraphValue):
 
 class ReportDraft(GraphValue):
     title: str = Field(min_length=1, max_length=300)
+    #: The model that wrote this draft, as the provider reported it. Stored on
+    #: the report row so a change in quality is attributable (TDD 7.2); not the
+    #: role's configured model, which failover can differ from. Defaulted so a
+    #: checkpoint written before Phase 12 still loads.
+    model: str = Field(default="", max_length=120)
     #: 0 for the first draft; 1 after the one repair the validator may ask for.
     #: Set by the graph, not the synthesizer.
     revision: int = Field(ge=0)
@@ -509,6 +514,14 @@ class ReportDraft(GraphValue):
     coverage_caveat: str | None = Field(default=None, max_length=2000)
 
 
+class RejectionCount(GraphValue):
+    """How many citations one broken link of the chain accounted for."""
+
+    #: One of the validator's reason codes, which are the links of the chain.
+    reason: str = Field(pattern=ERROR_CODE_PATTERN)
+    count: int = Field(ge=1)
+
+
 class CitationCheck(GraphValue):
     """The citation validator's verdict on one draft."""
 
@@ -516,6 +529,11 @@ class CitationCheck(GraphValue):
     checked: int = Field(ge=0)
     valid: int = Field(ge=0)
     rejected: int = Field(ge=0)
+    #: Why the rejected ones were rejected, counted per reason. Carried in state
+    #: rather than only logged because it is shown to the reader above a report
+    #: that shipped with citations the run could not stand behind - which is the
+    #: one case where the count is the most important thing on the page.
+    rejections: tuple[RejectionCount, ...] = Field(default=(), max_length=8)
     repair_instructions: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
@@ -524,6 +542,12 @@ class CitationCheck(GraphValue):
             raise ValueError("Every checked citation is either valid or rejected.")
         if self.rejected and not self.repair_instructions:
             raise ValueError("Rejected citations need repair instructions for the synthesizer.")
+        counted = sum(rejection.count for rejection in self.rejections)
+        if self.rejections and counted != self.rejected:
+            raise ValueError(
+                "Every rejected citation belongs to exactly one reason: "
+                f"{self.rejected} rejected, {counted} accounted for."
+            )
         return self
 
     @property
