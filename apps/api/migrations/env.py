@@ -28,7 +28,15 @@ from app.db.external import EXTERNALLY_OWNED_TABLES
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers` defaults to True, which sets `disabled` on every
+    # logger that already exists - including every `app.*` logger, since this
+    # module imports the application to reach its metadata. Alembic's generated
+    # env.py omits the argument, and the effect is silent: migrations log
+    # normally and the application stops logging entirely. Harmless while
+    # migrations run in their own process; not harmless in a worker that
+    # migrates and then serves, and it is what made application logs
+    # unassertable in the test suite (Phase 10).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 

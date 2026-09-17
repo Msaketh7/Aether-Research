@@ -106,6 +106,24 @@ class GraphNode(StrEnum):
 _DISCOVERY_NODES = frozenset({GraphNode.PLANNER, GraphNode.RESEARCHER})
 
 
+class ResearchChannel(StrEnum):
+    """Where a subtask is researched (Phase 10).
+
+    One node runs every subtask, so the node has to know which researcher to
+    be. The planner proposes a channel - it is the only step that has read the
+    question - and the router resolves it against what the run actually has: a
+    subtask sent to ``DOCUMENTS`` for a run with no attached corpus is moved to
+    the web rather than answered with nothing.
+    """
+
+    #: Search the open web, fetch and read pages.
+    WEB = "web"
+    #: The run's own attached documents, through retrieval. No network.
+    DOCUMENTS = "documents"
+    #: The structured sources: SEC filings, arXiv papers, GitHub repositories.
+    DATA = "data"
+
+
 class StopReason(StrEnum):
     """Why a run stopped looking for material before its critic was satisfied.
 
@@ -171,6 +189,12 @@ class RunParameters(GraphValue):
     date_range_start: date | None = None
     date_range_end: date | None = None
     parent_research_id: UUID | None = None
+    #: Whether the user attached documents to this run. A fact about the run
+    #: rather than a derived one: the planner decides whether to send a subtask
+    #: to the document channel before any retrieval has happened, and a planner
+    #: that had to ask the database would be a planner that can fail on a
+    #: database. The worker sets it when it builds the brief (Phase 13).
+    has_attached_documents: bool = False
 
 
 class Stop(GraphValue):
@@ -271,6 +295,9 @@ class Subtask(GraphValue):
     priority: TaskPriority
     iteration: int = Field(ge=1)
     rationale: str = Field(default="", max_length=2000)
+    #: Resolved by the router before dispatch, never used as the planner gave
+    #: it. Defaulted so that a checkpoint written before Phase 10 still loads.
+    channel: ResearchChannel = ResearchChannel.WEB
 
 
 class Plan(GraphValue):
@@ -305,6 +332,10 @@ class SubtaskAssignment(GraphValue):
     research_id: UUID
     user_id: UUID
     query: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
+    #: The run's mode, carried rather than looked up: it decides which model
+    #: tier the researcher's calls route to, and a researcher that defaulted it
+    #: would spend deep-run prices inside a quick run.
+    mode: ResearchMode
     subtask: Subtask
     query_allowance: int = Field(ge=1)
     source_allowance: int = Field(ge=1)
@@ -367,6 +398,7 @@ class EvidenceItem(GraphValue):
     iteration: int = Field(ge=1)
     source_id: UUID
     document_id: UUID
+    #: The span itself, verbatim. Stored as ``evidence.span_text``.
     claim_text: str = Field(min_length=1, max_length=2000)
     span_start: int = Field(ge=0)
     span_end: int = Field(ge=1)
@@ -376,6 +408,17 @@ class EvidenceItem(GraphValue):
     def _ordered(self) -> EvidenceItem:
         if self.span_end <= self.span_start:
             raise ValueError("An evidence span must end after it starts.")
+        # The offsets must bracket exactly this text in the stored document, or
+        # re-reading the span at them would not return the quote and every
+        # citation resting on it would be unverifiable. Phase 10 found that an
+        # extractor is the one place this can go wrong silently, so it is an
+        # invariant of the value rather than a rule an extractor remembers.
+        if self.span_end - self.span_start != len(self.claim_text):
+            raise ValueError(
+                "An evidence span's offsets must bracket exactly its text: "
+                f"{self.span_end - self.span_start} characters spanned, "
+                f"{len(self.claim_text)} quoted."
+            )
         return self
 
 

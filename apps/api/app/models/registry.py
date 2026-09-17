@@ -185,6 +185,24 @@ class ModelRegistry:
             and (not chat_only or spec.supports_chat)
         ]
 
+    def find(self, provider: LlmProvider, model_id: str) -> ModelSpec | None:
+        """The declared model a completion came from, or ``None``.
+
+        The reverse of what the router does, and the only way a caller holding
+        a finished ``Completion`` can price it without knowing registry keys.
+        Declaration order decides when one model id is declared twice - two
+        entries for the same id with different prices is a registry defect, and
+        picking the first at least makes it a *consistent* one.
+        """
+        return next(
+            (
+                spec
+                for spec in self.specs.values()
+                if spec.provider is provider and spec.model_id == model_id
+            ),
+            None,
+        )
+
     def embedding_models(self) -> list[ModelSpec]:
         return [spec for spec in self.specs.values() if spec.supports_embeddings]
 

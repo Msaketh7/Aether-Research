@@ -143,3 +143,48 @@ def test_secrets_are_not_printed_by_settings_repr():
     assert "sk-ant-secret-value" not in repr(settings)
     assert settings.anthropic_api_key is not None
     assert settings.anthropic_api_key.get_secret_value() == "sk-ant-secret-value"
+
+
+def test_running_migrations_does_not_switch_the_application_logs_off():
+    """Found in Phase 10, by a test that could not see a log line it had just made.
+
+    ``fileConfig`` defaults to ``disable_existing_loggers=True``, and
+    ``migrations/env.py`` imports the application to reach its metadata - so
+    every ``app.*`` logger already exists by the time Alembic configures
+    logging, and every one of them was being disabled. The migrations kept
+    logging normally, which is what made it invisible: the process looked like
+    it was logging, and the application inside it had gone quiet.
+
+    Harmless while migrations run in their own process. Not harmless in a
+    worker that migrates and then serves.
+    """
+    from logging.config import fileConfig
+    from pathlib import Path
+
+    probe = logging.getLogger("app.probe.migrations")
+    assert not probe.disabled
+
+    fileConfig(
+        str(Path(__file__).resolve().parents[1] / "alembic.ini"),
+        disable_existing_loggers=False,
+    )
+
+    assert not probe.disabled, "an application logger must survive the migration run"
+
+
+def test_an_error_context_cannot_break_the_handler_that_reports_it():
+    """Found in Phase 10, the moment application logs started working again.
+
+    ``logging.makeRecord`` raises when an ``extra`` field shares a name with a
+    ``LogRecord`` attribute. The error handler spreads an ``AppError``'s context
+    into ``extra``, and an upload refused for a format mismatch carries
+    ``filename`` in its context - so reporting a 415 raised a ``KeyError`` and
+    turned it into a 500. The disabled loggers above are why no test saw it: a
+    disabled logger returns before it builds a record.
+    """
+    from app.core.logging import log_context
+
+    safe = log_context({"filename": "notes.pdf", "declared": "application/pdf"})
+
+    assert safe == {"ctx_filename": "notes.pdf", "declared": "application/pdf"}
+    logging.getLogger("app.probe.context").warning("request rejected", extra=safe)

@@ -449,17 +449,18 @@ progress after every step, and streams updates to your browser._
 _Plain terms: each row is one AI worker, what it takes in, what it produces, and
 how powerful a model it needs._
 
-| Node                                   | Input                                                                   | Output                                                                           | Model tier                                                |
-| -------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| **Planner**                            | question, mode, depth, domains, date range, parent evidence (followups) | `ResearchPlan` (Pydantic): `research_goal`, `subtasks[{id, question, priority}]` | strong                                                    |
-| **Researcher** (per subtask, parallel) | one subtask + `SearchBudget` slice                                      | ranked `RetrievedSource[]` + fetched `Document[]`                                | strong for reasoning; small for relevance filtering       |
-| **Evidence Extractor**                 | documents for a subtask                                                 | `EvidenceCandidate[]` (claim text, span, offsets, stance)                        | medium                                                    |
-| **Claim Normalization**                | evidence candidates                                                     | `Claim[]` with `normalized_key`, subject/predicate/object                        | medium                                                    |
-| **Verification Agent**                 | claims + all evidence                                                   | per-claim `status` + calibrated `confidence`                                     | strong                                                    |
-| **Contradiction Check**                | claims grouped by `normalized_key`                                      | `Contradiction[]` with `likely_reason`                                           | strong                                                    |
-| **Critic**                             | coverage/confidence/contradiction state per subtask                     | `sufficient: bool` + `missing: MissingInfo[]`                                    | strong                                                    |
-| **Synthesizer**                        | verified claims, contradictions, sources                                | report sections (Markdown) + citation markers                                    | strongest                                                 |
-| **Citation Validator**                 | draft report + citation markers                                         | validated report or repair instructions                                          | small/medium (deterministic checks + one LLM repair pass) |
+| Node                                   | Input                                                                   | Output                                                                           | Model tier                                          |
+| -------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **Planner**                            | question, mode, depth, domains, date range, parent evidence (followups) | `ResearchPlan` (Pydantic): `research_goal`, `subtasks[{id, question, priority}]` | strong                                              |
+| **Researcher** (per subtask, parallel) | one subtask + `SearchBudget` slice                                      | ranked `RetrievedSource[]` + fetched `Document[]`                                | strong for reasoning; small for relevance filtering |
+| **Research router**                    | the subtask's channel                                                   | the researcher for it: web, the run's attached documents, or SEC/arXiv/GitHub    | none - deterministic                                |
+| **Evidence Extractor**                 | documents for a subtask                                                 | `EvidenceCandidate[]` (claim text, span, offsets, stance)                        | medium                                              |
+| **Claim Normalization**                | evidence candidates                                                     | `Claim[]` with `normalized_key`, subject/predicate/object                        | medium                                              |
+| **Verification Agent**                 | claims + all evidence                                                   | per-claim `status` + calibrated `confidence`                                     | strong                                              |
+| **Contradiction Check**                | claims grouped by `normalized_key`                                      | `Contradiction[]` with `likely_reason`                                           | strong                                              |
+| **Critic**                             | coverage/confidence/contradiction state per subtask                     | `sufficient: bool` + `missing: MissingInfo[]`                                    | strong                                              |
+| **Synthesizer**                        | verified claims, contradictions, sources                                | report sections (Markdown) + citation markers                                    | strongest                                           |
+| **Citation Validator**                 | draft report + citation markers                                         | validated report or repair instructions                                          | none - the repair pass is the synthesizer re-run    |
 
 ### 4.3 Graph state
 
@@ -1382,7 +1383,15 @@ Full detail in `docs/threat-model.md`. Summary:
 
 - All retrieved content is **untrusted data**. Researcher/extractor prompts wrap
   fetched text in explicit delimiters and instruct the model that the content
-  inside is data to analyse, never instructions to follow.
+  inside is data to analyse, never instructions to follow. Implemented as
+  `untrusted_block`: one notice and one pair of markers around many labelled
+  passages, so a prompt carrying twenty chunks offers one boundary to probe
+  rather than twenty.
+- **A model refers to the run's material by catalogue number, never by
+  identifier** (ADR 0015). It cannot name a URL, a source or a claim of its own,
+  so injected text asking for one produces a number out of range, which is
+  dropped and counted. With the tool permissions in 15.3, the most a hostile
+  page can obtain is a fetch of itself.
 - Output filtering on synthesized text: strip anything resembling injected
   directives, system-prompt fragments, or secret-shaped tokens.
 - Agents have a **restricted tool set**: see 15.3.
@@ -1641,7 +1650,8 @@ aether-research/
 │       └── tests/
 ├── packages/
 │   ├── shared-types/            # shared data definitions (website <-> server)
-│   ├── prompts/                 # versioned prompt templates (prompt_version)
+│   ├── prompts/                 # pointer: the templates ship inside the API
+│   │                            # package, at app/agents/prompts/ (ADR 0015)
 │   └── evaluation/              # dataset loaders, runner, metrics, graders
 ├── data/
 │   ├── seed/  eval/  fixtures/

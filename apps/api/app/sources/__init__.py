@@ -58,7 +58,14 @@ from app.sources.tools.search import (
     build_search_provider,
 )
 from app.sources.tools.sec import SearchSecInput, SearchSecOutput, SecFiling
-from app.sources.untrusted import BEGIN_MARKER, END_MARKER, UntrustedText
+from app.sources.untrusted import (
+    BEGIN_MARKER,
+    DATA_NOTICE,
+    END_MARKER,
+    UntrustedPassage,
+    UntrustedText,
+    untrusted_block,
+)
 from app.sources.urls import (
     ALLOWED_SCHEMES,
     BLOCKED_PORTS,
@@ -73,6 +80,7 @@ __all__ = [
     "ALLOWED_SCHEMES",
     "BEGIN_MARKER",
     "BLOCKED_PORTS",
+    "DATA_NOTICE",
     "DEFAULT_USER_AGENT",
     "END_MARKER",
     "RESEARCH_TOOLS",
@@ -113,6 +121,7 @@ __all__ = [
     "Toolbelt",
     "ToolbeltConfig",
     "UnsupportedContentType",
+    "UntrustedPassage",
     "UntrustedText",
     "UpstreamRateLimited",
     "UpstreamRejected",
@@ -130,5 +139,6 @@ __all__ = [
     "sanitize_text",
     "strip_invisible_markup",
     "tool_names",
+    "untrusted_block",
     "validate_url",
 ]

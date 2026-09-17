@@ -179,10 +179,14 @@ class RunBrief(GraphValue):
     date_range_start: date | None = None
     date_range_end: date | None = None
     parent_research_id: UUID | None = None
+    #: Set by whoever picks the run up, from the run's uploads (Phase 13). Not
+    #: derivable from ``ResearchRun``, which counts sources rather than
+    #: attachments, so it is passed in rather than guessed at.
+    has_attached_documents: bool = False
     budget: RunBudget
 
     @classmethod
-    def from_run(cls, run: ResearchRun) -> RunBrief:
+    def from_run(cls, run: ResearchRun, *, has_attached_documents: bool = False) -> RunBrief:
         return cls(
             research_id=run.id,
             user_id=run.user_id,
@@ -193,6 +197,7 @@ class RunBrief(GraphValue):
             date_range_start=run.date_range_start,
             date_range_end=run.date_range_end,
             parent_research_id=run.parent_run_id,
+            has_attached_documents=has_attached_documents,
             budget=RunBudget.from_limits(run.limits),
         )
 
@@ -205,6 +210,7 @@ class RunBrief(GraphValue):
             date_range_start=self.date_range_start,
             date_range_end=self.date_range_end,
             parent_research_id=self.parent_research_id,
+            has_attached_documents=self.has_attached_documents,
         )
 
 

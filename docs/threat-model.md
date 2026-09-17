@@ -53,16 +53,26 @@ threat in the system, because ingesting hostile text is the product's core loop.
   researcher cannot write to the database. No agent has a shell.
 - Structured output: agents return schema-validated objects. Free-form prose
   cannot become an action.
+- **A model refers to the run's material by number, never by identifier.** It
+  answers with catalogue positions, so injected text asking it to cite, fetch or
+  name something produces a number out of range — dropped and counted, not
+  followed. It has no way to express a URL, a source or a claim of its own
+  (ADR 0015).
 - Every claim must carry a verbatim span that is verified to exist in the stored
   document text, so injected assertions with no supporting span are dropped by
   citation validation.
 
-**Status (Phase 6).** The delimiting, sanitisation and least-privilege controls
-are implemented in `apps/api/app/sources` and enforced by the type system rather
-than by convention — retrieved text is `UntrustedText`, whose `__str__` raises,
-so it cannot be interpolated into a prompt at all (ADR 0011). The remaining
-controls (system-prompt wording, structured output, verbatim-span validation)
-arrive with the agents in Phases 10-12.
+**Status (Phase 10).** All of these are implemented. The delimiting,
+sanitisation and least-privilege controls live in `apps/api/app/sources` and are
+enforced by the type system rather than by convention — retrieved text is
+`UntrustedText`, whose `__str__` raises, so it cannot be interpolated into a
+prompt at all (ADR 0011). Many passages reach one prompt through
+`untrusted_block`: one notice and one pair of markers around the lot, so a
+prompt carrying twenty chunks offers one boundary to probe rather than twenty.
+Every template whose variables can carry retrieved text repeats the warning in
+its system instruction, in the same words, and a test asserts it across the set.
+Extraction verifies each quote character for character against the passage it
+names before it becomes a span with offsets.
 
 **Residual risk.** A sufficiently plausible injected _claim_ can still enter the
 evidence base with a real span behind it. Mitigation is corroboration scoring
@@ -121,7 +131,9 @@ model call ends discovery at the end of its round, because a ceiling that cannot
 be measured cannot be enforced. Every node runs under a timeout, and LangGraph's
 recursion limit is derived from the run's shape as a backstop. The overshoot is
 bounded by one step. Spend is summed from what nodes report until Phase 16
-reconciles it against the model-call ledger.
+reconciles it against the model-call ledger; since Phase 10 what they report is
+priced through the gateway from the registry, and a model with no declared price
+is reported as an uncosted call rather than as free.
 
 ### 3.4 Broken object-level authorization (boundary 2)
 

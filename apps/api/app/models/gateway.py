@@ -219,6 +219,27 @@ class LLMGateway:
                     run_id=run_id,
                 )
 
+    def cost_of(self, completion: Completion) -> float | None:
+        """What a finished call cost, or ``None`` when its price is not declared.
+
+        The graph enforces a run's cost ceiling from what its nodes report
+        (Phase 9), and a node holds completions, not registry keys. Without
+        this it would have to reach past the gateway into the registry - and
+        ADR 0007 exists to stop exactly that.
+
+        ``None`` is *not measured*, never zero. A node that receives it reports
+        an uncosted call, and the run stops discovery at the end of the round
+        rather than spending against a ceiling it cannot check.
+        """
+        spec = self._registry.find(completion.provider, completion.model)
+        if spec is None:
+            logger.warning(
+                "a completion came from a model the registry does not declare",
+                extra={"provider": completion.provider.value, "model": completion.model},
+            )
+            return None
+        return spec.cost_usd(completion.usage)
+
     def embedding_model(self) -> ModelSpec:
         """The model every embedding is produced with.
 

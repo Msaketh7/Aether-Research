@@ -494,6 +494,7 @@ class _Governed:
                     research_id=state["research_id"],
                     user_id=state["user_id"],
                     query=state["query"],
+                    mode=parameters.mode,
                     subtask=dispatch.subtask,
                     query_allowance=dispatch.query_allowance,
                     source_allowance=dispatch.source_allowance,

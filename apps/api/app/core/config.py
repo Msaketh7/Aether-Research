@@ -112,6 +112,20 @@ class Settings(BaseSettings):
     #: because LangGraph's Postgres checkpointer is written against it.
     checkpoint_pool_size: int = 4
 
+    # --- agents (Phase 10) -------------------------------------------------
+    #: Pages one researcher fetches and ingests at once. Multiplied by
+    #: ``graph_max_concurrency``, since that many researchers run in parallel:
+    #: the product is the run's concurrent fetches and database sessions, and it
+    #: has to stay under the connection pool.
+    researcher_fetch_concurrency: int = 2
+    #: Search results requested per query, before deduplication and selection.
+    researcher_results_per_query: int = 10
+    #: Retrieved passages one evidence-extraction call reads, and how many such
+    #: calls a round may make. Together they bound how much of a large round is
+    #: read at all, so a round that exceeds them says so in the log.
+    evidence_passages_per_call: int = 12
+    evidence_max_calls_per_round: int = 3
+
     # Per-user guardrails on the API surface itself.
     max_concurrent_runs_per_user: int = 3
     default_page_size: int = 20
@@ -317,6 +331,10 @@ class Settings(BaseSettings):
             "max_subtasks_per_iteration",
             "graph_max_concurrency",
             "checkpoint_pool_size",
+            "researcher_fetch_concurrency",
+            "researcher_results_per_query",
+            "evidence_passages_per_call",
+            "evidence_max_calls_per_round",
         ):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name.upper()} must be at least 1.")

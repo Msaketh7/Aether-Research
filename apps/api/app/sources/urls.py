@@ -39,7 +39,7 @@ import socket
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from app.core.logging import get_logger
+from app.core.logging import get_logger, log_context
 from app.sources.errors import UrlRefused
 
 logger = get_logger(__name__)
@@ -343,7 +343,7 @@ def _refuse(reason: str, url: str, **context: object) -> UrlRefused:
     """Build the refusal, logging it as the security event it is."""
     logger.warning(
         "url refused by the ssrf guard",
-        extra={"reason": reason, "url": url[:200], **context},
+        extra={"reason": reason, "url": url[:200], **log_context(context)},
     )
     return UrlRefused(reason, context={"url": url[:200], "reason": reason, **context})
 

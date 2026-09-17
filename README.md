@@ -203,7 +203,8 @@ Each feature below has a one-line plain explanation.
 The retrieval half of that scoreboard exists and has been run: the first
 measured numbers, the labelled questions behind them, and an honest account of
 what they are worth are in [`data/eval/retrieval/`](data/eval/retrieval/). The
-rest of the table waits on the agents.
+rest of the table waits on Phase 18's harness; the agents it would grade now
+exist, and none of these numbers has been measured yet.
 
 ---
 
@@ -457,12 +458,14 @@ aether-research/
 
 ## Current status
 
-**Phases 0-9 of 25 are complete** ([build plan](docs/PHASES.md)). The frontend
+**Phases 0-10 of 25 are complete** ([build plan](docs/PHASES.md)). The frontend
 is a working product; it talks to a real FastAPI backend that persists to
 PostgreSQL; and behind it are object storage, a provider-neutral model gateway,
 six research tools behind an SSRF guard, a document ingestion pipeline, hybrid
-retrieval, and the research graph the agents will run in: bounded, cancellable
-and checkpointed.
+retrieval, the research graph - bounded, cancellable and checkpointed - and the
+nine agents that run inside it, from planning a question to writing a report
+whose every citation has been checked back to a source that was really
+retrieved.
 Switching the frontend between fixtures and the live API is one environment
 variable, with no code change
 ([ADR 0009](docs/ADRs/0009-frontend-mock-transport.md)).
@@ -479,8 +482,9 @@ variable, with no code change
 | 7     | Document ingestion: uploads, isolated parsing, offset-exact chunking, embeddings, metadata filtering              | Done    |
 | 8     | Hybrid retrieval: vector and lexical search, rank fusion, reranking, a retrieval benchmark                        | Done    |
 | 9     | LangGraph agent system: typed research state, the graph, bounded loops                                            | Done    |
-| 10    | Agents: planning, research, evidence, verification, critique, synthesis, citation validation                      | Next    |
-| 11+   | Evidence, reports, workers, evaluation, observability, load testing, deployment                                   | Planned |
+| 10    | Agents: planning, research, evidence, verification, critique, synthesis, citation validation                      | Done    |
+| 11    | Evidence system: claim extraction, normalization, source deduplication, contradiction detection                   | Next    |
+| 12+   | Reports, workers, streaming, evaluation, observability, load testing, deployment                                  | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -496,11 +500,12 @@ SSE stream is real, and a run survives a restart of the API process.
 **There is no worker yet**, so a created run stays `queued`, and a document
 attached to a run is stored but not yet ingested: the ingestion pipeline exists
 and is tested end to end, and the worker that runs it when a run starts is
-Phase 13. The research graph is built and tested against scripted nodes, but
-nothing runs it yet: the agents that implement its nodes are Phase 10, and the
-worker Phase 13. The tables for evidence, reports and traces exist and are fully
-constrained, but nothing writes to them until Phases 10-12, and the endpoints
-return empty collections rather than inventing content. Capabilities whose phase has not
+Phase 13. The research graph and all nine of its agents are built and
+tested - a question goes to a validated report through the real graph in the
+suite - but nothing runs one in production yet: the worker is Phase 13. The
+tables for evidence, reports and traces exist and are fully constrained, but
+nothing writes to them until Phases 11-12, and the endpoints return empty
+collections rather than inventing content. Capabilities whose phase has not
 landed return `501 not_implemented`, so "not built yet" is always
 distinguishable from "no results".
 
@@ -574,16 +579,17 @@ failing loudly.
 
 **Done** means built and tested. **Partly** means some of the row is built, and
 the note says which part. The research tools, retrieval and the research graph
-are built but nothing calls them yet: the agents that use them are Phase 10.
+now have callers: the nine agents of Phase 10. What still has none is the graph
+itself - the worker that picks a queued run up is Phase 13.
 
 | Row | Scope                                                                                         | Status      | Where it stands in `docs/PHASES.md`                                                                                                                                                                        |
 | --- | --------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0   | Product prototype, website with fake data, so the experience is real before the engine exists | Done        | Phase 1                                                                                                                                                                                                    |
 | 1   | Basic backend, accounts, database, create/read research                                       | Partly      | Backend, database and creating and reading research are built (Phases 2-3). Real sign-in is Phase 20.                                                                                                      |
-| 2   | First AI, one Planner + Researcher + Synthesizer, single straight-line path                   | Not started | The model gateway the agents will call is built (Phase 5). No agent exists yet (Phase 10).                                                                                                                 |
-| 3   | Web research, real searching, fetching, parsing, and citations                                | Partly      | Searching, fetching and parsing are built (Phase 6). Citations are Phases 11-12.                                                                                                                           |
-| 4   | RAG, indexing and smart retrieval over collected documents                                    | Partly      | Indexing and hybrid retrieval are built (Phases 7-8). Nothing feeds them collected documents until Phases 10 and 13.                                                                                       |
-| 5   | Multi-agent, add Critic + Verifier, run researchers in parallel                               | Partly      | The graph that runs researchers in parallel and loops under a critic is built (Phase 9). The agents that fill it are Phase 10.                                                                             |
+| 2   | First AI, one Planner + Researcher + Synthesizer, single straight-line path                   | Done        | All three exist and run through the graph (Phase 10), over the gateway built in Phase 5.                                                                                                                   |
+| 3   | Web research, real searching, fetching, parsing, and citations                                | Partly      | Searching, fetching and parsing are built (Phase 6) and driven by the researchers (Phase 10). Citations are validated in the graph; persisting them is Phases 11-12.                                       |
+| 4   | RAG, indexing and smart retrieval over collected documents                                    | Partly      | Indexing and hybrid retrieval are built (Phases 7-8), and the researchers now feed them (Phase 10). A run's attached uploads are ingested by the worker, which is Phase 13.                                |
+| 5   | Multi-agent, add Critic + Verifier, run researchers in parallel                               | Done        | The graph runs researchers in parallel and loops under a critic (Phase 9), and the critic, verifier and three researchers that fill it are built (Phase 10).                                               |
 | 6   | Durable execution, save-points, queue, background workers, resume                             | Partly      | Runs are queued (Phase 2), and save-points and resuming from them are built (Phase 9). The background worker that runs them is Phase 13.                                                                   |
 | 7   | Evaluation, the test set, the scoreboard, the release gate                                    | Not started | Only the retrieval benchmark has run (Phase 8). The test set, scoreboard and release gate are Phase 18.                                                                                                    |
 | 8   | Production engineering, monitoring, rate limits, caching, load tests, security                | Partly      | Security groundwork is built: authorisation, request validation, the SSRF guard and untrusted-content handling (Phases 2-6). Caching, monitoring, rate limits and load tests are Phases 15, 17, 20 and 21. |

@@ -23,8 +23,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 7   | Document ingestion         | Done     |
 | 8   | Retrieval                  | Done     |
 | 9   | LangGraph agent system     | Done     |
-| 10  | Agents                     | **Next** |
-| 11  | Evidence system            | Planned  |
+| 10  | Agents                     | Done     |
+| 11  | Evidence system            | **Next** |
 | 12  | Report generation          | Planned  |
 | 13  | Background workers         | Planned  |
 | 14  | Streaming                  | Planned  |
@@ -482,7 +482,7 @@ raises loses its usage from the total until Phase 16 reconciles against the
 model-call ledger. LangSmith tracing is forced off. `langgraph-sdk` pins
 `websockets` to 16.x.
 
-## Phase 10 — Agents · **Next**
+## Phase 10 — Agents · **Done**
 
 `PlannerAgent`, `WebResearchAgent`, `DocumentResearchAgent`, `DataResearchAgent`,
 `EvidenceAgent`, `VerificationAgent`, `CriticAgent`, `SynthesisAgent`,
@@ -490,7 +490,109 @@ model-call ledger. LangSmith tracing is forced off. `langgraph-sdk` pins
 input/output, timeout, retry policy, observability and unit tests. Agents
 communicate through structured state, not unstructured string blobs.
 
-## Phase 11 — Evidence system · Planned
+_Landed:_ ADR 0015. Every Protocol Phase 9 declared now has an implementation,
+and a run goes from a question to a validated report through the real graph.
+
+**A model never emits an identifier.** It is shown a numbered catalogue built
+from the state (`catalog.py`) and answers with numbers, which the agent maps
+back. A number out of range is a fabrication the agent can see and drop; a
+fabricated UUID is indistinguishable from a real one and would reach the report
+as a citation to a source that was never retrieved. The schemas a model fills in
+(`outputs.py`) are separate from the state schemas and contain no UUID field.
+
+**A quote is verified before it becomes evidence.** The extractor names a
+passage and quotes it; the agent finds the quote in that passage character for
+character and computes the span's offsets from where it was found. A quote that
+is not there is dropped and counted - a paraphrase has no offsets, an invention
+has no source. `EvidenceItem` now refuses a span whose offsets do not bracket
+exactly its text, so it is an invariant of the value rather than a rule an
+extractor remembers.
+
+**Identity is derived.** A claim's id is `uuid5` over the run and its normalized
+key, a contradiction's over its ordered pair, so the same assertion found in a
+second round is the same claim with more evidence behind it, and the same
+disagreement found twice is recorded once.
+
+**The citation validator makes no model call.** TDD 4.2 allows "deterministic
+checks plus one LLM repair pass"; the repair pass is the graph re-running the
+synthesizer, and the check is arithmetic over the state - marker to claim, claim
+to evidence, evidence to a source the run really retrieved. Its usage is
+genuinely zero. For the same reason the synthesizer may not write the
+`references` or `evidence` sections: a model writing a list of sources is the
+most reliable way to fabricate one.
+
+Prompts are versioned Markdown files shipped inside the wheel
+(`app/agents/prompts/`), one per agent step, with the system instruction fixed
+and only the user turn templated. The three researchers sit behind a router that
+resolves the channel the planner proposed against what the deployment has.
+
+155 new tests, 931 total. The eight that skip locally are the same eight that
+skipped before this phase: they need pgvector, which this machine's PostgreSQL
+does not have, and CI runs them.
+
+Found while building and running it:
+
+- **Alembic's `fileConfig` switched off every application logger.**
+  `disable_existing_loggers` defaults to `True`, and `migrations/env.py` imports
+  the application to reach its metadata - so every `app.*` logger existed by the
+  time Alembic configured logging, and every one was disabled. The migrations
+  kept logging normally, which is what hid it. Harmless while migrations run in
+  their own process; not harmless in a worker that migrates and then serves, and
+  it is why no test in this repository could assert on a log line. Found by a
+  test that could not see a line it had just written.
+- **An error's context could break the handler reporting it**, which the fix
+  above then made visible. `logging.makeRecord` refuses an `extra` field sharing
+  a name with a `LogRecord` attribute, and the error handler spreads an
+  `AppError`'s context into `extra` - so an upload refused for a format
+  mismatch, whose context carries `filename`, raised a `KeyError` and turned its
+  own 415 into a 500. Live in production the whole time, and invisible in the
+  suite because the logger it raised in was disabled. `log_context` now prefixes
+  a colliding key, and the reserved set is derived from a real `LogRecord`
+  rather than listed, so a future Python cannot reintroduce it.
+- **A finished `Completion` could not be priced by its caller.** The gateway
+  computes cost for the ledger and hands the completion back without it, so an
+  agent reporting what it spent would have had to reach past the gateway into
+  the registry - the thing ADR 0007 exists to prevent. `LLMGateway.cost_of` and
+  `ModelRegistry.find` close it; an unpriced model still reports an uncosted
+  call rather than zero.
+- **A researcher would have been routed as if every run were deep.**
+  `SubtaskAssignment` carried the domains and the date range but not the mode,
+  so a quick run's researchers would have spent deep-run prices. The mode is now
+  part of the assignment.
+- **One graph node runs every subtask**, so it has to know which researcher to
+  be. `Subtask` gains a `channel` the planner proposes and the router resolves,
+  narrowing only: a channel this deployment lacks, or documents for a run with
+  no attached corpus, goes to the web and the change is logged with both.
+- **The planner could not know whether the run had documents attached.**
+  `ResearchRun` counts sources, not attachments, so the flag is now part of
+  `RunParameters` and set by whoever builds the brief (Phase 13).
+- **A source found again in a later round is not read again.** Sources merge by
+  id keeping the first researcher's task key, so a later round's extractor sees
+  only what that round newly attributed to it. That is the intended saving - the
+  page has already been quoted from - and it means a round that finds only pages
+  the run already had produces no new evidence, which the trace says.
+- **The contradiction check makes no model call when no two claims share a
+  key**, because a key held by one claim cannot disagree with anything. The
+  node still runs, with its budget and cancel checks; it costs nothing.
+- **Two defects in this phase's own code, found by re-reading rather than by a
+  failure.** Evidence extraction interleaved the per-subtask chunk lists with
+  `zip`, which stops at the shortest - so one subtask that retrieved a single
+  chunk capped every other subtask at one and the rest were dropped with no
+  trace. And claim normalization filtered a capped evidence catalogue rather
+  than capping the filtered one, so once a run held more evidence than a prompt
+  carries, a new span could fall outside the cap and never become a claim. Both
+  now have tests, checked against the old code first.
+
+Stated rather than implied: nothing runs these agents in production yet - the
+worker is Phase 13, and a created run still stays `queued`. No live model call
+has been made on this machine (Ollama is installed but not running), so the
+agents are exercised against a scripted provider behind the real gateway, which
+is what prices them. The `parse` tool still has no caller through the toolbelt:
+ingestion calls the same readability extractor beneath it, inside the isolated
+parser, so a fetched page is parsed once rather than twice. No end-to-end
+evaluation has run; that is Phase 18.
+
+## Phase 11 — Evidence system · **Next**
 
 Entities: `Source`, `Claim`, `Evidence`, `Citation`, `Contradiction`. Every claim
 linkable to evidence; every evidence record identifies its source; every source

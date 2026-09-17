@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.errors import AppError
-from app.core.logging import get_logger, request_id_var
+from app.core.logging import get_logger, log_context, request_id_var
 
 logger = get_logger(__name__)
 
@@ -60,7 +60,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         # the context never reaches the client.
         logger.warning(
             "request rejected",
-            extra={"code": exc.code, "status": exc.status_code, **exc.context},
+            extra={"code": exc.code, "status": exc.status_code, **log_context(exc.context)},
         )
         return JSONResponse(
             status_code=exc.status_code,

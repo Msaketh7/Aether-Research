@@ -231,7 +231,10 @@ class ScriptedNodes:
                 document_id=stable_id("document", source.source_id),
                 claim_text=f"A finding from {source.title}",
                 span_start=0,
-                span_end=20,
+                # An evidence span's offsets must bracket exactly its text
+                # (Phase 10): the citation validator re-reads the document at
+                # them, and a span that is not there is not checkable.
+                span_end=len(f"A finding from {source.title}"),
                 stance=EvidenceStance.SUPPORTS,
             )
             for source in state.get("sources", [])

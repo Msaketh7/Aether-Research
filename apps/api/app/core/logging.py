@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -65,6 +66,34 @@ _STANDARD_ATTRS = frozenset(
         "taskName",
     ]
 )
+
+
+#: The names ``logging.makeRecord`` refuses to let an ``extra`` overwrite.
+#: Derived from a real record rather than listed, so a future Python that adds
+#: an attribute cannot reintroduce the collision. It overlaps
+#: ``_STANDARD_ATTRS`` above, which answers a different question: that one is
+#: what the formatter treats as *not* caller-supplied.
+_RESERVED_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+}
+
+
+def log_context(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Caller-supplied fields, made safe to pass as ``extra``.
+
+    ``logging.makeRecord`` raises ``KeyError`` when an extra field shares a name
+    with a ``LogRecord`` attribute. That turns a log call into an exception, and
+    where the log call is inside an error handler it turns a 415 into a 500 -
+    which is exactly how this was found (Phase 10): an upload refused for a
+    format mismatch carried ``filename`` in its error context.
+
+    Colliding keys are prefixed rather than dropped. The value is what an
+    operator needs; the name is only how they find it.
+    """
+    return {
+        (f"ctx_{key}" if key in _RESERVED_ATTRS else key): value for key, value in values.items()
+    }
 
 
 def redact(key: str, value: Any) -> Any:

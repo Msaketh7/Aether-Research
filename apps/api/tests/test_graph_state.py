@@ -354,6 +354,7 @@ def test_a_dispatched_researchers_work_order_survives_a_checkpoint():
         research_id=stable_id("run"),
         user_id=stable_id("user"),
         query="How do providers price inference?",
+        mode=ResearchMode.DEEP,
         subtask=subtask(),
         query_allowance=3,
         source_allowance=5,

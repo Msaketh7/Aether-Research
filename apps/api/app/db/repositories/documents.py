@@ -120,6 +120,25 @@ class SqlAlchemyDocumentRepository:
         )
         return (await self._session.execute(statement)).scalar_one_or_none()
 
+    async def sources_by_id(
+        self, ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
+    ) -> list[SourceRow]:
+        """The named sources, restricted to ones this user owns.
+
+        Scoped through ``research_runs.user_id`` like every other read here, and
+        for the sharper reason: the caller is a research agent, which carries no
+        identity of its own and asks for ids it was handed by a retriever.
+        """
+        if not ids:
+            return []
+        statement = (
+            select(SourceRow)
+            .join(ResearchRunRow, ResearchRunRow.id == SourceRow.run_id)
+            .where(SourceRow.id.in_(tuple(ids)), ResearchRunRow.user_id == user_id)
+            .order_by(SourceRow.canonical_url, SourceRow.id)
+        )
+        return list((await self._session.execute(statement)).scalars())
+
     async def add_source(self, values: Mapping[str, Any]) -> SourceRow:
         row = SourceRow(**values)
         self._session.add(row)
