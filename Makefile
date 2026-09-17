@@ -30,6 +30,10 @@ api-install: ## Create the API virtualenv and install locked dependencies
 api: ## Run the FastAPI service (needs `make up` for Postgres and Redis)
 	cd $(API) && uv run uvicorn app.main:app --reload --port 8000
 
+.PHONY: worker
+worker: ## Run the research worker (needs `make up` for Postgres and Redis)
+	cd $(API) && uv run python -m app.workers.runner
+
 .PHONY: api-lint
 api-lint: ## Format check, lint and typecheck the API
 	cd $(API) && uv run ruff format --check .

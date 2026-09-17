@@ -17,29 +17,30 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–12 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–13 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
-| Layer                         | State                                                                                                                                                                                                                                                                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Frontend (`apps/web`)         | Complete product surface, 100 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                  |
-| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 997 tests.                                                                                                                                                                                                                         |
-| Database                      | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). Runs survive restart.                                                                                                                                                              |
-| Object storage                | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                           |
-| Model gateway                 | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`.                                                                                                                                     |
-| Research tools                | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. Called by the web and data researchers; the synthesizer and validator are given no belt at all.                                                                                       |
-| Ingestion (`app/retrieval`)   | Upload API; PDF, HTML, Markdown and text parsed in a killable, scrubbed child process; offset-exact LlamaIndex chunking; gateway embeddings; chunk metadata filters. Called by the web and data researchers, which is what turns a fetched page into a citable source. The worker ingests a run's attached uploads (Phase 13). |
-| Retrieval (`app/retrieval`)   | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. Called by the document researcher and by evidence extraction.                                      |
-| Research graph (`app/agents`) | LangGraph `StateGraph` over a typed, checkpointed `ResearchState`: parallel researchers via `Send`; every node wrapped with cancellation, the FR-8 ceilings, a timeout and usage accounting; Postgres checkpoints whose tables Alembic owns, read back through a derived allowlist. Every node is implemented.                 |
-| Agents (`app/agents`)         | All nine: planner, three researchers behind a router, evidence, claim normalization, verification, contradictions, critic, synthesis, and a citation validator that calls no model. Versioned prompts as package data; a model cites by catalogue number and never emits an identifier (ADR 0015).                             |
-| Evidence (`app/evidence`)     | The chain made durable: a projection of graph state onto claims, evidence spans and contradictions, idempotent on derived ids; source deduplication into clusters, so corroboration counts distinct content rather than copies; origin credibility from a declared table. `/sources` and `/evidence` serve real rows.          |
-| Reports (`app/reports`)       | A validated draft assembled into the report a reader opens: claim numbers renumbered to citation ordinals, Evidence and References built from rows rather than written, citations whose foreign keys the database enforces. `/report` serves it with the citation check's verdict.                                             |
-| Worker                        | No worker to run the graph yet (Phase 13): a created run stays `queued`, so nothing has been projected outside the tests.                                                                                                                                                                                                      |
-| Everything else               | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                                                                                                    |
+| Layer                         | State                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend (`apps/web`)         | Complete product surface, 100 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                        |
+| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 1036 tests.                                                                                                                                                                                                                              |
+| Database                      | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). A run's row carries the worker's lease (ADR 0017); UUIDs come back as `uuid.UUID`, never the driver's subclass.                                                                          |
+| Object storage                | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                                 |
+| Model gateway                 | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`.                                                                                                                                           |
+| Research tools                | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. Called by the web and data researchers; the synthesizer and validator are given no belt at all.                                                                                             |
+| Ingestion (`app/retrieval`)   | Upload API; PDF, HTML, Markdown and text parsed in a killable, scrubbed child process; offset-exact LlamaIndex chunking; gateway embeddings; chunk metadata filters. Called by the web and data researchers, which is what turns a fetched page into a citable source. The worker ingests a run's attached uploads (Phase 13).       |
+| Retrieval (`app/retrieval`)   | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. Called by the document researcher and by evidence extraction.                                            |
+| Research graph (`app/agents`) | LangGraph `StateGraph` over a typed, checkpointed `ResearchState`: parallel researchers via `Send`; every node wrapped with cancellation, the FR-8 ceilings, a timeout and usage accounting; Postgres checkpoints whose tables Alembic owns, read back through a derived allowlist. Every node is implemented.                       |
+| Agents (`app/agents`)         | All nine: planner, three researchers behind a router, evidence, claim normalization, verification, contradictions, critic, synthesis, and a citation validator that calls no model. Versioned prompts as package data; a model cites by catalogue number and never emits an identifier (ADR 0015).                                   |
+| Evidence (`app/evidence`)     | The chain made durable: a projection of graph state onto claims, evidence spans and contradictions, idempotent on derived ids; source deduplication into clusters, so corroboration counts distinct content rather than copies; origin credibility from a declared table. `/sources` and `/evidence` serve real rows.                |
+| Reports (`app/reports`)       | A validated draft assembled into the report a reader opens: claim numbers renumbered to citation ordinals, Evidence and References built from rows rather than written, citations whose foreign keys the database enforces. `/report` serves it with the citation check's verdict.                                                   |
+| Worker                        | `python -m app.workers.runner`: claims a run against its row, ingests its attachments, streams the graph while renewing the lease and writing the run's phase, progress and counts, then records the outcome. Retries with backoff, hands runs back on shutdown, reconciles what the queue lost. Publishes no events yet (Phase 14). |
+| Everything else               | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                                                                                                          |
 
 Nothing fabricates data to fill a gap. The only benchmark executed so far is
 the retrieval benchmark (Phase 8, lexical arm only); no end-to-end evaluation
-has run.
+has run, and no live model call has been made on this machine - every run
+executed so far has been over scripted agents.
 
 **Licensing.** Proprietary, all rights reserved - see [`LICENSE`](LICENSE). The
 repository is public on GitHub for reading, not reuse. Never add an open-source
@@ -57,7 +58,7 @@ listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 | [`docs/architecture.md`](docs/architecture.md) | System map                                                              |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE per trust boundary; prompt injection and SSRF                    |
 | [`docs/evaluation.md`](docs/evaluation.md)     | Metrics, thresholds, the no-fabricated-numbers rule                     |
-| [`docs/ADRs/`](docs/ADRs/)                     | 16 accepted decisions. New irreversible choice ⇒ new ADR.               |
+| [`docs/ADRs/`](docs/ADRs/)                     | 17 accepted decisions. New irreversible choice ⇒ new ADR.               |
 
 ## Repository structure
 
@@ -76,7 +77,12 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
                    recorder.py (a finished run's evidence and report in one
                    transaction - the citations' foreign keys require that order)
   app/db/          base, models/, repositories/
-  app/workers/     JobQueue interface, Redis + in-memory adapters
+  app/workers/     the second process type: queue.py (JobQueue, Redis and
+                   in-memory adapters), lifecycle.py (the lease, as the
+                   transitions a worker performs), progress.py (a node -> the
+                   run's status and its bar), worker.py (one run), loop.py
+                   (reserve, sweep, drain), runner.py (the process). No write
+                   here can overwrite a status this worker does not hold.
   app/storage/     ObjectStorage protocol, S3 + filesystem backends, key namespace
   app/models/      LLM gateway, registry.yaml, routing, provider adapters
                    (NOT the ORM — that is app/db/models/)
@@ -141,6 +147,7 @@ make api-install && make migrate && make api    # backend on :8000
 make ci             # format, lint, typecheck, unit tests, both stacks
 make test-e2e       # Playwright
 make migrate-check  # migration upgrade/downgrade round trip
+make worker         # the research worker (needs Postgres and Redis)
 make migration m="add x"   # autogenerate on the core line; HEAD=vector@head for pgvector
 make benchmark-retrieval   # measure the retrieval strategies and the chunk size
 ```
@@ -152,8 +159,11 @@ Point the frontend at the real API with `NEXT_PUBLIC_API_MODE=live` and
 
 Hard-won; do not rediscover them.
 
-- **Docker is not installed.** `make up` cannot run here. The API needs Redis
-  outside `APP_ENV=test`, so use `APP_ENV=test` for local end-to-end checks.
+- **Docker is not installed, and neither is Redis.** `make up` cannot run here.
+  The API and the worker both need Redis outside `APP_ENV=test`, so use
+  `APP_ENV=test` for local end-to-end checks - it selects the in-memory queue.
+  `tests/test_worker_queue.py` skips its Redis tests with a reason when no
+  server answers; CI runs them against a `redis:8-alpine` service container.
 - **pgvector is not installed** in the local PostgreSQL 17, and no
   pip-installable build exists for Python 3.13 on Windows. The suite migrates
   the relational line (`core@head`); the vector line (0002, 0004) and the vector
@@ -178,18 +188,29 @@ Hard-won; do not rediscover them.
   resolves a real hostname (it skips cleanly with no DNS). Everything else uses
   `httpx2.MockTransport`.
 - **The repo path contains a space.** Vitest's `forks` pool cannot hand off to
-  workers, so the config pins `pool: 'threads'`.
+  workers, so the config pins `pool: 'threads'`. On this machine the default
+  thread count then loses the race too - every worker reports "Timeout waiting
+  for worker to respond" and the run ends with `no tests`. `npx vitest run
+--maxWorkers=2` is green in about 90 seconds; it is a local resource limit, not
+  a broken test.
 - **npm cold resolve crashes** (arborist bug in the vitest peer graph) without
   `--legacy-peer-deps`. `npm ci` from the committed lockfile is fine.
+- **The API suite takes longer than twenty minutes here**, so running it in one
+  command times out. Split it - three roughly equal slices of `tests/test_*.py`
+  plus `tests/checkpointer` - and run the slices one at a time; two at once
+  contend for the machine and both get slower.
 - Bash heredocs fail above roughly 8 KB — use the Write tool for larger files.
 - **Ollama is installed but not running**, and has pulled neither the registry's
   chat model nor `nomic-embed-text`. Live embeddings are unverified here; tests
   drive the real adapter over `httpx2.MockTransport`.
 - **LlamaIndex takes about 4.5 s to import cold.** It is imported lazily inside
   the chunker, so the API process never pays it.
-- **`.env.example` is committed with mixed line endings** (mostly CRLF). An
-  editor that normalises them turns a small change into a block rewrite; check
-  `git diff --stat --ignore-cr-at-eol` before committing.
+- **`.env.example` is committed with CRLF line endings.** An editor that
+  normalises them turns a small change into a whole-file rewrite; check
+  `git diff --stat --ignore-cr-at-eol` before committing. This shell's `grep -c
+$'
+'` and `cat -A` both report the file as LF, which is wrong - read it in
+  Python with `newline=""` to see what is really there.
 - **The agent's file tool decodes backslash-u escape sequences** in content it
   writes into the characters they name (one became a NUL byte in a comment).
   Build non-ASCII characters with `chr()`, or type the character itself.
@@ -209,6 +230,13 @@ Hard-won; do not rediscover them.
   values inline as JSON**, subclasses included, so a `StrEnum` at the top of the
   graph state comes back as a plain string. Keep enums inside models;
   `tests/test_graph_state.py` fails on a top-level field that breaks this.
+- **The same trap, from the other end: asyncpg returns `pgproto.UUID`,** a
+  subclass of `uuid.UUID` that passes every isinstance check and every Pydantic
+  field - and that LangGraph's serializer then refuses to reconstruct, because
+  its allowlist is derived from the state's declared types. A resumed run fails
+  far from the cause. `NormalisedUUID` in `app/db/base.py` converts on the way
+  out, so define UUID columns with `uuid_pk()` or `fk_uuid()` and never with a
+  bare `PgUUID`. `tests/test_schema.py` fails if the conversion is removed.
 - **`langgraph` depends on `langgraph-sdk`, which pins `websockets` below 17**,
   so the lockfile holds 16.x. uvicorn needs 13 or later.
 - **Alembic's `fileConfig` disables every existing logger** unless told not to,

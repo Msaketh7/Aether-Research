@@ -147,6 +147,9 @@ class ScriptedNodes:
         self.script = script or Script()
         self.calls: Counter[str] = Counter()
         self.assignments: list[SubtaskAssignment] = []
+        #: The state each planning round was given, so a test can assert on what
+        #: the graph told the planner - the attached corpus, most of all.
+        self.plan_states: list[ResearchState] = []
         self.peak_concurrent_research = 0
         self._active_research = 0
 
@@ -194,6 +197,7 @@ class ScriptedNodes:
     # --- nodes ----------------------------------------------------------------------
 
     async def plan(self, state: ResearchState) -> NodeResult[Plan]:
+        self.plan_states.append(state)
         await self._begin("planner")
         iteration = state.get("iteration", 0) + 1
         count = (

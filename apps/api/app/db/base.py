@@ -17,9 +17,10 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import DateTime, MetaData, func, text
+from sqlalchemy import DateTime, MetaData, TypeDecorator, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 #: Without this, Postgres invents constraint names and a downgrade cannot find
@@ -45,10 +46,38 @@ class Base(DeclarativeBase):
     }
 
 
+class NormalisedUUID(TypeDecorator[uuid.UUID]):
+    """A UUID column that hands back a ``uuid.UUID`` and never a driver's subclass.
+
+    asyncpg returns ``asyncpg.pgproto.pgproto.UUID``. It *is* a ``uuid.UUID``, so
+    every isinstance check, every Pydantic field and every comparison accepts it,
+    and it travels out of a row into the research graph's state without anything
+    noticing. Then the state is checkpointed, and LangGraph's serializer refuses
+    to reconstruct a class that is not on its allowlist - which is derived from
+    the state's declared types, where the type is ``uuid.UUID``. The value comes
+    back as nothing, and a *resumed* run fails a long way from here (found by
+    running a worker restart, Phase 13).
+
+    Converting on the way out is the boundary fix: the driver is an
+    implementation detail of this layer, and the rest of the system is entitled
+    to the type the model declares. The same reasoning is already applied by
+    hand to ``Decimal`` in the research repository.
+    """
+
+    impl = PgUUID(as_uuid=True)
+    cache_ok = True
+
+    def process_result_value(self, value: Any, dialect: Dialect) -> uuid.UUID | None:
+        # An exact type check, not isinstance: the subclass is the whole problem.
+        if value is None or type(value) is uuid.UUID:
+            return value
+        return uuid.UUID(int=value.int)
+
+
 def uuid_pk() -> Mapped[uuid.UUID]:
     """Primary key generated server-side by ``gen_random_uuid()`` (pgcrypto)."""
     return mapped_column(
-        PgUUID(as_uuid=True),
+        NormalisedUUID(),
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
@@ -56,7 +85,7 @@ def uuid_pk() -> Mapped[uuid.UUID]:
 
 def fk_uuid(*args: Any, **kwargs: Any) -> Mapped[uuid.UUID]:
     """A foreign-key column. Always indexed: every FK in this schema is joined on."""
-    return mapped_column(PgUUID(as_uuid=True), *args, index=True, **kwargs)
+    return mapped_column(NormalisedUUID(), *args, index=True, **kwargs)
 
 
 class TimestampMixin:

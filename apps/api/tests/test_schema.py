@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.db.base import Base
 from app.db.external import EXTERNALLY_OWNED_TABLES
+from app.db.models.user import UserRow
 from tests.support.postgres import ProvisionedDatabase
 
 EXPECTED_TABLES = {
@@ -411,6 +412,27 @@ async def test_primary_keys_are_generated_by_the_database(raw: asyncpg.Connectio
     assert isinstance(first, uuid.UUID)
     assert first != second
     assert first.version == 4
+
+
+async def test_a_uuid_read_through_the_orm_is_a_plain_uuid(database, raw: asyncpg.Connection):
+    """Not asyncpg's subclass of it.
+
+    ``asyncpg.pgproto.pgproto.UUID`` passes every isinstance check and every
+    Pydantic field, so it travels from a row into the research graph's state
+    unnoticed - and then LangGraph's checkpoint serializer, whose allowlist is
+    derived from the state's *declared* types, refuses to reconstruct it. The
+    value comes back as nothing and a resumed run fails a long way from the
+    cause. Found by restarting a worker (Phase 13); fixed in ``app.db.base``.
+    """
+    user_id = await seed_user(raw, "uuid-shape@example.com")
+
+    async with database.session() as session:
+        row = await session.get(UserRow, user_id)
+        assert row is not None
+        stored = row.id
+
+    assert stored == user_id
+    assert type(stored) is uuid.UUID, f"the ORM returned {type(stored).__module__}"
 
 
 # --- pgvector -------------------------------------------------------------

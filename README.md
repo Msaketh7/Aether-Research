@@ -418,7 +418,7 @@ apps/api/app/
 ├── auth/           principal resolution and ownership
 ├── research/       schemas, repository boundary, event broker, service
 ├── db/             engine, session factory, ORM models, repositories, migrations
-├── workers/        JobQueue interface, Redis and in-memory adapters
+├── workers/        the queue, the run's lease, and the worker process itself
 ├── observability/  request-id and access-log middleware
 └── agents/ retrieval/ sources/ evidence/ reports/ evaluations/
                     module boundaries, filled by later phases
@@ -485,8 +485,9 @@ variable, with no code change
 | 10    | Agents: planning, research, evidence, verification, critique, synthesis, citation validation                      | Done    |
 | 11    | Evidence system: the claim, evidence and contradiction chain persisted, source deduplication, credibility         | Done    |
 | 12    | Report generation: the structured report, citations by source, a validator that proves each one                   | Done    |
-| 13    | Background workers: the queue, the worker process, resumable runs that survive a restart                          | Next    |
-| 14+   | Streaming, caching, evaluation, observability, load testing, deployment                                           | Planned |
+| 13    | Background workers: the queue, the worker process, resumable runs that survive a restart                          | Done    |
+| 14    | Streaming: progress events from the worker, over a bus that works with more than one API process                  | Next    |
+| 15+   | Caching, cost governance, evaluation, observability, load testing, deployment                                     | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -499,17 +500,21 @@ In **live mode** the same UI runs against the real stack: runs are validated,
 authorised, written to Postgres and queued, `POST /research` returns `202`, the
 SSE stream is real, and a run survives a restart of the API process.
 
-**There is no worker yet**, so a created run stays `queued`, and a document
-attached to a run is stored but not yet ingested: the ingestion pipeline exists
-and is tested end to end, and the worker that runs it when a run starts is
-Phase 13. The research graph and all nine of its agents are built and
-tested - a question goes to a validated report through the real graph in the
-suite - but nothing runs one in production yet: the worker is Phase 13. The
-tables for evidence, reports and traces exist and are fully constrained, but
-nothing writes to them until Phases 11-12, and the endpoints return empty
-collections rather than inventing content. Capabilities whose phase has not
-landed return `501 not_implemented`, so "not built yet" is always
-distinguishable from "no results".
+**A queued run is now executed.** A separate worker process takes it off the
+queue, ingests the documents it was created with, runs the research graph, and
+writes its claims, evidence, contradictions and report. The run's own row is the
+worker's lease, so a duplicate delivery, a cancellation and a second worker
+offered the same job are all settled by the database; a run whose worker is
+killed or deployed over is resumed at the node that had not finished rather than
+started again.
+
+**What the worker does not do yet is talk.** It records progress on the run as it
+goes, but publishes no live events: the event bus is in-process, so a worker
+publishing to it would reach nobody. The Redis bus and real emission are
+Phase 14, and until then the agent timeline in live mode updates when the page
+is loaded rather than as the run moves. Capabilities whose phase has not landed
+return `501 not_implemented`, so "not built yet" is always distinguishable from
+"no results".
 
 The one benchmark executed so far is the retrieval benchmark (Phase 8, lexical
 arm only). No end-to-end evaluation has run, and the evaluations page says so.
@@ -555,8 +560,15 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 make up            # Postgres + pgvector, Redis, MinIO, Prometheus, Grafana
 make api-install   # create apps/api/.venv from the lockfile
+make migrate       # apply both migration branches
 make api           # uvicorn on :8000, OpenAPI UI at /docs
+make worker        # in a second terminal: the process that runs the research
 ```
+
+Two processes, one codebase. The API never runs a research workflow; the worker
+never serves a request. Stopping a worker mid-run is safe - it hands the run back
+and the next one resumes it - and running several of them is how the throughput
+is scaled.
 
 Point the frontend at it. This is the only change required:
 
@@ -580,9 +592,10 @@ failing loudly.
 > numbers are not the row numbers here.
 
 **Done** means built and tested. **Partly** means some of the row is built, and
-the note says which part. The research tools, retrieval and the research graph
-now have callers: the nine agents of Phase 10. What still has none is the graph
-itself - the worker that picks a queued run up is Phase 13.
+the note says which part. Every layer now has a caller: the research tools and
+retrieval are called by the nine agents of Phase 10, and the graph they fill is
+called by the worker of Phase 13, which is what turns a queued run into a
+report.
 
 | Row | Scope                                                                                         | Status      | Where it stands in `docs/PHASES.md`                                                                                                                                                                                                                        |
 | --- | --------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -590,9 +603,9 @@ itself - the worker that picks a queued run up is Phase 13.
 | 1   | Basic backend, accounts, database, create/read research                                       | Partly      | Backend, database and creating and reading research are built (Phases 2-3). Real sign-in is Phase 20.                                                                                                                                                      |
 | 2   | First AI, one Planner + Researcher + Synthesizer, single straight-line path                   | Done        | All three exist and run through the graph (Phase 10), over the gateway built in Phase 5.                                                                                                                                                                   |
 | 3   | Web research, real searching, fetching, parsing, and citations                                | Done        | Searching, fetching and parsing are built (Phase 6) and driven by the researchers (Phase 10). Claims, evidence spans, sources and the citations that point at them are all persisted, and a citation the chain cannot prove is not written (Phases 11-12). |
-| 4   | RAG, indexing and smart retrieval over collected documents                                    | Partly      | Indexing and hybrid retrieval are built (Phases 7-8), and the researchers now feed them (Phase 10). A run's attached uploads are ingested by the worker, which is Phase 13.                                                                                |
+| 4   | RAG, indexing and smart retrieval over collected documents                                    | Yes         | Indexing and hybrid retrieval are built (Phases 7-8), the researchers feed them (Phase 10), and the worker ingests a run's attached uploads before it plans (Phase 13).                                                                                    |
 | 5   | Multi-agent, add Critic + Verifier, run researchers in parallel                               | Done        | The graph runs researchers in parallel and loops under a critic (Phase 9), and the critic, verifier and three researchers that fill it are built (Phase 10).                                                                                               |
-| 6   | Durable execution, save-points, queue, background workers, resume                             | Partly      | Runs are queued (Phase 2), and save-points and resuming from them are built (Phase 9). The background worker that runs them is Phase 13.                                                                                                                   |
+| 6   | Durable execution, save-points, queue, background workers, resume                             | Yes         | Runs are queued (Phase 2), save-points and resuming from them are built (Phase 9), and the worker that executes them survives a restart by resuming at the node it had not finished (Phase 13).                                                            |
 | 7   | Evaluation, the test set, the scoreboard, the release gate                                    | Not started | Only the retrieval benchmark has run (Phase 8). The test set, scoreboard and release gate are Phase 18.                                                                                                                                                    |
 | 8   | Production engineering, monitoring, rate limits, caching, load tests, security                | Partly      | Security groundwork is built: authorisation, request validation, the SSRF guard and untrusted-content handling (Phases 2-6). Caching, monitoring, rate limits and load tests are Phases 15, 17, 20 and 21.                                                 |
 | 9   | Deployment, cloud hosting, infrastructure-as-code, automated deploys, monitoring              | Not started | Nothing is hosted or deployed (Phases 23-24). CI already runs the tests on pushes to `main` and on pull requests.                                                                                                                                          |

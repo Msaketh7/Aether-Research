@@ -1,1 +1,1 @@
-"""The API-to-worker boundary: job queue interface and the worker entry point."""
+"""The API-to-worker boundary: job queue, the run lease, and the worker itself."""

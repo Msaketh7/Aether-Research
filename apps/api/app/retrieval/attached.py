@@ -1,8 +1,8 @@
 """Ingesting the files a run was created with into that run's corpus.
 
-The worker (Phase 13) calls this when it starts a run. Until then it is exercised
-by the tests, end to end: upload through the API, create a run naming the upload,
-ingest, and read back the source, document and chunks.
+The worker calls this before it plans a run (Phase 13), which is why ingestion is
+not done in the upload request: it is minutes of parsing and embedding, and a
+request thread is the one place that must not happen (ADR 0001, ADR 0012).
 
 Each attached upload becomes an ordinary source of type ``upload`` in the run, so
 evidence, citations and the sources page treat it exactly like a fetched page.

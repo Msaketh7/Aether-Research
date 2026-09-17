@@ -28,7 +28,16 @@ from app.db.external import CHECKPOINT_TABLES
 from app.db.models.research import ResearchRunRow
 from app.research.cancellation import PostgresCancellationProbe
 from tests.support.graph import Script, ScriptedNodes, brief, make_runner
-from tests.support.ingestion import seed_run
+from tests.support.ingestion import seed_run as seed_bare_run
+from tests.support.worker import (
+    build_worker,
+    entered,
+    read_row,
+    seed_run,
+    serve_until,
+    settled,
+    worker_settings,
+)
 
 MIGRATION = Path(__file__).resolve().parents[2] / "migrations/versions/0005_graph_checkpoints.py"
 LATEST_VERSION = len(AsyncPostgresSaver.MIGRATIONS) - 1
@@ -136,7 +145,7 @@ async def test_a_run_resumes_from_postgres_with_its_values_still_typed(settings)
 
 async def test_a_cancellation_written_to_the_run_stops_the_graph(settings, database):
     """Written the way ResearchService.cancel writes it: the status column."""
-    user_id, run_id = await seed_run(database)
+    user_id, run_id = await seed_bare_run(database)
     nodes = ScriptedNodes()
 
     async def cancel_the_run() -> None:
@@ -162,9 +171,61 @@ async def test_a_cancellation_written_to_the_run_stops_the_graph(settings, datab
 
 async def test_a_run_that_is_gone_or_not_the_users_reads_as_cancelled(database):
     """Nobody is left to deliver its report to, so carrying on would only spend."""
-    user_id, run_id = await seed_run(database)
+    user_id, run_id = await seed_bare_run(database)
     probe = PostgresCancellationProbe(database)
 
     assert await probe.is_cancelled(run_id, user_id) is False
     assert await probe.is_cancelled(run_id, uuid.uuid4()) is True
     assert await probe.is_cancelled(uuid.uuid4(), user_id) is True
+
+
+# --- the worker across a restart -------------------------------------------------
+
+
+async def test_a_worker_restart_resumes_the_run_from_postgres(settings, database, artifact_store):
+    """Phase 13's headline promise, against the store that has to keep it.
+
+    Two worker processes, each with its own checkpointer pool, and a run handed
+    from one to the other by a shutdown. The second must continue from the node
+    the first had not finished - not re-plan, and not research anything twice -
+    because the checkpoint is written before each node starts, not after the run
+    ends.
+    """
+    config = worker_settings(settings)
+    run = await seed_run(database, config)
+
+    async with open_checkpointer(config) as checkpointer:
+        first = build_worker(
+            database,
+            artifact_store,
+            config,
+            script=Script(hang={"critic"}),
+            checkpointer=checkpointer,
+            worker_id="worker-1",
+        )
+        await first.queue.enqueue(run.id)
+        await serve_until(first, entered(first, "critic"))
+
+    handed_back = await read_row(database, run.id)
+    assert RunStatus(handed_back.status) is RunStatus.PAUSED
+    assert handed_back.attempts == 0, "a stopped worker returns the attempt it took"
+    assert first.nodes.calls["researcher"] > 0
+
+    async with open_checkpointer(config) as checkpointer:
+        second = build_worker(
+            database,
+            artifact_store,
+            config,
+            nodes=ScriptedNodes(Script()),
+            checkpointer=checkpointer,
+            queue=first.queue,
+            worker_id="worker-2",
+        )
+        await second.queue.enqueue(run.id)
+        await serve_until(second, settled(second, database, run.id, RunStatus.COMPLETED))
+
+    row = await read_row(database, run.id)
+    assert RunStatus(row.status) is RunStatus.COMPLETED
+    assert row.attempts == 1, "and the second worker's is the first attempt spent"
+    assert second.nodes.calls["planner"] == 0, "the plan came back from Postgres"
+    assert second.nodes.calls["researcher"] == 0, "and no research was repeated"

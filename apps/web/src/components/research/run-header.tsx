@@ -146,10 +146,15 @@ export function RunHeader() {
       ) : null}
 
       {run.error ? (
-        <Alert variant="danger" className="mt-4">
+        // A paused run carries the reason it stopped, and it is not a failure:
+        // the worker will take it up again from where it got to. Rendering that
+        // in red would say the opposite of what `paused` means.
+        <Alert variant={run.status === 'paused' ? 'warning' : 'danger'} className="mt-4">
           <AlertTriangle aria-hidden />
-          <AlertDescription>
-            <span className="font-medium text-foreground">{run.error.code}. </span>
+          <AlertDescription data-testid="run-error">
+            <span className="font-medium text-foreground">
+              {run.status === 'paused' ? 'Paused, and will resume' : run.error.code}.{' '}
+            </span>
             {run.error.message}
           </AlertDescription>
         </Alert>

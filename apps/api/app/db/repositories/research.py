@@ -44,6 +44,48 @@ def _elapsed_seconds(row: ResearchRunRow, now: dt.datetime) -> int:
     return max(0, int((end - row.started_at).total_seconds()))
 
 
+def to_run_dto(row: ResearchRunRow, *, has_report: bool = False) -> ResearchRun:
+    """One row as the DTO every layer above the database speaks.
+
+    A module-level function rather than a method: the worker writes the same
+    table through its own repository (``app.db.repositories.worker``) and has to
+    hand back the same object, and two mappings of one table would drift.
+    """
+    now = dt.datetime.now(dt.UTC)
+    limits = row.limits or {}
+    return ResearchRun(
+        id=row.id,
+        user_id=row.user_id,
+        parent_run_id=row.parent_run_id,
+        title=row.title,
+        question=row.question,
+        mode=ResearchMode(row.mode),
+        depth=row.depth,
+        domains=list(row.domains or []),
+        date_range_start=row.date_range_start,
+        date_range_end=row.date_range_end,
+        status=RunStatus(row.status),
+        progress=_to_float(row.progress),
+        limits=RunLimits.model_validate(limits),
+        usage=RunUsage(
+            iterations=row.iteration_count,
+            sources=row.source_count,
+            elapsed_seconds=_elapsed_seconds(row, now),
+            total_tokens=row.total_tokens,
+            cost_usd=_to_float(row.total_cost_usd),
+        ),
+        source_count=row.source_count,
+        claim_count=row.claim_count,
+        contradiction_count=row.contradiction_count,
+        coverage_caveat=row.coverage_caveat,
+        has_report=has_report,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        completed_at=row.completed_at,
+        error=RunError.model_validate(row.error) if row.error else None,
+    )
+
+
 class SqlAlchemyResearchRepository:
     """Reads and writes ``research_runs`` for one request's session."""
 
@@ -53,39 +95,7 @@ class SqlAlchemyResearchRepository:
     # --- mapping ----------------------------------------------------------
 
     def _to_dto(self, row: ResearchRunRow, *, has_report: bool = False) -> ResearchRun:
-        now = dt.datetime.now(dt.UTC)
-        limits = row.limits or {}
-        return ResearchRun(
-            id=row.id,
-            user_id=row.user_id,
-            parent_run_id=row.parent_run_id,
-            title=row.title,
-            question=row.question,
-            mode=ResearchMode(row.mode),
-            depth=row.depth,
-            domains=list(row.domains or []),
-            date_range_start=row.date_range_start,
-            date_range_end=row.date_range_end,
-            status=RunStatus(row.status),
-            progress=_to_float(row.progress),
-            limits=RunLimits.model_validate(limits),
-            usage=RunUsage(
-                iterations=row.iteration_count,
-                sources=row.source_count,
-                elapsed_seconds=_elapsed_seconds(row, now),
-                total_tokens=row.total_tokens,
-                cost_usd=_to_float(row.total_cost_usd),
-            ),
-            source_count=row.source_count,
-            claim_count=row.claim_count,
-            contradiction_count=row.contradiction_count,
-            coverage_caveat=row.coverage_caveat,
-            has_report=has_report,
-            created_at=row.created_at,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            error=RunError.model_validate(row.error) if row.error else None,
-        )
+        return to_run_dto(row, has_report=has_report)
 
     @staticmethod
     def _to_row_values(run: ResearchRun) -> dict[str, Any]:

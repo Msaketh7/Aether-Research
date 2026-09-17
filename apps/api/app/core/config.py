@@ -112,6 +112,43 @@ class Settings(BaseSettings):
     #: because LangGraph's Postgres checkpointer is written against it.
     checkpoint_pool_size: int = 4
 
+    # --- worker (Phase 13, ADR 0005) --------------------------------------
+    #: Runs one worker process executes at once. A run is mostly waiting on the
+    #: network, so a process can hold several; the ceiling is the database pool
+    #: and the gateway's semaphore, which are per process and shared by all of
+    #: them. Scale past this with more processes, not a bigger number.
+    worker_concurrency: int = 1
+    #: How long the worker blocks waiting for a job before ticking. The tick is
+    #: what runs the reconciliation sweep and notices a shutdown signal, so this
+    #: is also the worst case for how long a stopping worker takes to react.
+    worker_poll_seconds: float = 5.0
+    #: Attempts a run gets before it is marked failed. An attempt is counted
+    #: when a worker claims the run, so a process killed mid-run spends one -
+    #: which is what stops a run that crashes its worker from doing it forever.
+    worker_max_attempts: int = 3
+    #: Exponential backoff between attempts, held in the run's own row rather
+    #: than in a delayed queue: a retry that Redis forgets is a run that never
+    #: resumes, and the sweep already reads Postgres.
+    worker_retry_base_delay_seconds: float = 10.0
+    worker_retry_max_delay_seconds: float = 600.0
+    #: How long a worker's claim on a run is honoured without a heartbeat.
+    #: The heartbeat is written at every node boundary, so this must comfortably
+    #: exceed one node's own timeout or a healthy worker's run gets taken from
+    #: it mid-node; the validator below enforces that.
+    worker_lease_seconds: int = 600
+    #: How often a worker re-dispatches runs the queue lost, retries that are
+    #: due, and runs whose worker died (ADR 0005).
+    worker_sweep_interval_seconds: float = 30.0
+    #: How long a run may sit `queued` before the sweep concludes its job was
+    #: lost. Below this, a newly created run would be dispatched twice - which
+    #: the claim makes harmless, but noisy.
+    worker_queued_grace_seconds: float = 60.0
+    #: Runs one sweep may re-dispatch. Bounded like every other query here.
+    worker_sweep_batch: int = 100
+    #: How long a stopping worker waits for its runs to reach a checkpoint
+    #: before cancelling them. A cancelled run is handed back, not failed.
+    worker_shutdown_grace_seconds: float = 30.0
+
     # --- agents (Phase 10) -------------------------------------------------
     #: Pages one researcher fetches and ingests at once. Multiplied by
     #: ``graph_max_concurrency``, since that many researchers run in parallel:
@@ -237,6 +274,35 @@ class Settings(BaseSettings):
     retrieval_rerank: bool = True
     retrieval_mmr_lambda: float = 0.7
 
+    @field_validator(
+        "openai_api_key",
+        "anthropic_api_key",
+        "tavily_api_key",
+        "brave_api_key",
+        "github_token",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        mode="before",
+    )
+    @classmethod
+    def _blank_credential_is_no_credential(cls, value: object) -> object:
+        """A variable set to nothing means the credential is absent, not empty.
+
+        `.env.example` ships every key blank, so `make env` produces a file in
+        which `OPENAI_API_KEY=` is present with no value. Read as a value that is
+        a `SecretStr("")`, which is not `None` - so a provider was built with an
+        empty key and the vendor SDK refused it in its constructor, crashing the
+        process at startup instead of simply not having OpenAI. Found by starting
+        a worker from the shipped example (Phase 13).
+
+        Normalised here rather than at each use site, because every one of those
+        sites already asks the only question that matters - is there a
+        credential - and each would otherwise have to ask it twice.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("allowed_domains", "blocked_domains", mode="before")
     @classmethod
     def _split_domains(cls, value: object) -> object:
@@ -345,6 +411,41 @@ class Settings(BaseSettings):
         if self.max_subtasks_per_iteration > 20:
             raise ValueError(
                 "MAX_SUBTASKS_PER_ITERATION cannot exceed 20, the most subtasks a plan may propose."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_worker_bounds(self) -> Settings:
+        """Refuse a worker configuration that would take runs away from itself.
+
+        The lease is the interesting one. A worker renews it at every node
+        boundary, and a node may run for ``graph_node_timeout_seconds``, so a
+        lease shorter than that expires while the worker is healthy and another
+        worker takes the run mid-node. Both then hold it. Twice the node timeout
+        leaves room for the node plus the write that follows it.
+        """
+        for name in ("worker_concurrency", "worker_max_attempts", "worker_sweep_batch"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name.upper()} must be at least 1.")
+        for name in (
+            "worker_poll_seconds",
+            "worker_retry_base_delay_seconds",
+            "worker_retry_max_delay_seconds",
+            "worker_sweep_interval_seconds",
+            "worker_queued_grace_seconds",
+            "worker_shutdown_grace_seconds",
+        ):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name.upper()} must be positive.")
+        if self.worker_retry_max_delay_seconds < self.worker_retry_base_delay_seconds:
+            raise ValueError(
+                "WORKER_RETRY_MAX_DELAY_SECONDS cannot be below WORKER_RETRY_BASE_DELAY_SECONDS."
+            )
+        if self.worker_lease_seconds < 2 * self.graph_node_timeout_seconds:
+            raise ValueError(
+                "WORKER_LEASE_SECONDS must be at least twice GRAPH_NODE_TIMEOUT_SECONDS: a "
+                "shorter lease expires while a node is still running and lets a second worker "
+                "take the run."
             )
         return self
 

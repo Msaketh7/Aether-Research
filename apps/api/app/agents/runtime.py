@@ -7,6 +7,13 @@ checkpoint thread is the run's id, so a second call - after a crash, a deploy
 or a raised failure - finds the last checkpoint and continues from the node
 that had not finished. Nodes that completed are not called again.
 
+It reports each superstep to a ``StepListener`` on the way past, which is how
+the worker (Phase 13) keeps a run's row moving: LangGraph is streamed rather than
+awaited, and every value chunk is the accumulated state after one superstep while
+the update chunk before it names the nodes that produced it. A listener that
+raises stops the run - that is deliberate, and it is how a worker whose lease has
+expired stops touching a run that is no longer its own.
+
 It also hands the finished state to a ``ResultRecorder`` (Phase 11), because a
 checkpoint is readable only by the graph: until its claims, spans and
 contradictions are projected onto rows, a run that succeeded has nothing to show
@@ -31,6 +38,9 @@ Four settings are made per invocation, each for a stated reason:
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing
+from datetime import datetime
 from typing import Any, Protocol, cast
 from uuid import UUID
 
@@ -50,6 +60,7 @@ from app.agents.graph import (
     utcnow,
 )
 from app.agents.nodes import ResearchNodes
+from app.agents.schemas import GraphNode
 from app.agents.state import ResearchState, RunBrief, initial_state
 from app.core.enums import ResearchMode
 from app.core.logging import get_logger
@@ -62,6 +73,22 @@ def thread_id(research_id: UUID) -> str:
     return str(research_id)
 
 
+def _graph_nodes(update: object) -> Iterator[GraphNode]:
+    """The research nodes named by one ``updates`` chunk.
+
+    LangGraph's own bookkeeping keys - ``__start__`` and the rest - are not
+    nodes anyone asked for, so they are skipped rather than raising: a library
+    upgrade that adds one must not stop a run.
+    """
+    if not isinstance(update, dict):  # pragma: no cover - defensive
+        return
+    for name in update:
+        try:
+            yield GraphNode(name)
+        except ValueError:
+            continue
+
+
 class ResultRecorder(Protocol):
     """What the runner does with a finished run's state besides return it.
 
@@ -72,6 +99,18 @@ class ResultRecorder(Protocol):
     """
 
     async def record(self, state: ResearchState) -> object: ...
+
+
+class StepListener(Protocol):
+    """Told what the graph did, one superstep at a time, while it runs.
+
+    ``nodes`` is what ran in that step - more than one only where the graph fans
+    out, which is the researchers - and ``state`` is the whole state after it.
+    Raising from here ends the run, so a listener is also the way a caller stops
+    a graph it has lost the right to run.
+    """
+
+    async def stepped(self, nodes: tuple[GraphNode, ...], state: ResearchState) -> None: ...
 
 
 class ResearchGraphRunner:
@@ -108,11 +147,15 @@ class ResearchGraphRunner:
             )
         return self._graphs[mode]
 
-    async def run(self, brief: RunBrief) -> ResearchState:
+    async def run(self, brief: RunBrief, *, listener: StepListener | None = None) -> ResearchState:
         """Run to completion, resuming from the last checkpoint if there is one.
 
         Raises a ``GraphError`` when the run cannot produce a report. Calling
         again afterwards resumes at the node that failed.
+
+        The listener is per call rather than per runner: one runner serves every
+        run a worker executes, and what a listener does - renew *this* run's
+        lease, move *this* run's row - belongs to one of them.
         """
         graph = self.graph(brief.mode)
         config: RunnableConfig = {
@@ -129,11 +172,8 @@ class ResearchGraphRunner:
         payload = None if saved.values else initial_state(brief, now=started)
         try:
             with tracing_context(enabled=False):
-                final = await graph.ainvoke(
-                    payload,
-                    config,
-                    context=GraphContext(resumed_at=started),
-                    durability="sync",
+                final = await self._stream(
+                    graph, payload, config, started=started, listener=listener
                 )
         except Exception:
             # A run that failed at synthesis still found sources and quoted
@@ -146,8 +186,63 @@ class ResearchGraphRunner:
 
         # Unguarded, unlike the failure path: a run whose results could not be
         # stored has not finished, and the worker should see that and retry.
-        await self._recorder.record(cast(ResearchState, final))
-        return cast(ResearchState, final)
+        await self._recorder.record(final)
+        return final
+
+    async def _stream(
+        self,
+        graph: ResearchGraph,
+        payload: ResearchState | None,
+        config: RunnableConfig,
+        *,
+        started: datetime,
+        listener: StepListener | None,
+    ) -> ResearchState:
+        """Run the graph, reporting each superstep, and return the final state.
+
+        Two stream modes rather than one: ``updates`` names the nodes that ran,
+        ``values`` carries the state they produced, and LangGraph emits them in
+        that order per superstep. ``values`` alone could not say which node ran;
+        ``updates`` alone carries each node's own return value, not the reduced
+        state, so the counts a listener wants would have to be re-derived.
+
+        The stream is closed explicitly. A listener that raises - a worker whose
+        lease has gone - leaves the loop early, and without this the generator
+        would only be finalised whenever it was collected.
+        """
+        final: ResearchState | None = None
+        stepped: list[GraphNode] = []
+        # LangGraph declares an ``AsyncIterator`` and returns an async
+        # generator. The difference only matters for closing it, which is
+        # exactly what this is for, so the cast is the narrow claim it looks
+        # like: a version that stopped returning one would fail here and in
+        # every graph test at once.
+        stream = cast(
+            AsyncGenerator[Any, None],
+            graph.astream(
+                payload,
+                config,
+                context=GraphContext(resumed_at=started),
+                durability="sync",
+                stream_mode=["updates", "values"],
+            ),
+        )
+        async with aclosing(stream):
+            async for mode, chunk in stream:
+                if mode == "updates":
+                    stepped.extend(_graph_nodes(chunk))
+                    continue
+                final = cast(ResearchState, chunk)
+                # The first values chunk is the input, before any node has run,
+                # so there is nothing to report for it.
+                if stepped and listener is not None:
+                    await listener.stepped(tuple(stepped), final)
+                stepped.clear()
+
+        if final is None:  # pragma: no cover - a stream always yields its input
+            snapshot: StateSnapshot = await graph.aget_state(config)
+            final = cast(ResearchState, snapshot.values)
+        return final
 
     async def _record_last_checkpoint(
         self, graph: ResearchGraph, config: RunnableConfig, *, research_id: UUID

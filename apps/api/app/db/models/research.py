@@ -94,9 +94,26 @@ class ResearchRunRow(Base, TimestampMixin, UpdatedAtMixin):
     progress: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, server_default=text("0"))
 
     #: Ties the run to its saved LangGraph state so it can resume after a
-    #: worker restart (Phase 13).
+    #: worker restart (Phase 13). The thread is written when a worker claims the
+    #: run; the checkpoint id stays NULL because a resume reads the thread's
+    #: latest checkpoint and never names one (``app.agents.runtime``).
     langgraph_thread_id: Mapped[str | None] = mapped_column(Text)
     langgraph_checkpoint_id: Mapped[str | None] = mapped_column(Text)
+
+    # --- the worker's lease on this run (Phase 13) ------------------------
+    #: Times a worker has claimed this run. Bounds retries, and counts a worker
+    #: that died mid-run, so a run that crashes its process cannot do it
+    #: forever. A worker that hands the run back on shutdown gives its attempt
+    #: back, because that is not a failed attempt.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    #: Which worker holds the run. Every lifecycle write names it in its WHERE
+    #: clause, so a worker whose lease expired cannot overwrite its successor.
+    worker_id: Mapped[str | None] = mapped_column(String(64))
+    #: Last sign of life from that worker, written at every node boundary. NULL
+    #: when nobody holds the run.
+    heartbeat_at: Mapped[dt.datetime | None]
+    #: When a paused run becomes eligible again. NULL means immediately.
+    next_attempt_at: Mapped[dt.datetime | None]
 
     iteration_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Numeric, never float: money that drifts by a rounding error is a bug that

@@ -1268,10 +1268,14 @@ worker:
   node (`thread_id = research_runs.langgraph_thread_id`).
 - A run can resume after: worker crash, deploy, transient provider outage, or a
   user-initiated pause.
-- The worker supervisor scans for runs `status in (planning, researching,
-verifying, synthesizing)` with a stale heartbeat and re-enqueues them; the
-  graph resumes from the last checkpoint (no repeated side effects because
-  ingestion and writes are idempotent on hashes / natural keys).
+- Every worker periodically scans for runs in a non-terminal, non-waiting status
+  whose heartbeat is stale, and re-enqueues them; the graph resumes from the last
+  checkpoint (no repeated side effects because ingestion and writes are
+  idempotent on hashes / natural keys). The status list is derived from
+  `RunStatus` rather than written out, so a new workflow phase cannot be left out
+  of it. There is no separate supervisor: re-dispatching a run that is still
+  running is harmless, because taking it is a conditional `UPDATE` that only one
+  worker can win (ADR 0017).
 - `POST /research/{id}/cancel` sets `status = cancelled` on the run. The graph
   reads that column at every node boundary and stops without further work
   (`app/research/cancellation.py`): one source of truth, rather than a Redis flag

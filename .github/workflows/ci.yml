@@ -78,8 +78,22 @@ jobs:
           --health-timeout 5s
           --health-retries 20
 
+      # The worker's queue (Phase 13). Its blocking pop, its timeout and the
+      # fact that one job reaches exactly one worker cannot be faked, so the
+      # tests that assert them skip locally and run here.
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     env:
       AETHER_TEST_DATABASE_URL: postgresql+asyncpg://aether:aether@127.0.0.1:5432/aether_test
+      REDIS_URL: redis://127.0.0.1:6379/0
 
     steps:
       - uses: actions/checkout@v5

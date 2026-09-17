@@ -37,11 +37,12 @@ DESCRIPTION = """
 Autonomous multi-agent research: decomposition, parallel retrieval, evidence
 extraction, contradiction detection and citation-validated reports.
 
-**This build is Phase 7 (document ingestion).** The API surface, validation,
-authorisation, error contract, progress stream, Postgres persistence and document
-uploads are real. There is no worker consuming the queue yet, so a created run
-stays `queued`, an uploaded document is stored but not yet ingested into a run,
-and endpoints for data a run has not produced return empty results or
+**This build is Phase 13 (background workers).** A created run is queued here and
+executed by a separate worker process, which ingests the documents it was
+created with, runs the research graph, and records its claims, evidence,
+contradictions and report. Progress is written to the run as it goes; live
+streaming from the worker is Phase 14, so `/events` currently relays only what
+this process publishes. Endpoints for capabilities that are not built return
 `not_implemented` rather than fabricated content.
 """.strip()
 

@@ -26,8 +26,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 10  | Agents                     | Done     |
 | 11  | Evidence system            | Done     |
 | 12  | Report generation          | Done     |
-| 13  | Background workers         | **Next** |
-| 14  | Streaming                  | Planned  |
+| 13  | Background workers         | Done     |
+| 14  | Streaming                  | **Next** |
 | 15  | Caching                    | Planned  |
 | 16  | Cost and token governance  | Planned  |
 | 17  | Observability              | Planned  |
@@ -795,14 +795,107 @@ frontend still runs against its fixtures by default; pointing it at the live API
 is one environment variable, and there is nothing there to read until the worker
 exists.
 
-## Phase 13 — Background workers · **Next**
+## Phase 13 — Background workers · **Done**
 
 Redis-based workers: API → Redis queue → worker → LangGraph → PostgreSQL. Worker
 processes separate from API processes. Job statuses: queued, running, paused,
 completed, failed, cancelled. Retries, idempotency, persisted workflow
 state/checkpoints. **Research must survive worker restarts.**
 
-## Phase 14 — Streaming · Planned
+_Landed:_ a run no longer stays `queued`. `python -m app.workers.runner` claims
+it, ingests the documents it was created with, runs the graph, and leaves behind
+the claims, evidence, contradictions and report every earlier phase could only
+write in a test. ADR 0017 records the decision the rest of this rests on.
+
+**The lease is the run's own row, and the queue is only a doorbell.** ADR 0005
+had already said Redis is the dispatch mechanism rather than the source of truth;
+this is what that means in code. Taking a run is one conditional `UPDATE`, so a
+duplicate delivery, a user's cancellation and a second worker offered the same
+job are all settled by the database rather than by a lock. Every later write the
+worker makes names its own `worker_id` and excludes terminal statuses, which is
+why a stalled worker cannot overwrite its successor - or a cancellation. Migration
+0009 adds the four columns: `worker_id`, `heartbeat_at`, `attempts`,
+`next_attempt_at`.
+
+**"Running" is not a status, so the row follows the graph instead.** The
+vocabulary has `planning`, `researching`, `verifying`, `synthesizing` and
+`validating`, and a worker that set one of them at the start and nothing until
+the end would be lying for most of the run. So the runner streams LangGraph
+rather than awaiting it, and each superstep ends in one write that renews the
+lease and records the phase, the progress and the run's live counts. The
+progress bar is openly an estimate - a run's length is not known in advance,
+because the critic decides whether there is another round - but it never goes
+backwards, and a test walks a four-round trace to prove it.
+
+**An attempt is spent when a run is claimed, not when one fails.** That is what
+bounds a run that kills its worker: a process that dies mid-node refunds nothing,
+so a poison run stops after `WORKER_MAX_ATTEMPTS` instead of forever. The mirror
+of it is that a worker _asked_ to stop hands the run back as `paused` and returns
+the attempt, because a deploy is not a failed attempt. Three deploys in a row
+would otherwise exhaust a run that never went wrong.
+
+**One thing is designed for rather than observed, and is marked as such.** A
+blocking `BLPOP` must not outlast the Redis client's socket timeout, or every
+quiet poll raises a read timeout indistinguishable from an outage. There is no
+Redis on this machine, so that was reasoned about rather than hit: `build_redis`
+takes the socket timeout as a parameter, the worker sizes it from its poll
+interval, and the test that would catch a regression runs in CI against a real
+server rather than against a fake that could not reproduce it.
+
+**`paused` finally means what the frontend has always rendered.** A retryable
+failure pauses with a backoff held in the run's row - a retry Redis forgets is a
+run that never resumes - and the reconciliation sweep re-dispatches it when it
+comes due, along with runs still queued long after creation and runs whose worker
+stopped renewing its lease. Every worker sweeps without coordinating, because
+re-dispatching a run that is already running is harmless by construction.
+
+39 new tests, 1036 total, including a worker restarted across two real Postgres
+checkpointer pools. The Redis tests need a server: CI now runs one and they skip
+locally with a reason, the same arrangement as the pgvector tests - eleven tests
+skip on this machine now rather than eight.
+
+Found while building and running it:
+
+- **Every UUID the ORM returned was asyncpg's subclass of `uuid.UUID`, not
+  `uuid.UUID`.** It passes every isinstance check and every Pydantic field, so it
+  travelled from a row into the graph's state unnoticed - and then LangGraph's
+  checkpoint serializer, whose allowlist is derived from the state's _declared_
+  types, refused to reconstruct it. The value came back as nothing and the
+  resumed run failed a long way from the cause. Exactly the failure mode
+  `app/agents/checkpoint.py` warns about, and invisible until a worker actually
+  restarted. Fixed at the boundary that created it: `NormalisedUUID` in
+  `app/db/base.py`, with a test that fails if it is removed.
+- **Waiting for a run to reach a status races the worker.** A status written from
+  outside - a cancellation - is true while the job is still in flight, so a test
+  that stopped there cut the run off mid-node and asserted on half of it. The
+  worker reports whether it is busy, and the tests wait for both.
+- **A paused run rendered as a red failure.** `paused` has meant "resumable, and
+  not a failure" since Phase 1, and this phase is what first makes it reachable -
+  with the reason it stopped attached, which the run header showed in the same
+  danger alert a failed run gets. It says "Paused, and will resume" in a warning
+  now. Nothing else about the contract changed: `attempts` and `next_attempt_at`
+  are the worker's business and are not exposed.
+- **A process started from the shipped `.env.example` crashed at startup.** Every
+  key in it is present and blank, so `make env` produces `OPENAI_API_KEY=` -
+  which reads as `SecretStr("")`, not as an absent credential. A provider was
+  built with it and the vendor SDK refused the empty key in its constructor,
+  three layers below the typed settings that were supposed to prevent exactly
+  this. A blank credential is now an absent one, and a test starts a process from
+  the shipped example. Phase 5's defect, found by being the second process to
+  read the configuration.
+- **The scripted agents invent source ids.** A real researcher ingests a page and
+  then reports the id of the row it has just written; the evidence projection's
+  foreign key to `documents` is what noticed the difference. The test harness now
+  stores what a researcher would have stored, which is also a statement of the
+  contract the real one keeps.
+
+Stated rather than implied: the worker publishes no progress events yet. The
+event broker is in-process (Phase 2), so a worker publishing to it would reach
+nobody; the Redis pub/sub broker and real emission are Phase 14, and until then
+`/events` relays only what the API itself publishes. No live model call has been
+made on this machine, so every run executed so far has been over scripted agents.
+
+## Phase 14 — Streaming · **Next**
 
 Server-Sent Events. Frontend receives `research_started`, `planner_started`,
 `planner_completed`, `search_started`, `source_found`, `source_processed`,
@@ -949,13 +1042,13 @@ A new user must be able to:
 2. Create a research request — **done**
 3. Select Quick or Deep Research — **done**
 4. Submit a complex research question — **done**
-5. Observe agent execution in real time — _stream done, agents Phase 9–10_
-6. See sources being discovered — _UI done, discovery Phase 6_
-7. See evidence being collected — _UI done, extraction done, worker Phase 13_
-8. See contradictions — _UI done, detection done, worker Phase 13_
-9. Wait for iterative research to complete — _Phase 9_
-10. Receive a structured report — _UI done, generation done, worker Phase 13_
-11. Open citations — _UI done, validation done, worker Phase 13_
+5. Observe agent execution in real time — _stream done, agents done, worker emission Phase 14_
+6. See sources being discovered — _UI done, discovery done, live updates Phase 14_
+7. See evidence being collected — **done** _(no live stream until Phase 14)_
+8. See contradictions — **done**
+9. Wait for iterative research to complete — **done**
+10. Receive a structured report — **done**
+11. Open citations — **done**
 12. Inspect sources — _UI done_
 13. Inspect evidence supporting claims — _UI done_
 14. View previous research — **done**

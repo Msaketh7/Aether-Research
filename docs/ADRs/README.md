@@ -22,3 +22,4 @@ accepted; a changed mind means a new ADR that supersedes the old one.
 | [0014](0014-research-graph.md)             | The research graph: typed state, bounded loops, checkpoints Alembic owns      | Accepted |
 | [0015](0015-agent-outputs.md)              | Agents cite by catalogue number; prompts ship inside the API package          | Accepted |
 | [0016](0016-evidence-projection.md)        | The evidence tables are a projection of the checkpoint, not a second truth    | Accepted |
+| [0017](0017-worker-lease.md)               | The run's own row is the worker's lease; the queue is only a doorbell         | Accepted |
