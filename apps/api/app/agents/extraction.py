@@ -248,7 +248,8 @@ class EvidenceAgent(ModelAgent):
             passages=_render_passages(catalog),
             max_evidence=str(MAX_EVIDENCE_PER_CALL),
         )
-        output, usage = await self.ask(context, prompt=prompt, schema=EvidenceOutput)
+        answer = await self.ask_answer(context, prompt=prompt, schema=EvidenceOutput)
+        output, usage = answer.value, answer.usage
 
         found: list[EvidenceItem] = []
         unquoted = 0
@@ -258,7 +259,7 @@ class EvidenceAgent(ModelAgent):
             if passage is None:
                 invented += 1
                 continue
-            item = _locate(candidate.quote, passage, candidate.stance)
+            item = _locate(candidate.quote, passage, candidate.stance, model=answer.model)
             if item is None:
                 unquoted += 1
                 continue
@@ -325,6 +326,7 @@ class ClaimNormalizerAgent(ModelAgent):
         existing = {claim.id: claim for claim in state.get("claims") or ()}
         claims: dict[uuid.UUID, ClaimItem] = {}
         dropped = 0
+        unquoted_values = 0
         for proposed in output.claims:
             cited, unknown = unclaimed.resolve(list(proposed.evidence))
             if unknown:
@@ -338,6 +340,9 @@ class ClaimNormalizerAgent(ModelAgent):
             # evidence would silently drop the last round's.
             previous = claims.get(claim_id) or existing.get(claim_id)
             ids = _merge_evidence(previous, cited)
+            value = asserted_value(proposed.object_value, proposed.text)
+            if proposed.object_value and not value:
+                unquoted_values += 1
             claims[claim_id] = ClaimItem(
                 id=claim_id,
                 normalized_key=key,
@@ -346,6 +351,11 @@ class ClaimNormalizerAgent(ModelAgent):
                 status=previous.status if previous else ClaimStatus.CANDIDATE,
                 confidence=proposed.confidence,
                 evidence_ids=ids,
+                # A round that drops its value keeps the one the claim already
+                # had: the assertion has not changed, only this round's wording
+                # of it, and a contradiction already displaying a value must not
+                # lose it because a later round rephrased the claim.
+                object_value=value or (previous.object_value if previous else ""),
             )
 
         logger.info(
@@ -357,6 +367,7 @@ class ClaimNormalizerAgent(ModelAgent):
                 "proposed": len(output.claims),
                 "kept": len(claims),
                 "cited_unknown_evidence": dropped,
+                "value_not_in_claim": unquoted_values,
             },
         )
         return NodeResult(value=tuple(claims.values()), usage=usage)
@@ -374,6 +385,26 @@ def claim_identity(research_id: uuid.UUID, normalized_key: str) -> uuid.UUID:
     return uuid.uuid5(_CLAIM_NAMESPACE, f"{research_id}:{normalized_key}")
 
 
+def asserted_value(value: str, text: str) -> str:
+    """The claim's value, kept only when the claim's own text contains it.
+
+    A contradiction has to be able to say *what* two sources disagree about, and
+    the normalized key deliberately does not hold it. So the value is asked for -
+    and then checked, the same way a quote is checked before it becomes evidence:
+    found in the claim it belongs to, or dropped. An unchecked value would be a
+    second assertion, made in a field no reader would think to doubt, resting on
+    nothing.
+
+    Whitespace is normalised on both sides before the comparison, and the value
+    is returned as the model wrote it: a model that reflowed a figure across a
+    line break has not asserted anything new.
+    """
+    cleaned = " ".join(value.split())
+    if not cleaned:
+        return ""
+    return cleaned if cleaned.casefold() in " ".join(text.split()).casefold() else ""
+
+
 def normalize_key(raw: str) -> str:
     """A grouping key reduced to its content.
 
@@ -386,7 +417,9 @@ def normalize_key(raw: str) -> str:
     return " | ".join(part for part in parts if part)[:300] or raw.strip().lower()[:300]
 
 
-def _locate(quote: str, passage: _Passage, stance: EvidenceStance) -> EvidenceItem | None:
+def _locate(
+    quote: str, passage: _Passage, stance: EvidenceStance, *, model: str
+) -> EvidenceItem | None:
     """The quote's place in the passage's document, or ``None`` if it is not there.
 
     Exact match only. A near match - normalised whitespace, a smart quote turned
@@ -408,6 +441,7 @@ def _locate(quote: str, passage: _Passage, stance: EvidenceStance) -> EvidenceIt
         span_start=start,
         span_end=start + len(quote),
         stance=stance,
+        extractor_model=model,
     )
 
 

@@ -41,6 +41,7 @@ from app.retrieval.formats import MEDIA_TYPES
 from app.retrieval.isolation import DocumentParser
 from app.retrieval.language import LanguageDetection, detect_language
 from app.retrieval.parsed import ParsedDocument
+from app.sources.credibility import assess
 from app.storage import ObjectStorage, content_digest
 
 logger = get_logger(__name__)
@@ -69,7 +70,14 @@ class SourceDescriptor:
     fallback_title: str
     author: str | None = None
     published_at: dt.datetime | None = None
-    credibility_metadata: Mapping[str, object] = field(default_factory=dict)
+    #: How these bytes were obtained - the status code, the redirects followed,
+    #: whether robots.txt was consulted. Facts about the retrieval, so they are
+    #: stored on the document beside the format and the parser. They used to be
+    #: written into ``sources.credibility_metadata``, which the ``Source`` DTO
+    #: reads as a ``SourceCredibility`` and rejects unknown fields from: the
+    #: sources endpoint would have failed on the first real row. Credibility is
+    #: assessed here instead, from the source type and the domain.
+    fetch_metadata: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +325,7 @@ class DocumentIngestor:
                     "doc_metadata": _compact(
                         {
                             **prepared.parsed.metadata,
+                            **descriptor.fetch_metadata,
                             "format": fmt.value,
                             "raw_sha256": content_digest(raw),
                             "chunk_count": len(prepared.chunks),
@@ -361,6 +370,7 @@ class DocumentIngestor:
 
 def _source_values(prepared: PreparedDocument, descriptor: SourceDescriptor) -> dict[str, Any]:
     parsed = prepared.parsed
+    credibility = assess(descriptor.source_type, descriptor.domain)
     return {
         "run_id": descriptor.run_id,
         "url": descriptor.url,
@@ -373,7 +383,8 @@ def _source_values(prepared: PreparedDocument, descriptor: SourceDescriptor) -> 
         "published_at": descriptor.published_at or _document_date(parsed.published_at),
         "accessed_at": descriptor.accessed_at,
         "content_hash": prepared.content_hash,
-        "credibility_metadata": dict(descriptor.credibility_metadata),
+        "credibility_score": credibility.score,
+        "credibility_metadata": credibility.as_metadata(),
         "excerpt": " ".join(prepared.normalized[: EXCERPT_CHARS * 2].split())[:EXCERPT_CHARS],
     }
 

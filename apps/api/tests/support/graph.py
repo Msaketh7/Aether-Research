@@ -90,6 +90,31 @@ class ScriptedProbe:
         return self.cancelled
 
 
+class RecordedRuns:
+    """A recorder that keeps what it was asked to project.
+
+    The runner requires one: a graph whose results nobody records is a run that
+    produced a checkpoint and nothing a person can read, and making that state
+    reachable by forgetting an argument is exactly what a required collaborator
+    prevents.
+    """
+
+    def __init__(self, *, fails: bool = False) -> None:
+        self.states: list[Any] = []
+        self._fails = fails
+
+    async def record(self, state: Any) -> object:
+        self.states.append(state)
+        if self._fails:
+            raise RuntimeError("recording failed")
+        return len(self.states)
+
+    @property
+    def claims(self) -> list[Any]:
+        """The claims of the last state recorded."""
+        return list(self.states[-1].get("claims") or ()) if self.states else []
+
+
 @dataclass
 class Script:
     subtasks_per_round: int = 2
@@ -374,6 +399,7 @@ def make_runner(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     probe: CancellationProbe | None = None,
     clock: ManualClock | None = None,
+    recorder: RecordedRuns | None = None,
     width: int = 8,
     concurrency: int = 4,
     node_timeout: float = 5.0,
@@ -390,6 +416,7 @@ def make_runner(
             max_concurrency=concurrency,
             node_timeout_seconds=node_timeout,
         ),
+        recorder=recorder or RecordedRuns(),
         now=manual_clock,
     )
     return runner, scripted_probe, manual_clock

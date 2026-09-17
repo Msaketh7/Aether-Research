@@ -786,9 +786,11 @@ filing, paper, repo, or upload._
 | published_at         | `timestamptz`  | nullable                                                      |
 | accessed_at          | `timestamptz`  |                                                               |
 | content_hash         | `text`         | sha256 of normalized content (exact-dupe key)                 |
-| credibility_score    | `numeric(3,2)` |                                                               |
+| credibility_score    | `numeric(3,2)` | the origin's tier, from a declared table (Phase 11)           |
 | credibility_metadata | `jsonb`        | domain reputation, is_primary, tier                           |
+| relevance_score      | `numeric(3,2)` | nullable: NULL means never measured, not "middling"           |
 | dedup_cluster_id     | `uuid`         | groups near-duplicates                                        |
+| dedup_reason         | `text`         | `exact_hash` \| `canonical_url` \| `near_duplicate`           |
 
 Indexes: `(run_id)`, `(canonical_url)`, `(content_hash)`, `(dedup_cluster_id)`,
 `(source_type)`.
@@ -1180,16 +1182,26 @@ Store original source + normalized content + hash.
 
 ### 9.3 Deduplication
 
-Three signals, combined:
+Three signals, applied strongest first (`apps/api/app/evidence/dedup.py`), and
+the rule that merged a cluster is stored on it:
 
-1. **URL canonicalization**: strip tracking parameters, normalize host/scheme,
+1. **Content hash**: exact-duplicate detection on normalized content.
+2. **URL canonicalization**: strip tracking parameters, normalize host/scheme,
    resolve AMP/mobile variants.
-2. **Content hash**: exact-duplicate detection on normalized content.
-3. **Semantic similarity**: embedding cosine ≥ threshold clusters near-dupes
+3. **Text overlap**: word-trigram containment ≥ threshold clusters near-dupes
    (syndicated wire stories, aggregator copies).
 
 Clustered sources share a `dedup_cluster_id`. **Confidence weighting counts one
 cluster as one independent source**, not N copies.
+
+Signal 3 was specified as embedding cosine and built as trigram containment,
+for two reasons found in Phase 11. Embedding similarity is high for two
+_different_ articles on the same subject - that is what the embedding is for -
+so using it here would merge independent accounts, which is the one error that
+inflates confidence rather than deflating it. And containment, normalised by the
+shorter text, matches the input: what is compared is the stored 280-character
+excerpt, so one copy carrying a byline pushes the end of the other's text out of
+the window, and a symmetric measure counts that difference against both.
 
 ### 9.4 SearchBudget
 

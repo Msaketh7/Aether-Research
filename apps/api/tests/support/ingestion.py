@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Mapping
 
 from app.core.enums import SourceType
 from app.db.models.research import ResearchRunRow
@@ -68,16 +69,19 @@ def descriptor(
     *,
     canonical_url: str = "upload://sha256/fixture",
     source_type: SourceType = SourceType.UPLOAD,
+    domain: str = "uploaded-document",
     published_at: dt.datetime | None = None,
+    fetch_metadata: Mapping[str, object] | None = None,
 ) -> SourceDescriptor:
     return SourceDescriptor(
         run_id=run_id,
         source_type=source_type,
         url="upload://fixture.pdf",
         canonical_url=canonical_url,
-        domain="uploaded-document",
+        domain=domain,
         publisher="Uploaded document",
         accessed_at=dt.datetime(2026, 9, 10, tzinfo=dt.UTC),
         fallback_title="fixture.pdf",
         published_at=published_at,
+        fetch_metadata=fetch_metadata or {},
     )

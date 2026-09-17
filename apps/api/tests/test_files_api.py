@@ -20,6 +20,8 @@ from app.db.models.source import DocumentRow, SourceRow
 from app.db.models.upload import ResearchRunUploadRow, UploadRow
 from app.main import create_app
 from app.retrieval.attached import AttachedUploadIngestion
+from app.sources.credibility import TIER_SCORES
+from app.sources.schemas import SourceCredibility
 from tests.conftest import API, BASE_URL, as_user, valid_request
 from tests.support.documents import encrypt_pdf, make_pdf, prose
 from tests.support.ingestion import in_process_ingestor
@@ -292,7 +294,18 @@ async def test_an_attached_upload_becomes_a_source_of_its_run(client, database, 
     assert (source.run_id, source.source_type) == (run_id, "upload")
     assert source.title == "Quarterly filing"
     assert source.url == "upload://filing.pdf"
-    assert source.credibility_metadata == {"tier": "unknown", "origin": "user_upload"}
+    # The origin of an upload is the person who asked: it is the document itself
+    # rather than commentary about it, and nothing in the system has assessed it.
+    # The shape is exactly what the `Source` DTO parses, which is what stopped
+    # the sources endpoint failing on its first real row (Phase 11).
+    assert SourceCredibility.model_validate(source.credibility_metadata) == SourceCredibility(
+        is_primary=True,
+        tier="unknown",
+        domain_reputation=TIER_SCORES["unknown"],
+        notes="Supplied with the request",
+    )
+    assert float(source.credibility_score) == TIER_SCORES["unknown"]
+    assert source.relevance_score is None, "no relevance has been measured for it"
     assert document.storage_key is not None
     assert document.storage_key.startswith(f"runs/{run_id}/pdf/")
     assert (await client.get(f"{API}/research/{run_id}")).json()["source_count"] == 1

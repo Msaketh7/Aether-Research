@@ -15,7 +15,7 @@ import statistics
 from uuid import UUID
 
 from app.core.config import Settings
-from app.core.enums import ResearchMode, RunStatus
+from app.core.enums import ClaimStatus, ResearchMode, RunStatus, SourceType
 from app.core.errors import (
     DependencyUnavailable,
     ReportNotReady,
@@ -27,6 +27,7 @@ from app.core.errors import (
 from app.core.ids import new_id
 from app.core.logging import get_logger
 from app.core.pagination import Page, PageParams, decode_cursor_id, encode_cursor
+from app.evidence.repository import EvidenceStore
 from app.evidence.schemas import EvidenceResponse
 from app.reports.schemas import ReportResponse
 from app.research.activity import ActivityResponse
@@ -58,12 +59,14 @@ class ResearchService:
         *,
         repository: ResearchRepository,
         uploads: UploadAttachments,
+        evidence_store: EvidenceStore,
         queue: JobQueue,
         broker: EventBroker,
         settings: Settings,
     ) -> None:
         self._repository = repository
         self._uploads = uploads
+        self._evidence = evidence_store
         self._queue = queue
         self._broker = broker
         self._settings = settings
@@ -264,19 +267,51 @@ class ResearchService:
     #
     # These endpoints exist and are correct: a run that has produced nothing
     # returns nothing. They are wired to real data by the phases that create it
-    # (6-8 for sources, 11 for evidence, 12 for reports, 9-10 for the trace).
+    # (11 for sources and evidence, 12 for reports, 9-10 for the trace).
 
     async def plan(self, user_id: UUID, run_id: UUID) -> ResearchPlan:
         run = await self._require_run(user_id, run_id)
         return ResearchPlan(research_goal=run.question, tasks=[], iteration=run.usage.iterations)
 
-    async def sources(self, user_id: UUID, run_id: UUID) -> SourcesResponse:
-        await self._require_run(user_id, run_id)
-        return SourcesResponse(sources=[], clusters=[], next_cursor=None, total=0)
+    async def sources(
+        self,
+        user_id: UUID,
+        run_id: UUID,
+        *,
+        page: PageParams,
+        source_type: SourceType | None = None,
+    ) -> SourcesResponse:
+        """This run's sources, with the clusters that collapse its duplicates.
 
-    async def evidence(self, user_id: UUID, run_id: UUID) -> EvidenceResponse:
+        Ownership is checked here and passed down, so the repository's scoping
+        join is a second, independent check rather than the only one: a run this
+        user does not own is a 404 before any source is read.
+        """
         await self._require_run(user_id, run_id)
-        return EvidenceResponse(claims=[], contradictions=[], next_cursor=None, total=0)
+        return await self._evidence.sources_page(
+            run_id,
+            user_id=user_id,
+            limit=page.limit,
+            after_id=decode_cursor_id(page.cursor) if page.cursor else None,
+            source_type=source_type,
+        )
+
+    async def evidence(
+        self,
+        user_id: UUID,
+        run_id: UUID,
+        *,
+        page: PageParams,
+        status: ClaimStatus | None = None,
+    ) -> EvidenceResponse:
+        await self._require_run(user_id, run_id)
+        return await self._evidence.evidence_page(
+            run_id,
+            user_id=user_id,
+            limit=page.limit,
+            after_id=decode_cursor_id(page.cursor) if page.cursor else None,
+            status=status,
+        )
 
     async def activity(self, user_id: UUID, run_id: UUID) -> ActivityResponse:
         await self._require_run(user_id, run_id)

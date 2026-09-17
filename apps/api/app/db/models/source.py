@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Computed,
     ForeignKey,
     Index,
@@ -93,9 +94,16 @@ class SourceRow(Base, TimestampMixin):
     #: Groups near-duplicates. Not a foreign key: the cluster is derived, and a
     #: separate table would be a join for something only ever read with the row.
     dedup_cluster_id: Mapped[uuid.UUID | None] = fk_uuid()
-    relevance_score: Mapped[float] = mapped_column(
-        Numeric(3, 2), nullable=False, server_default=text("0.50")
-    )
+    #: Which rule collapsed this source into its cluster (``app.evidence.dedup``).
+    #: NULL until the run's evidence has been projected. Stored because it cannot
+    #: be recomputed from the row - the excerpts it was judged on may have been
+    #: re-ingested since - and because a reader shown "3 duplicates" deserves to
+    #: know whether that was a digest match or a judgement about overlapping text.
+    dedup_reason: Mapped[str | None] = mapped_column(String(20))
+    #: How well this source answers the run's question. Nullable because it has
+    #: no default that would be true: a placeholder here is displayed to a reader
+    #: as a measurement, so "not measured" has to be representable (0007).
+    relevance_score: Mapped[float | None] = mapped_column(Numeric(3, 2))
     task_external_id: Mapped[str | None] = mapped_column(String(80))
     claim_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     excerpt: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
@@ -108,6 +116,11 @@ class SourceRow(Base, TimestampMixin):
 
     __table_args__ = (
         enum_check("source_type", SourceType, "sources_source_type"),
+        CheckConstraint(
+            "dedup_reason IS NULL OR dedup_reason IN "
+            "('exact_hash', 'canonical_url', 'near_duplicate')",
+            name="ck_sources_dedup_reason",
+        ),
         # The sources page: this run's sources in discovery order.
         Index("ix_sources_run_id_created_at", "run_id", "created_at"),
         # Deduplication within a run.

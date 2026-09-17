@@ -24,8 +24,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 8   | Retrieval                  | Done     |
 | 9   | LangGraph agent system     | Done     |
 | 10  | Agents                     | Done     |
-| 11  | Evidence system            | **Next** |
-| 12  | Report generation          | Planned  |
+| 11  | Evidence system            | Done     |
+| 12  | Report generation          | **Next** |
 | 13  | Background workers         | Planned  |
 | 14  | Streaming                  | Planned  |
 | 15  | Caching                    | Planned  |
@@ -592,7 +592,7 @@ ingestion calls the same readability extractor beneath it, inside the isolated
 parser, so a fetched page is parsed once rather than twice. No end-to-end
 evaluation has run; that is Phase 18.
 
-## Phase 11 — Evidence system · **Next**
+## Phase 11 — Evidence system · **Done**
 
 Entities: `Source`, `Claim`, `Evidence`, `Citation`, `Contradiction`. Every claim
 linkable to evidence; every evidence record identifies its source; every source
@@ -601,7 +601,109 @@ carries title, url, publisher, `published_at`, `accessed_at`, `content_hash`,
 normalization, source deduplication and contradiction detection. **Do not
 silently resolve conflicting information — surface conflicts in the report.**
 
-## Phase 12 — Report generation · Planned
+_Landed:_ ADR 0016. The chain the previous phase derived in memory is now durable and
+readable. `GET /research/{id}/sources` and `/evidence` serve real rows for the
+first time — paginated, filtered, and scoped by a join rather than by a filter
+applied after fetching.
+
+**A checkpoint is not a read model.** LangGraph stores a run's state as one
+serialised blob per step, addressed by thread id and readable only by the graph.
+That is right for resuming a run and useless for every other question — which
+claims rest on this source, which contradictions are unresolved, show me page
+two. `EvidenceProjector` writes the state onto the relational entities Phase 3
+declared, and the graph runner calls it after every invocation, including on the
+way out of a failure: a run that died at synthesis still found sources and quoted
+spans, and someone diagnosing it needs to see them.
+
+**Projecting twice writes the same rows twice.** A resumed run re-projects
+everything its checkpoint holds, so every id is derived from what it describes —
+a claim's from the run and its normalized key, a span's from the claim and the
+span, a contradiction's from its ordered pair — and every write is an upsert. Two
+columns are deliberately not overwritten: a claim's `first_seen_at`, because a
+re-projection is not a new belief, and a contradiction's `resolution`, because
+the projection only ever writes `unresolved` and overwriting would undo a
+person's judgement. FR-7 cuts both ways.
+
+**Corroboration counts clusters, not rows.** A wire story republished by four
+outlets is one source's word four times, and counting it as four tells a reader
+something false in the direction they are least likely to check. Deduplication
+(`app/evidence/dedup.py`) groups a run's sources by identical content hash, then
+by canonical URL, then by overlapping text, and a claim's `corroboration_count`
+is the number of distinct clusters behind it. Every threshold is set to merge
+reluctantly: a false merge costs a claim corroboration it deserved, a false split
+invents corroboration that never existed, and only the second misleads.
+
+**Credibility is a declared table, not a model.** `app/sources/credibility.py`
+scores the _origin_ — restricted-registration domains, mastheads with a
+correction policy, user-generated platforms, and everything else as `unknown`,
+which sits below a forum because "we do not know who runs this" is worse than
+"we know, and it is a forum". Four tiers, the tier is the score, every number a
+constant with a reason beside it. A learned reputation score would be a number
+nobody could account for attached to a citation.
+
+**A claim now carries what it asserts.** The normalized key holds
+`subject | predicate | qualifier` and deliberately not the value, which is what
+lets two sources that disagree share a key. So a contradiction had no way to say
+what the disagreement was _about_. The normalizer is asked for the value and the
+agent checks it against the claim's own text, exactly as a quote is checked
+before it becomes evidence: found, or dropped. `claims/v2`.
+
+37 new tests, 968 total. The eight that skip locally are the same eight as
+before: they need pgvector, and CI runs them.
+
+Found while building and running it:
+
+- **The sources endpoint would have failed on its first real row.** Ingestion
+  wrote the fetch facts — status code, redirect count, whether robots.txt was
+  consulted — into `sources.credibility_metadata`, which the `Source` DTO parses
+  as a `SourceCredibility` that forbids unknown fields. Nothing had noticed
+  because the endpoint returned an empty list. The fetch facts belong on the
+  document, beside the format and the parser, and now live there.
+- **The relevance placeholder.** `relevance_score` was `NOT NULL DEFAULT 0.50`
+  and nothing had ever computed it, which is why Phase 7 left the endpoint empty
+  rather than render "relevance 50%" as a measurement. The column, the DTO and
+  the TypeScript type are nullable now, and `null` means not measured — the web
+  app's formatter already renders that as a dash. No relevance is measured in
+  this phase; saying so is the point.
+- **One span can be evidence for two claims.** `evidence.claim_id` is a single
+  foreign key, so the table's grain is the link rather than the span, and the row
+  id is derived from both. Projecting a span cited by two claims as one row would
+  have silently dropped one of them.
+- **Jaccard was the wrong measure for near-duplicates**, found by running the
+  test rather than by reasoning about it. What is compared is the stored 280-
+  character excerpt, so a reprint carrying a byline pushes the end of the other
+  copy's text out of the window; Jaccard counts that against both texts and a
+  genuine reprint scored 0.82, under any threshold high enough to be safe.
+  Containment normalised by the shorter text asks the question actually being
+  asked — is one of these inside the other — and scores it 1.0.
+- **A pair matched by two rules was reported as the weaker one.** Two copies with
+  the same digest also have overlapping text, so the cluster came back as a
+  judgement when it was a certainty. The rules now run strongest first and a
+  merge records only the rule that actually joined two components; a cluster is
+  reported as the weakest rule that made a merge _in it_, which is the honest
+  reading of a group held together partly by a digest and partly by a judgement.
+- **The upserts set an `updated_at` that does not exist.** These tables carry
+  `created_at` only, and the column was not added: when a projection last
+  rewrote a row says nothing about the run it describes.
+- **The projection's own summary counted what state held rather than what it
+  wrote**, found by re-reading rather than by a failure. Both row builders drop
+  what they cannot write — a span the checkpoint no longer carries, a
+  contradiction whose claims are gone — so the line a worker logs would have
+  claimed more evidence than exists. It counts the rows now.
+- **The attached-upload descriptor carried a placeholder credibility dict**, with
+  a comment saying credibility belonged to Phase 11. It does now: an upload is
+  primary and unrated, because its origin is the person who asked and nothing in
+  the system has assessed it.
+
+Stated rather than implied: nothing runs a graph in production yet, so nothing
+has been projected outside the tests — the worker is Phase 13. Deduplication
+compares the stored excerpt, which catches a syndicated copy and does not catch a
+paraphrase; nothing here claims otherwise. `claims.task_id` stays NULL because
+the graph does not write `research_tasks` rows, and `task_external_id` carries
+the link to the subtask that found a claim's first span. Relevance is not
+measured, and `citations` is Phase 12's table.
+
+## Phase 12 — Report generation · **Next**
 
 Structured report: Executive Summary, Key Findings, Detailed Analysis,
 Competitive Landscape, Evidence, Contradictions, Risks, Opportunities,
@@ -766,8 +868,8 @@ A new user must be able to:
 4. Submit a complex research question — **done**
 5. Observe agent execution in real time — _stream done, agents Phase 9–10_
 6. See sources being discovered — _UI done, discovery Phase 6_
-7. See evidence being collected — _UI done, extraction Phase 11_
-8. See contradictions — _UI done, detection Phase 11_
+7. See evidence being collected — _UI done, extraction done, worker Phase 13_
+8. See contradictions — _UI done, detection done, worker Phase 13_
 9. Wait for iterative research to complete — _Phase 9_
 10. Receive a structured report — _UI done, generation Phase 12_
 11. Open citations — _UI done, validation Phase 12_

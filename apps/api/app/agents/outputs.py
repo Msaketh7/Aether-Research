@@ -169,6 +169,13 @@ class ProposedClaim(AgentOutput):
     #: detection joins on. Normalised again by the agent, so two models writing
     #: "Nvidia / revenue / FY2025" and "nvidia revenue fy2025" still group.
     normalized_key: str = Field(min_length=3, max_length=200)
+    #: What the claim asserts - the number, name or direction - quoted from its
+    #: own text. The key holds the subject and period and deliberately not this,
+    #: so that two sources disagreeing about a figure share a key; this is what
+    #: they disagree about, and a contradiction cannot be displayed without it.
+    #: Checked against the claim's text before it is kept, so it cannot become a
+    #: second assertion the evidence was never asked about.
+    object_value: str = Field(default="", max_length=300)
     claim_type: ClaimType
     evidence: tuple[int, ...] = Field(min_length=1, max_length=MAX_EVIDENCE_PER_CLAIM)
     confidence: float = Field(ge=0.0, le=1.0)

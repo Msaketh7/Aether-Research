@@ -61,7 +61,7 @@ from app.core.enums import (
     TaskPriority,
 )
 from tests.support import agents as fake
-from tests.support.graph import ScriptedProbe
+from tests.support.graph import RecordedRuns, ScriptedProbe
 from tests.test_researchers import FakeCollector, FakeToolbelt, result
 
 #: Two pages, so a second round can find something the first did not. A page
@@ -199,6 +199,7 @@ def build(*answers: Any, width: int = 4):
         bounds=GraphBounds(
             max_subtasks_per_iteration=width, max_concurrency=2, node_timeout_seconds=10.0
         ),
+        recorder=RecordedRuns(),
     )
     return runner, model, recorder, probe, collector
 

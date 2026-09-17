@@ -8,7 +8,7 @@ which are what distinguish a citation from an assertion.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -42,7 +42,10 @@ class Source(ApiModel):
     credibility_score: float = Field(ge=0.0, le=1.0)
     credibility_metadata: SourceCredibility
     dedup_cluster_id: UUID | None
-    relevance_score: float = Field(ge=0.0, le=1.0)
+    #: ``None`` means relevance was never measured for this source. Distinct from
+    #: a low score, and the reason the column is nullable: a placeholder here is
+    #: read by a person as a number the system produced (migration 0007).
+    relevance_score: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     task_external_id: str | None
     claim_count: int
     excerpt: str

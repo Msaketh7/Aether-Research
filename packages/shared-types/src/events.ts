@@ -70,7 +70,8 @@ export type ResearchEvent =
         url: string;
         publisher: string;
         source_type: SourceType;
-        relevance_score: UnitInterval;
+        /** `null` when relevance was not measured, as on `Source`. */
+        relevance_score: UnitInterval | null;
         task_external_id: string | null;
       }
     >

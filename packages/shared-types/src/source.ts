@@ -26,8 +26,12 @@ export interface Source {
   credibility_metadata: SourceCredibility;
   /** Groups near-duplicates so the UI can collapse them. */
   dedup_cluster_id: Uuid | null;
-  /** How well this source matched the subtask that found it. */
-  relevance_score: UnitInterval;
+  /**
+   * How well this source matched the subtask that found it, or `null` when that
+   * was never measured. Nullable rather than defaulted: a placeholder here is
+   * read by a person as a score the system produced.
+   */
+  relevance_score: UnitInterval | null;
   /** Which planner subtask surfaced it. */
   task_external_id: string | null;
   claim_count: number;

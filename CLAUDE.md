@@ -17,13 +17,13 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–10 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–11 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
 | Layer                         | State                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Frontend (`apps/web`)         | Complete product surface, 99 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                   |
-| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 776 tests.                                                                                                                                                                                                                         |
+| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 968 tests.                                                                                                                                                                                                                         |
 | Database                      | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). Runs survive restart.                                                                                                                                                              |
 | Object storage                | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                           |
 | Model gateway                 | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`.                                                                                                                                     |
@@ -32,7 +32,8 @@ untrusted-content handling, measured evaluation, observability, deployment.
 | Retrieval (`app/retrieval`)   | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. Called by the document researcher and by evidence extraction.                                      |
 | Research graph (`app/agents`) | LangGraph `StateGraph` over a typed, checkpointed `ResearchState`: parallel researchers via `Send`; every node wrapped with cancellation, the FR-8 ceilings, a timeout and usage accounting; Postgres checkpoints whose tables Alembic owns, read back through a derived allowlist. Every node is implemented.                 |
 | Agents (`app/agents`)         | All nine: planner, three researchers behind a router, evidence, claim normalization, verification, contradictions, critic, synthesis, and a citation validator that calls no model. Versioned prompts as package data; a model cites by catalogue number and never emits an identifier (ADR 0015).                             |
-| Worker                        | No worker to run the graph yet (Phase 13): a created run stays `queued`.                                                                                                                                                                                                                                                       |
+| Evidence (`app/evidence`)     | The chain made durable: a projection of graph state onto claims, evidence spans and contradictions, idempotent on derived ids; source deduplication into clusters, so corroboration counts distinct content rather than copies; origin credibility from a declared table. `/sources` and `/evidence` serve real rows.          |
+| Worker                        | No worker to run the graph yet (Phase 13): a created run stays `queued`, so nothing has been projected outside the tests.                                                                                                                                                                                                      |
 | Everything else               | Not built. Endpoints for unbuilt capabilities return `501 not_implemented`.                                                                                                                                                                                                                                                    |
 
 Nothing fabricates data to fill a gap. The only benchmark executed so far is
@@ -55,7 +56,7 @@ listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 | [`docs/architecture.md`](docs/architecture.md) | System map                                                              |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE per trust boundary; prompt injection and SSRF                    |
 | [`docs/evaluation.md`](docs/evaluation.md)     | Metrics, thresholds, the no-fabricated-numbers rule                     |
-| [`docs/ADRs/`](docs/ADRs/)                     | 14 accepted decisions. New irreversible choice ⇒ new ADR.               |
+| [`docs/ADRs/`](docs/ADRs/)                     | 16 accepted decisions. New irreversible choice ⇒ new ADR.               |
 
 ## Repository structure
 
@@ -91,7 +92,12 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
                    prompts/ holds the versioned templates as package data;
                    catalog.py numbers state for a model, outputs.py is what a
                    model may return, factory.py wires them together.
-  app/evidence|reports|evaluations|observability/
+  app/evidence/    the evidence chain as rows: dedup.py clusters a run's
+                   sources, projection.py writes the graph's claims, spans and
+                   contradictions onto them, repository.py is the store's
+                   protocol. Never resolves a contradiction, and never
+                   un-resolves one a person resolved.
+  app/reports|evaluations|observability/
                    module boundaries with docstrings; filled by later phases
   migrations/      Alembic, two branches: core (relational) and vector
                    (needs pgvector). `alembic upgrade heads` applies both.

@@ -74,6 +74,7 @@ class ClaimRow(Base, TimestampMixin):
         enum_check("claim_type", ClaimType, "claims_claim_type"),
         enum_check("status", ClaimStatus, "claims_status"),
         CheckConstraint("confidence BETWEEN 0 AND 1", name="ck_claims_confidence_range"),
+        CheckConstraint("corroboration_count >= 0", name="ck_claims_corroboration_non_negative"),
         # The evidence page: this run's claims, optionally filtered by status.
         Index("ix_claims_run_id_status", "run_id", "status"),
         # Contradiction detection: same key, same run, different sources.

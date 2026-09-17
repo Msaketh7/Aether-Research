@@ -417,19 +417,22 @@ def evidence(
     quote: str = "Inference on H100 instances is priced at $4.10 per GPU-hour.",
     task_key: str = "i1-1",
     source_name: str = "source-a",
+    document_name: str = "doc-a",
     span_start: int = 0,
     stance: EvidenceStance = EvidenceStance.SUPPORTS,
+    model: str = "test-extractor-v1",
 ) -> EvidenceItem:
     return EvidenceItem(
         id=ident(name),
         task_key=task_key,
         iteration=1,
         source_id=ident(source_name),
-        document_id=ident("doc-a"),
+        document_id=ident(document_name),
         claim_text=quote,
         span_start=span_start,
         span_end=span_start + len(quote),
         stance=stance,
+        extractor_model=model,
     )
 
 
@@ -441,15 +444,18 @@ def claim(
     evidence_ids: tuple[uuid.UUID, ...] = (),
     status: ClaimStatus = ClaimStatus.CANDIDATE,
     confidence: float = 0.6,
+    object_value: str = "$4.10",
+    claim_id: uuid.UUID | None = None,
 ) -> ClaimItem:
     return ClaimItem(
-        id=ident(name),
+        id=claim_id or ident(name),
         normalized_key=key,
         text=text,
         claim_type=ClaimType.QUANTITATIVE,
         status=status,
         confidence=confidence,
         evidence_ids=evidence_ids or (ident("ev-1"),),
+        object_value=object_value,
     )
 
 

@@ -23,7 +23,7 @@ import pytest
 import sqlalchemy as sa
 
 from app.core.config import Settings
-from app.core.enums import DocumentFormat, LlmProvider
+from app.core.enums import DocumentFormat, LlmProvider, SourceType
 from app.db.models.research import ResearchRunRow
 from app.db.models.source import DocumentChunkRow, DocumentRow, SourceRow
 from app.db.session import Database
@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.retrieval.embedding import ChunkEmbedder
 from app.retrieval.errors import DocumentEncrypted
+from app.sources.schemas import SourceCredibility
 from tests.support import llm
 from tests.support.documents import article_html, encrypt_pdf, make_pdf, prose
 from tests.support.ingestion import descriptor, in_process_ingestor, seed_run
@@ -127,6 +128,41 @@ async def test_a_pdf_becomes_a_source_a_document_and_exact_chunks(database, arti
         assert chunk.embedding_model is None
 
     assert (await counts(database, run_id))["source_count"] == 1
+
+
+async def test_a_fetched_page_is_stored_with_a_credibility_its_reader_can_parse(
+    database, artifact_store
+):
+    """The column is written here and read as a `SourceCredibility`, which forbids
+    unknown fields. Until Phase 11 it held the fetch facts instead, and the
+    sources endpoint would have failed on the first real row - invisibly, because
+    the endpoint returned an empty list. The fetch facts now sit on the document.
+    """
+    _, run_id = await seed_run(database)
+    outcome = await in_process_ingestor(database, artifact_store).ingest(
+        article_html(prose(4), published="2026-02-01"),
+        fmt=DocumentFormat.HTML,
+        charset=None,
+        descriptor=descriptor(
+            run_id,
+            canonical_url="https://www.reuters.com/story",
+            source_type=SourceType.WEB,
+            domain="reuters.com",
+            fetch_metadata={"fetched_status": 200, "redirects": 1, "robots_checked": True},
+        ),
+    )
+
+    async with database.session() as session:
+        source = await session.get(SourceRow, outcome.source_id)
+        document = await session.get(DocumentRow, outcome.document_id)
+    assert source is not None and document is not None
+    credibility = SourceCredibility.model_validate(source.credibility_metadata)
+    assert (credibility.tier, credibility.is_primary) == ("reputable", False)
+    assert float(source.credibility_score) == credibility.domain_reputation
+    assert document.doc_metadata["fetched_status"] == 200, (
+        "how the bytes were obtained is a fact about the document, beside the format and the parser"
+    )
+    assert document.doc_metadata["robots_checked"] is True
 
 
 async def test_markdown_chunks_record_their_section(database, artifact_store):

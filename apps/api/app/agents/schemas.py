@@ -403,6 +403,13 @@ class EvidenceItem(GraphValue):
     span_start: int = Field(ge=0)
     span_end: int = Field(ge=1)
     stance: EvidenceStance
+    #: The model that read the passage and named this span, as the provider
+    #: reported it - not the model the role routes to, which failover can change
+    #: mid-run. Stored as ``evidence.extractor_model``, which is how a span whose
+    #: quality is later doubted can be traced to what produced it. Defaulted so a
+    #: checkpoint written before Phase 11 still loads; such a span is recorded as
+    #: ``unknown`` rather than attributed to a model that may not have made it.
+    extractor_model: str = Field(default="", max_length=120)
 
     @model_validator(mode="after")
     def _ordered(self) -> EvidenceItem:
@@ -433,6 +440,13 @@ class ClaimItem(GraphValue):
     status: ClaimStatus = ClaimStatus.CANDIDATE
     confidence: float = Field(ge=0.0, le=1.0)
     evidence_ids: tuple[UUID, ...] = Field(min_length=1, max_length=MAX_EVIDENCE_PER_CLAIM)
+    #: What this claim asserts, as distinct from what it is about. The key holds
+    #: ``subject | predicate | qualifier`` and deliberately not the value, so two
+    #: claims that disagree share a key; the value is what they disagree *about*,
+    #: and a contradiction that could not name it would tell a reader only that a
+    #: conflict exists. Taken verbatim from the claim's own text (the normalizer
+    #: drops one that is not there), so it is never a second assertion.
+    object_value: str = Field(default="", max_length=300)
 
 
 class ContradictionItem(GraphValue):

@@ -19,7 +19,7 @@ from app.agents.errors import NodeContractViolated, PlanningFailed, SynthesisFai
 from app.agents.nodes import NodeResult
 from app.agents.schemas import ClaimItem, Plan, ReportDraft, StopReason
 from app.core.enums import ClaimStatus, ResearchMode, TaskPriority
-from tests.support.graph import Script, ScriptedNodes, brief, make_runner
+from tests.support.graph import RecordedRuns, Script, ScriptedNodes, brief, make_runner
 
 EVERY_NODE_ONCE = {
     "planner": 1,
@@ -315,6 +315,54 @@ async def test_a_failed_synthesis_fails_the_run():
     runner, _, _ = make_runner(nodes)
 
     with pytest.raises(SynthesisFailed):
+        await runner.run(brief())
+
+
+# --- recording what a run produced (Phase 11) -----------------------------------
+
+
+async def test_a_finished_run_hands_its_state_to_the_recorder():
+    """A checkpoint is readable only by the graph, so a run nobody recorded has
+    produced nothing anyone can open."""
+    nodes = ScriptedNodes(Script())
+    recorder = RecordedRuns()
+    runner, _, _ = make_runner(nodes, recorder=recorder)
+
+    state = await runner.run(brief())
+
+    assert len(recorder.states) == 1
+    assert recorder.states[0]["research_id"] == state["research_id"]
+    assert recorder.claims == state["claims"], "what is recorded is what the run concluded"
+
+
+async def test_a_run_that_failed_still_has_its_evidence_recorded():
+    nodes = ScriptedNodes(Script(fail_on={"synthesizer": {1}}))
+    recorder = RecordedRuns()
+    runner, _, _ = make_runner(nodes, recorder=recorder)
+
+    with pytest.raises(SynthesisFailed):
+        await runner.run(brief())
+
+    assert len(recorder.states) == 1, (
+        "synthesis failing does not unfind the sources, and someone diagnosing "
+        "the failure needs to see what the run had gathered"
+    )
+    assert recorder.claims, "the last checkpoint is what the graph had reached"
+
+
+async def test_a_recorder_that_fails_after_a_failed_run_does_not_replace_the_failure():
+    nodes = ScriptedNodes(Script(fail_on={"synthesizer": {1}}))
+    runner, _, _ = make_runner(nodes, recorder=RecordedRuns(fails=True))
+
+    with pytest.raises(SynthesisFailed):
+        await runner.run(brief())
+
+
+async def test_a_run_whose_results_cannot_be_stored_has_not_finished():
+    nodes = ScriptedNodes(Script())
+    runner, _, _ = make_runner(nodes, recorder=RecordedRuns(fails=True))
+
+    with pytest.raises(RuntimeError, match="recording failed"):
         await runner.run(brief())
 
 

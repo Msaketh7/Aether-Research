@@ -162,7 +162,7 @@ class SourceCollector:
                 fallback_title=candidate.title[:_MAX_TITLE_CHARS] or page.domain,
                 author=candidate.author,
                 published_at=candidate.published_at,
-                credibility_metadata={
+                fetch_metadata={
                     "fetched_status": page.status_code,
                     "redirects": len(page.redirects),
                     "robots_checked": page.robots_checked,

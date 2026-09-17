@@ -1,5 +1,7 @@
 import type { ResearchEvent, ResearchEventType } from '@aether/shared-types';
 
+import { formatPercent } from '@/lib/format';
+
 /**
  * Turns a raw event into the line the activity feed shows.
  *
@@ -82,7 +84,7 @@ export function describeEvent(event: ResearchEvent): EventDescription {
     case 'source_found':
       return {
         title: event.payload.title,
-        detail: `${event.payload.publisher} · relevance ${(event.payload.relevance_score * 100).toFixed(0)}%`,
+        detail: `${event.payload.publisher} · relevance ${formatPercent(event.payload.relevance_score)}`,
         tone,
         href: event.payload.url,
       };

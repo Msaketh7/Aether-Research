@@ -14,9 +14,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Request, Response, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
@@ -26,7 +27,7 @@ from app.api.deps import (
     ResearchServiceDep,
     SettingsDep,
 )
-from app.core.enums import RunStatus
+from app.core.enums import ClaimStatus, RunStatus, SourceType
 from app.core.logging import get_logger
 from app.core.pagination import Page
 from app.evidence.schemas import EvidenceResponse
@@ -98,16 +99,28 @@ async def get_plan(run_id: UUID, user: CurrentUser, service: ResearchServiceDep)
 
 @router.get("/{run_id}/sources", response_model=SourcesResponse, summary="Discovered sources")
 async def get_sources(
-    run_id: UUID, user: CurrentUser, service: ResearchServiceDep
+    run_id: UUID,
+    user: CurrentUser,
+    service: ResearchServiceDep,
+    page: PageParamsDep,
+    type: Annotated[SourceType | None, Query(description="Only sources of this kind.")] = None,
 ) -> SourcesResponse:
-    return await service.sources(user.id, run_id)
+    # ``type`` rather than ``source_type``: it is the query parameter the web app
+    # has sent since Phase 1, and the wire contract is the one that cannot be
+    # changed unilaterally. FastAPI's shadowing of the builtin is local to the
+    # signature and the value is an enum by the time it is used.
+    return await service.sources(user.id, run_id, page=page, source_type=type)
 
 
 @router.get("/{run_id}/evidence", response_model=EvidenceResponse, summary="Claims and evidence")
 async def get_evidence(
-    run_id: UUID, user: CurrentUser, service: ResearchServiceDep
+    run_id: UUID,
+    user: CurrentUser,
+    service: ResearchServiceDep,
+    page: PageParamsDep,
+    status: Annotated[ClaimStatus | None, Query(description="Only claims in this state.")] = None,
 ) -> EvidenceResponse:
-    return await service.evidence(user.id, run_id)
+    return await service.evidence(user.id, run_id, page=page, status=status)
 
 
 @router.get("/{run_id}/activity", response_model=ActivityResponse, summary="Agent trace")

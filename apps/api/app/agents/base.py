@@ -91,6 +91,17 @@ def total_usage(parts: list[NodeUsage]) -> NodeUsage:
     return NodeUsage(tokens=tokens, cost=cost, search_queries=searches)
 
 
+@dataclass(frozen=True, slots=True)
+class AgentAnswer[T]:
+    """One model call's result: the value, what it cost, and what answered it."""
+
+    value: T
+    usage: NodeUsage
+    #: The provider's model identifier, as the completion reported it. Not the
+    #: role's configured model: failover can answer with the next in the chain.
+    model: str
+
+
 class ModelAgent:
     """An agent that reaches a model only through the gateway, by role.
 
@@ -128,6 +139,24 @@ class ModelAgent:
         fix and failed over what it cannot, so an exception here means every
         declared model refused or the answer would not validate - and the node
         boundary above decides what that costs the run.
+        """
+        answer = await self.ask_answer(context, prompt=prompt, schema=schema)
+        return answer.value, answer.usage
+
+    async def ask_answer(
+        self,
+        context: AgentContext,
+        *,
+        prompt: Prompt,
+        schema: type[StructuredT],
+    ) -> AgentAnswer[StructuredT]:
+        """The same call, also reporting which model answered.
+
+        Most agents do not care: the role decides the tier, and the tier is what
+        a cost question is asked in. Extraction does, because an evidence row
+        records the model that produced the span (TDD 7.2), and the gateway's
+        failover chain means the role does not name it - the second model in the
+        chain is the one that answered whenever the first refused.
         """
         started = time.perf_counter()
         logger.debug(
@@ -172,7 +201,7 @@ class ModelAgent:
                 "cost_known": usage.cost.measured,
             },
         )
-        return result.value, usage
+        return AgentAnswer(value=result.value, usage=usage, model=result.completion.model)
 
     def _log_fields(self, context: AgentContext) -> dict[str, object]:
         return {

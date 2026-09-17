@@ -298,6 +298,48 @@ async def test_a_run_with_no_results_returns_empty_collections(client: AsyncClie
     assert activity["agent_runs"] == []
 
 
+async def test_the_evidence_endpoints_filter_by_the_vocabularies_they_publish(
+    client: AsyncClient,
+):
+    """The filters the web app has sent since Phase 1: `?type=` and `?status=`.
+
+    A value outside the vocabulary is a 422 rather than a silently empty page,
+    which is the difference between "no sources of that kind" and "that kind
+    does not exist".
+    """
+    run_id = (await create_run(client))["run_id"]
+
+    assert (await client.get(f"{API}/research/{run_id}/sources?type=sec")).status_code == 200
+    assert (
+        await client.get(f"{API}/research/{run_id}/evidence?status=verified")
+    ).status_code == 200
+    bad_type = await client.get(f"{API}/research/{run_id}/sources?type=podcast")
+    bad_status = await client.get(f"{API}/research/{run_id}/evidence?status=probably")
+
+    assert bad_type.status_code == 422
+    assert bad_status.status_code == 422
+
+
+async def test_a_cursor_that_is_not_an_id_is_refused_rather_than_ignored(client: AsyncClient):
+    run_id = (await create_run(client))["run_id"]
+
+    response = await client.get(f"{API}/research/{run_id}/sources?cursor=bm90LWFuLWlk")
+
+    assert response.status_code == 422, "the same guard the runs list has had since Phase 7"
+
+
+async def test_another_users_evidence_is_not_found_rather_than_forbidden(
+    client: AsyncClient, other_user_id: UUID
+):
+    run_id = (await create_run(client))["run_id"]
+
+    sources = await client.get(f"{API}/research/{run_id}/sources", headers=as_user(other_user_id))
+    evidence = await client.get(f"{API}/research/{run_id}/evidence", headers=as_user(other_user_id))
+
+    assert sources.status_code == 404
+    assert evidence.status_code == 404, "a 403 would confirm the run exists"
+
+
 async def test_the_report_is_not_ready_rather_than_missing(client: AsyncClient):
     """`report_not_ready` and `run_not_found` are different facts and different codes."""
     created = await create_run(client)

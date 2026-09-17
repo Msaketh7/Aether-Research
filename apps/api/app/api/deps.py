@@ -22,6 +22,7 @@ from app.auth.principal import DEV_USER_HEADER, Principal, resolve_principal
 from app.core.config import Settings
 from app.core.logging import user_id_var
 from app.core.pagination import PageParams
+from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
 from app.db.repositories.research import SqlAlchemyResearchRepository
 from app.db.repositories.uploads import SqlAlchemyUploadRepository
 from app.db.repositories.user import UserRepository
@@ -128,9 +129,14 @@ def get_upload_repository(session: SessionDep) -> SqlAlchemyUploadRepository:
     return SqlAlchemyUploadRepository(session)
 
 
+def get_evidence_repository(session: SessionDep) -> SqlAlchemyEvidenceRepository:
+    return SqlAlchemyEvidenceRepository(session)
+
+
 def get_research_service(
     repository: Annotated[SqlAlchemyResearchRepository, Depends(get_research_repository)],
     uploads: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
+    evidence: Annotated[SqlAlchemyEvidenceRepository, Depends(get_evidence_repository)],
     queue: Annotated[JobQueue, Depends(get_queue)],
     broker: Annotated[EventBroker, Depends(get_broker)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
@@ -143,7 +149,12 @@ def get_research_service(
     connections and does no work until a method is called.
     """
     return ResearchService(
-        repository=repository, uploads=uploads, queue=queue, broker=broker, settings=settings
+        repository=repository,
+        uploads=uploads,
+        evidence_store=evidence,
+        queue=queue,
+        broker=broker,
+        settings=settings,
     )
 
 

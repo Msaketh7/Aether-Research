@@ -55,9 +55,10 @@ def upload_descriptor(run_id: UUID, upload: UploadRow) -> SourceDescriptor:
         publisher=UPLOAD_PUBLISHER,
         accessed_at=upload.created_at,
         fallback_title=upload.filename,
-        # Only what is known. No reputation score is invented for a file whose
-        # origin nobody has assessed; credibility belongs to Phase 11.
-        credibility_metadata={"tier": "unknown", "origin": "user_upload"},
+        # No credibility is passed: ingestion assesses it from the source type
+        # and the domain (``app.sources.credibility``), and for an upload the
+        # answer is that the origin is the person who asked - primary, and
+        # unrated, because nothing in the system has assessed it.
     )
 
 
