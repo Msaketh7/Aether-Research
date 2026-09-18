@@ -35,13 +35,17 @@ from app.agents.researchers.router import ResearchRouter
 from app.agents.researchers.web import WebResearchAgent
 from app.agents.synthesis import SynthesisAgent
 from app.agents.verification import ContradictionAgent, VerificationAgent
+from app.cache import ResponseCache
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.db.session import Database
 from app.models.gateway import LLMGateway
+from app.observability.metrics import Metrics
+from app.observability.retrieval import MeasuredRetriever
 from app.retrieval.factory import build_document_ingestor, build_retriever
 from app.retrieval.ingestion import DocumentIngestor
 from app.retrieval.retriever import Retriever
+from app.sources.base import CallRecorder
 from app.sources.toolbelt import Toolbelt, build_toolbelt
 from app.storage import ObjectStorage
 
@@ -70,6 +74,9 @@ def build_dependencies(
     gateway: LLMGateway,
     database: Database,
     storage: ObjectStorage,
+    cache: ResponseCache | None = None,
+    tool_recorder: CallRecorder | None = None,
+    metrics: Metrics | None = None,
 ) -> ResearchDependencies:
     """Build the shared machinery once, from configuration.
 
@@ -77,17 +84,33 @@ def build_dependencies(
     so the vectors a researcher writes and the vectors an extractor searches are
     produced by the same embedding model. Different models there is not an error
     anywhere - it just makes retrieval quietly worse (ADR 0012).
+
+    The cache is the process's, for the same reason the gateway is: one shared
+    by every researcher in a run is what makes two of them fetching one page
+    fetch it once (Phase 15). One per agent would be one per nobody.
+
+    ``tool_recorder`` is where every tool call is written. Left out, the belt
+    logs them; the worker passes one that also writes `tool_calls`, hung from
+    whichever node is running (Phase 16).
+
+    ``metrics`` wraps the retriever so retrieval latency and result counts are
+    graphed (Phase 17). Left out, retrieval behaves identically and reports
+    nothing, which is what a test wants.
     """
     return ResearchDependencies(
         gateway=gateway,
         database=database,
         storage=storage,
-        toolbelt=build_toolbelt(settings),
+        toolbelt=build_toolbelt(settings, cache=cache, recorder=tool_recorder),
         ingestor=build_document_ingestor(
             settings, database=database, storage=storage, gateway=gateway
         ),
-        retriever=build_retriever(settings, database=database, gateway=gateway),
+        retriever=_measured(build_retriever(settings, database=database, gateway=gateway), metrics),
     )
+
+
+def _measured(retriever: Retriever, metrics: Metrics | None) -> Retriever:
+    return retriever if metrics is None else MeasuredRetriever(retriever, metrics)
 
 
 def build_research_nodes(

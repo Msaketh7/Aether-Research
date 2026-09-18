@@ -22,13 +22,17 @@ from app.auth.principal import DEV_USER_HEADER, Principal, resolve_principal
 from app.core.config import Settings
 from app.core.logging import user_id_var
 from app.core.pagination import PageParams
+from app.db.repositories.evaluations import SqlAlchemyEvaluationStore
 from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
+from app.db.repositories.metrics import SqlAlchemySystemMetrics
 from app.db.repositories.reports import SqlAlchemyReportRepository
 from app.db.repositories.research import SqlAlchemyResearchRepository
+from app.db.repositories.trace import SqlAlchemyTraceStore
 from app.db.repositories.uploads import SqlAlchemyUploadRepository
 from app.db.repositories.user import UserRepository
 from app.db.session import Database
 from app.models import LLMGateway
+from app.observability.metrics import Metrics
 from app.research.events import EventBroker
 from app.research.service import ResearchService
 from app.retrieval.uploads import UploadService
@@ -50,6 +54,30 @@ def get_database(request: Request) -> Database:
 def get_queue(request: Request) -> JobQueue:
     queue: JobQueue = request.app.state.queue
     return queue
+
+
+def get_metrics(request: Request) -> Metrics | None:
+    """This process's instruments, or ``None`` when metrics are switched off."""
+    metrics: Metrics | None = getattr(request.app.state, "metrics", None)
+    return metrics
+
+
+def get_evaluation_store(
+    database: Annotated[Database, Depends(get_database)],
+) -> SqlAlchemyEvaluationStore:
+    """The benchmark store. Takes the engine: it is written by a runner that
+    has no request, and reading it here through the same object keeps one
+    implementation rather than two."""
+    return SqlAlchemyEvaluationStore(database)
+
+
+def get_system_metrics(
+    database: Annotated[Database, Depends(get_database)],
+    queue: Annotated[JobQueue, Depends(get_queue)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> SqlAlchemySystemMetrics:
+    """The live panel, read from rows and from the queue itself."""
+    return SqlAlchemySystemMetrics(database, queue, lease_seconds=settings.worker_lease_seconds)
 
 
 def get_broker(request: Request) -> EventBroker:
@@ -138,11 +166,23 @@ def get_report_repository(session: SessionDep) -> SqlAlchemyReportRepository:
     return SqlAlchemyReportRepository(session)
 
 
+def get_trace_store(database: Annotated[Database, Depends(get_database)]) -> SqlAlchemyTraceStore:
+    """The trace store takes the engine, not the request's session.
+
+    Unlike the other read models, this one is also written from the worker,
+    where there is no request and no session to share - so it opens its own,
+    and reading it here through the same object keeps one implementation
+    rather than two.
+    """
+    return SqlAlchemyTraceStore(database)
+
+
 def get_research_service(
     repository: Annotated[SqlAlchemyResearchRepository, Depends(get_research_repository)],
     uploads: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
     evidence: Annotated[SqlAlchemyEvidenceRepository, Depends(get_evidence_repository)],
     reports: Annotated[SqlAlchemyReportRepository, Depends(get_report_repository)],
+    activity: Annotated[SqlAlchemyTraceStore, Depends(get_trace_store)],
     queue: Annotated[JobQueue, Depends(get_queue)],
     broker: Annotated[EventBroker, Depends(get_broker)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
@@ -159,6 +199,7 @@ def get_research_service(
         uploads=uploads,
         evidence_store=evidence,
         report_store=reports,
+        activity_store=activity,
         queue=queue,
         broker=broker,
         settings=settings,
@@ -194,6 +235,7 @@ SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
 BrokerDep = Annotated[EventBroker, Depends(get_broker)]
+MetricsDep = Annotated[Metrics | None, Depends(get_metrics)]
 ObjectStorageDep = Annotated[ObjectStorage, Depends(get_object_storage)]
 GatewayDep = Annotated[LLMGateway, Depends(get_gateway)]
 ToolbeltDep = Annotated[Toolbelt, Depends(get_toolbelt)]

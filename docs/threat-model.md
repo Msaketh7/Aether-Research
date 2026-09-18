@@ -129,11 +129,26 @@ ends the run _safely_ with a partial report rather than by crashing.
 discovery, and the run proceeds to a partial report with a caveat. An uncosted
 model call ends discovery at the end of its round, because a ceiling that cannot
 be measured cannot be enforced. Every node runs under a timeout, and LangGraph's
-recursion limit is derived from the run's shape as a backstop. The overshoot is
-bounded by one step. Spend is summed from what nodes report until Phase 16
-reconciles it against the model-call ledger; since Phase 10 what they report is
-priced through the gateway from the registry, and a model with no declared price
-is reported as an uncosted call rather than as free.
+recursion limit is derived from the run's shape as a backstop.
+
+**Status (Phase 16).** The ceiling is now enforced _before_ a call as well as
+between nodes, in the gateway - the only other place every model call passes
+through. A node boundary decides correctly and bounds nothing: a node that
+starts under the ceiling may finish far over it, and a researcher fanned out
+four ways can overshoot by four calls before anything looks. A refused call
+raises, the graph treats it as a limit rather than as a broken agent, and the
+run proceeds to synthesis with a caveat naming what stopped it.
+
+The step that writes the report is deliberately exempt, and the exemption is
+the requirement: FR-8 promises a partial _result_, the result is a report, and
+a report costs a call. The overshoot is one call wide.
+
+A model the registry does not price is refused outright under a budget
+(`REQUIRE_PRICED_MODELS`, default on), failing over to the next model in the
+chain - a run whose spend cannot be measured cannot be held to a limit. Spend
+is counted from the call ledger that is actually written, never from a second
+tally that could drift from it, and an unpriced call is recorded as uncosted
+rather than as free (`llm_calls.cost_usd` is nullable, migration 0011).
 
 ### 3.4 Broken object-level authorization (boundary 2)
 
@@ -237,19 +252,49 @@ retrieved documents inside them - to a third-party service whenever
 past the typed settings layer.
 
 **Controls.** Every graph invocation runs with tracing explicitly disabled, and a
-test sets the variable and asserts that no node sees tracing enabled. Turning
-tracing on is a deliberate decision for Phase 17.
+test sets the variable and asserts that no node sees tracing enabled.
+
+**Status (Phase 17).** Tracing can now be turned on, and the way it is turned
+on is the control. Setting the library's own environment variables from the
+settings - what its documentation suggests - would leave two places the
+decision can be made and would break the rule that the settings layer is the
+only reader of the environment; a test enforces that rule and failed on
+exactly that attempt. Instead a client is constructed from the typed key and
+handed to `tracing_context` per invocation, so the decision exists once, in
+configuration, defaults to off, and a switch with no key stays off rather
+than becoming half-on.
+
+### 3.11 Telemetry as a surface (boundaries 2, 4)
+
+**Threat.** An observability endpoint exposes user content, or a label whose
+values an attacker chooses turns the metrics store into a denial of service.
+
+**Controls.** `/metrics` on the API and the worker's metrics port carry closed
+vocabularies only - provider, model, agent role, tool, status, cache
+namespace, route template - and never a run id, a query, a URL or a user.
+A route label is rebuilt by substituting the captured path parameters back
+into the path, so a run id cannot reach a label unless the router never
+captured it, and a path that matched no route is labelled `unmatched` rather
+than by its own text, because an unmatched path is attacker-controlled.
+Per-run facts live in the ledger, which is a database, scoped by user through
+`/activity`.
+
+Neither endpoint is authenticated, like the health probes beside them: a
+scraper is not an API client. Neither belongs on a public interface, and the
+deployment (ADR 0008) is what restricts them. `METRICS_ENABLED=false` removes
+them entirely, and the endpoint then 404s rather than serving an empty
+exposition that would read as a healthy process reporting nothing.
 
 ## 4. STRIDE summary
 
-| Threat                     | Primary control                                                                                      |
-| -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **S**poofing               | Auth.js sessions, hashed tokens, ownership checks                                                    |
-| **T**ampering              | Content hashes on every document; append-only evidence trail; allowlisted checkpoint deserialization |
-| **R**epudiation            | Audit log of auth and research mutations; full agent trace                                           |
-| **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side, third-party tracing off                    |
-| **D**enial of service      | Rate limits, run ceilings, bounded queues, timeouts                                                  |
-| **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles                                                 |
+| Threat                     | Primary control                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **S**poofing               | Auth.js sessions, hashed tokens, ownership checks                                                                   |
+| **T**ampering              | Content hashes on every document; append-only evidence trail; allowlisted checkpoint deserialization                |
+| **R**epudiation            | Audit log of auth and research mutations; full agent trace                                                          |
+| **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side, third-party tracing off by default, bounded metric labels |
+| **D**enial of service      | Rate limits, run ceilings enforced before each call, bounded queues, timeouts, bounded metric cardinality           |
+| **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles                                                                |
 
 ## 5. What is explicitly out of scope for v1
 

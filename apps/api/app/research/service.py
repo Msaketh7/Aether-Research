@@ -31,8 +31,8 @@ from app.evidence.repository import EvidenceStore
 from app.evidence.schemas import EvidenceResponse
 from app.reports.repository import ReportStore
 from app.reports.schemas import ReportResponse
-from app.research.activity import ActivityResponse
-from app.research.events import EventBroker, ResearchEvent, ResearchEventType
+from app.research.activity import ActivityResponse, ActivityStore
+from app.research.events import EventBroker, EventDraft, ResearchEvent, ResearchEventType
 from app.research.repository import ResearchRepository, UploadAttachments, utcnow
 from app.research.schemas import (
     CreateResearchRequest,
@@ -62,6 +62,7 @@ class ResearchService:
         uploads: UploadAttachments,
         evidence_store: EvidenceStore,
         report_store: ReportStore,
+        activity_store: ActivityStore,
         queue: JobQueue,
         broker: EventBroker,
         settings: Settings,
@@ -70,6 +71,7 @@ class ResearchService:
         self._uploads = uploads
         self._evidence = evidence_store
         self._reports = report_store
+        self._activity = activity_store
         self._queue = queue
         self._broker = broker
         self._settings = settings
@@ -269,8 +271,8 @@ class ResearchService:
     # --- sub-resources ----------------------------------------------------
     #
     # These endpoints exist and are correct: a run that has produced nothing
-    # returns nothing. They are wired to real data by the phases that create it
-    # (11 for sources and evidence, 12 for reports, 9-10 for the trace).
+    # returns nothing. Each is wired to real data by the phase that creates it
+    # (11 for sources and evidence, 12 for reports, 16 for the trace).
 
     async def plan(self, user_id: UUID, run_id: UUID) -> ResearchPlan:
         run = await self._require_run(user_id, run_id)
@@ -317,8 +319,15 @@ class ResearchService:
         )
 
     async def activity(self, user_id: UUID, run_id: UUID) -> ActivityResponse:
+        """The run's trace: which agent ran when, and what it called (FR-10).
+
+        Ownership is established here and the trace is then read by run id,
+        which is the same arrangement as the evidence and report reads: the
+        run is the scope, and a run this user does not own is a 404 before a
+        single row is touched.
+        """
         await self._require_run(user_id, run_id)
-        return ActivityResponse(agent_runs=[], tool_calls=[], llm_calls=[])
+        return await self._activity.activity_for(run_id)
 
     async def report(self, user_id: UUID, run_id: UUID) -> ReportResponse:
         """The run's report, with its sections and every resolved citation.
@@ -361,10 +370,14 @@ class ResearchService:
         event_type: ResearchEventType,
         payload: dict[str, object] | None = None,
     ) -> None:
-        seq = await self._broker.next_seq(run.id)
+        """Publish one event about this run.
+
+        The broker numbers it, because the number has to be unique across
+        every process that emits for a run - and from Phase 14 the worker is
+        one of them.
+        """
         await self._broker.publish(
-            ResearchEvent.build(
-                seq=seq,
+            EventDraft(
                 type=event_type,
                 run_id=run.id,
                 status=run.status,

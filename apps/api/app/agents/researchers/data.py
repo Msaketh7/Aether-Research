@@ -108,6 +108,10 @@ class DataResearchAgent(ModelAgent):
                 task_key=assignment.subtask.key,
                 iteration=assignment.subtask.iteration,
                 sources=collected.sources,
+                # Named by the index they were asked of: "10-K filings" means
+                # something different at the SEC and on arXiv, and the stream
+                # should say which one was searched.
+                queries=tuple(f"{lookup.source.value}: {lookup.query}" for lookup in lookups),
             ),
             # Every lookup is a query against an external index, so each counts
             # against the run's search ceiling exactly as a web search does.

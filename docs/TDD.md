@@ -1024,6 +1024,24 @@ _Plain terms: one row per AI model call, with its token count and cost._
 | request_hash                      | `text`          | for de-dupe                                     |
 | trace_id / span_id                | `text`          |                                                 |
 
+#### `research_events`
+
+_Plain terms: the progress feed, written down, so a browser that reconnects is
+told exactly what it missed (Phase 14, ADR 0018)._
+
+| Column      | Type          | Notes                                                  |
+| ----------- | ------------- | ------------------------------------------------------ |
+| run_id      | `uuid`        | → research_runs, cascade                               |
+| seq         | `int`         | monotonic per run; the SSE `id:`. Unique with run_id   |
+| type        | `text`        | the event vocabulary, constrained by a check           |
+| status      | `text`        | the run's status when it was emitted                   |
+| payload     | `jsonb`       | as declared per type in `@aether/shared-types`         |
+| occurred_at | `timestamptz` | the database's clock, so two workers agree about order |
+
+The number is allocated by the insert that stores the event, and the unique
+constraint is what makes that safe: the API and the worker both emit, and a
+per-process counter would give two events one `id:`.
+
 #### `evaluations`
 
 _Plain terms: one row per test-question result in a benchmark run._
@@ -1246,13 +1264,16 @@ worker:
 ### 10.2 SSE (Server-Sent Events)
 
 - Endpoint: `GET /research/{id}/events` (`text/event-stream`).
-- The worker publishes events to a Redis channel `run:{id}:events`; the API
-  subscribes and relays to the client.
-- Event types: `status`, `plan`, `subtask_started`, `source_found`,
-  `sources_progress`, `evidence_progress`, `contradiction_found`, `iteration`,
-  `synthesizing`, `citation_check`, `completed`, `error`.
-- Each event carries an increasing `seq`; clients reconnect with `Last-Event-ID`
-  and the API replays from a bounded Redis buffer.
+- The worker publishes to a Redis channel per run; the API subscribes and
+  relays to the client, so any replica can hold the stream.
+- The event vocabulary is `ResearchEventType`, mirrored by
+  `RESEARCH_EVENT_TYPES` in `@aether/shared-types`; a check constraint on
+  `research_events.type` holds the same list.
+- Each event carries an increasing `seq`, allocated by the insert that stores
+  it. Clients reconnect with `Last-Event-ID` and the API replays from
+  `research_events` - so replay survives an evicted key, a Redis restart and a
+  reconnect an hour into a run. The Redis buffer stays as the fast path and is
+  allowed to be lossy.
 - A heartbeat comment every 15 s keeps intermediaries from closing the stream.
 
 ---
@@ -1337,15 +1358,29 @@ hammering it._
 > result. The one thing never cached blindly is a final research answer, those
 > must stay fresh.
 
-| Cache           | Key                                          | TTL                  | Notes                                                                                                                            |
-| --------------- | -------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Search**      | `sha256(query + domains + date_range)`       | short (hours)        | avoids duplicate search spend within/near a run                                                                                  |
-| **URL / fetch** | `url + content_hash`                         | medium (days)        | serves the archived normalized content                                                                                           |
-| **Embedding**   | `sha256(text) + embedding_model`             | long                 | embeddings are deterministic                                                                                                     |
-| **LLM**         | `sha256(provider + model + prompt + params)` | short, **selective** | only deterministic sub-ops (classification, metadata extraction, normalization). **Never blindly cache final research answers.** |
+| Cache           | Key                                                    | TTL           | Notes                                                                                     |
+| --------------- | ------------------------------------------------------ | ------------- | ----------------------------------------------------------------------------------------- |
+| **Search**      | `sha256(provider + query + limit + recency + domains)` | short (hours) | the provider is in the key: a failover must not serve one vendor's results as another's   |
+| **URL / fetch** | `sha256(url + fetch terms)`                            | medium (days) | the archived bytes and the sanitised body; pages over 512 KiB are not stored              |
+| **Extraction**  | `sha256(html + options)`                               | medium (days) | a deterministic, CPU-bound transformation of bytes already in hand                        |
+| **Embedding**   | `sha256(provider + model + prepared text)`             | long          | deterministic. The _prepared_ text, so a query is not served a passage's vector           |
+| **LLM**         | not cached                                             | -             | "this prompt is deterministic" is a claim nothing here can check; the seam exists, unused |
 
-Cache lookups are recorded (`cache_hit` on `tool_calls` / `llm_calls`) so the
-evaluation system can report cost savings.
+Every key carries a namespace and a schema version, so changing an encoding
+invalidates the whole class in one edit. Cache lookups are recorded
+(`cache_hit` on `tool_calls` / `llm_calls`) so the evaluation system can report
+cost savings rather than estimate them.
+
+Simultaneous identical calls are coalesced in-process, which is a separate
+promise from storing the result: two researchers of one run, given overlapping
+subtasks, both miss the cache and would both fetch. Turning caching off leaves
+the coalescing in place.
+
+Never cached: retrieval results (freshness, and the corpus is the user's), and
+anything belonging to a run - claims, evidence, reports - which are rows, and a
+cache in front of the system of record is a second source of truth. The
+namespace list is closed, which is how that rule is kept structurally
+(ADR 0019).
 
 ### 13.1 Prompt / context optimization
 

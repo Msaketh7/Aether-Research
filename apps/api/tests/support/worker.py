@@ -32,15 +32,20 @@ from app.core.ids import new_id
 from app.db.models.research import ResearchRunRow
 from app.db.models.source import DocumentRow, SourceRow
 from app.db.repositories.research import SqlAlchemyResearchRepository
+from app.db.repositories.trace import SqlAlchemyTraceStore
 from app.db.repositories.user import UserRepository
 from app.db.repositories.worker import SqlAlchemyRunLifecycle
 from app.db.session import Database
+from app.observability.ledger import DatabaseTracer
 from app.research.cancellation import PostgresCancellationProbe
+from app.research.eventbus import build_event_broker
+from app.research.events import EventBroker
 from app.research.recorder import RunRecorder
 from app.research.repository import utcnow
 from app.research.schemas import ResearchRun, RunLimits, RunUsage, derive_title
 from app.retrieval.attached import AttachedUploadIngestion
 from app.storage import ObjectStorage
+from app.workers.events import StoredReportFacts
 from app.workers.loop import ResearchWorker
 from app.workers.queue import InMemoryJobQueue
 from app.workers.worker import RunExecutor
@@ -155,6 +160,9 @@ class Harness:
     nodes: ScriptedNodes
     recorder: RecordedRuns
     checkpointer: BaseCheckpointSaver[Any]
+    #: The real broker the worker publishes to: an in-memory transport over
+    #: the real durable log, which is what ``APP_ENV=test`` selects.
+    broker: EventBroker
     settings: Settings
     worker_id: str
 
@@ -173,6 +181,7 @@ def build_worker(
 ) -> Harness:
     scripted = nodes or ScriptedNodes(script or Script())
     job_queue = queue or InMemoryJobQueue()
+    broker = build_event_broker(settings, database=database)
     saver = checkpointer or InMemorySaver(serde=build_serializer())
     lifecycle = SqlAlchemyRunLifecycle(database)
     recorder = RecordedRuns()
@@ -186,6 +195,10 @@ def build_worker(
         probe=PostgresCancellationProbe(database),
         bounds=GraphBounds.from_settings(settings),
         recorder=_Both(RunRecorder(database), recorder),
+        # The real tracer, as `app.workers.runner` wires it: the trace is a
+        # deliverable of the run, so a harness that left it out would test a
+        # worker no deployment runs (Phase 16).
+        tracer=DatabaseTracer(SqlAlchemyTraceStore(database)),
     )
     worker = ResearchWorker(
         queue=job_queue,
@@ -198,6 +211,8 @@ def build_worker(
                 storage=storage,
                 ingestor=in_process_ingestor(database, storage),
             ),
+            broker=broker,
+            reports=StoredReportFacts(database),
             settings=settings,
         ),
         settings=settings,
@@ -210,6 +225,7 @@ def build_worker(
         nodes=scripted,
         recorder=recorder,
         checkpointer=saver,
+        broker=broker,
         settings=settings,
         worker_id=worker_id,
     )
@@ -224,7 +240,12 @@ def respawn(
     worker_id: str = "worker-2",
     settings: Settings | None = None,
 ) -> Harness:
-    """The next worker process: same queue, same checkpoints, new loop."""
+    """The next worker process: same queue, same checkpoints, new loop.
+
+    A *new* broker, deliberately: a replacement process has its own transport
+    and inherits nothing but the durable log, which is exactly what has to be
+    enough for the resumed run's stream to continue rather than restart.
+    """
     return build_worker(
         database,
         storage,

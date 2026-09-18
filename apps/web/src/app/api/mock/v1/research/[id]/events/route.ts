@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 /**
  * Mock Server-Sent Events endpoint (ADR 0006).
  *
- * Deliberately faithful to the contract the API will implement in Phase 14:
+ * Deliberately faithful to the contract the real API implements (Phase 14):
  *
  * - every frame carries `id:` (the sequence number), so the browser's native
  *   `EventSource` sends `Last-Event-ID` on reconnect and this handler replays

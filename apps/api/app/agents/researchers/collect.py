@@ -186,6 +186,9 @@ class SourceCollector:
             task_key=task_key,
             title=candidate.title[:_MAX_TITLE_CHARS],
             url=page.final_url,
+            source_type=candidate.source_type,
+            publisher=(candidate.publisher or page.domain)[:300],
+            chunk_count=outcome.chunk_count,
         )
 
 

@@ -49,6 +49,7 @@ from app.core.enums import (
     EvidenceStance,
     ReportSectionKind,
     ResearchMode,
+    SourceType,
     TaskPriority,
 )
 
@@ -128,12 +129,19 @@ class Script:
     sufficient_on_round: int | None = 1
     #: The round on which the planner finds nothing more to research.
     empty_plan_on_round: int | None = None
+    #: The round on which the contradiction checker finds one. Needs two
+    #: claims to exist, which one round of two subtasks already produces.
+    contradictions_on_round: int | None = None
     #: How many drafts the citation validator rejects before passing one.
     citation_failures: int = 0
     research_delay_seconds: float = 0.0
     priorities: tuple[TaskPriority, ...] = ()
     #: Node name -> the call numbers (1-based) that raise.
     fail_on: dict[str, set[int]] = field(default_factory=dict)
+    #: Node name -> a specific exception it raises on every call. For the
+    #: failures whose *class* is what the graph routes on, rather than the
+    #: fact of a failure - a budget refusal, most of all.
+    raises: dict[str, Exception] = field(default_factory=dict)
     #: Node names whose calls never return.
     hang: set[str] = field(default_factory=set)
     #: Node name -> a hook run after that node's call, before it returns.
@@ -172,6 +180,9 @@ class ScriptedNodes:
         self.calls[name] += 1
         if name in self.script.hang:
             await asyncio.sleep(3600)
+        scripted = self.script.raises.get(name)
+        if scripted is not None:
+            raise scripted
         if self.calls[name] in self.script.fail_on.get(name, set()):
             raise RuntimeError(f"scripted failure in {name}")
 
@@ -237,11 +248,20 @@ class ScriptedNodes:
                 task_key=key,
                 title=f"Source {index} for {key}",
                 url=f"https://example.com/{key}/{index}",
+                source_type=SourceType.WEB,
+                publisher="example.com",
+                chunk_count=index + 3,
             )
             for index in range(self.script.sources_per_task)
         )
+        queries = tuple(f"query {index} for {key}" for index in range(self.script.queries_per_task))
         result = NodeResult(
-            TaskOutcome(task_key=key, iteration=assignment.subtask.iteration, sources=sources),
+            TaskOutcome(
+                task_key=key,
+                iteration=assignment.subtask.iteration,
+                sources=sources,
+                queries=queries,
+            ),
             self._usage(queries=self.script.queries_per_task),
         )
         await self._end("researcher")
@@ -306,7 +326,19 @@ class ScriptedNodes:
         self, state: ResearchState
     ) -> NodeResult[tuple[ContradictionItem, ...]]:
         await self._begin("contradiction_checker")
-        result: NodeResult[tuple[ContradictionItem, ...]] = NodeResult((), self._usage())
+        claims = list(state.get("claims", []))
+        found: tuple[ContradictionItem, ...] = ()
+        if self.script.contradictions_on_round == state.get("iteration", 0) and len(claims) >= 2:
+            found = (
+                ContradictionItem(
+                    id=stable_id("contradiction", claims[0].id, claims[1].id),
+                    normalized_key=claims[0].normalized_key,
+                    claim_a_id=claims[0].id,
+                    claim_b_id=claims[1].id,
+                    likely_reason="The two sources measured different periods.",
+                ),
+            )
+        result: NodeResult[tuple[ContradictionItem, ...]] = NodeResult(found, self._usage())
         await self._end("contradiction_checker")
         return result
 

@@ -32,6 +32,8 @@ from __future__ import annotations
 import os
 import socket
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from app.agents.errors import GraphError
@@ -41,8 +43,14 @@ from app.agents.state import ResearchState, RunBrief, stop_reason
 from app.core.config import Settings
 from app.core.enums import RunStatus
 from app.core.logging import get_logger
+from app.models.budget import RunBudgetGuard
+from app.observability.instruments import observe_run
+from app.observability.metrics import Metrics
+from app.research.events import EventBroker
+from app.research.repository import utcnow
 from app.research.schemas import ResearchRun
 from app.retrieval.attached import AttachedUploadIngestion
+from app.workers.events import ReportFactsReader, RunEventEmitter
 from app.workers.lifecycle import Lease, RunFailure, RunLifecycle, RunProgress
 from app.workers.progress import furthest, progress_for, status_for
 
@@ -92,12 +100,20 @@ class RunExecutor:
         lifecycle: RunLifecycle,
         runner: ResearchGraphRunner,
         uploads: AttachedUploadIngestion,
+        broker: EventBroker,
+        reports: ReportFactsReader,
         settings: Settings,
+        budget: RunBudgetGuard | None = None,
+        metrics: Metrics | None = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._runner = runner
         self._uploads = uploads
+        self._broker = broker
+        self._reports = reports
         self._settings = settings
+        self._budget = budget
+        self._metrics = metrics
 
     async def execute(self, lease: Lease) -> Outcome:
         """Run it, and write the result. Cancellation is left to propagate.
@@ -108,9 +124,14 @@ class RunExecutor:
         is exactly the thing that does not reliably finish.
         """
         run = lease.run
+        emitter = RunEventEmitter(broker=self._broker, run_id=run.id)
+        # Before the graph starts, so a resumed run knows what the previous
+        # worker already told the client and does not say it again.
+        await emitter.prime()
         try:
             brief = await self._brief(run)
-            state = await self._runner.run(brief, listener=_StepReporter(self, lease))
+            async with self._enrolled(run):
+                state = await self._runner.run(brief, listener=_StepReporter(self, lease, emitter))
         except LeaseLost:
             # Cancelled, or taken over. Either way the row already says what it
             # should, and writing to it now would be this worker overwriting a
@@ -121,10 +142,32 @@ class RunExecutor:
             )
             return Outcome(run.id, None, "no longer held")
         except Exception as exc:
-            return await self._failed(lease, exc)
-        return await self._completed(lease, state)
+            return await self._failed(lease, exc, emitter)
+        return await self._completed(lease, state, emitter)
 
     # --- the parts ---------------------------------------------------------
+
+    @asynccontextmanager
+    async def _enrolled(self, run: ResearchRun) -> AsyncIterator[None]:
+        """Hold this run to the cost ceiling frozen on its row (Phase 16).
+
+        The graph checks the same ceiling between nodes; this is what bounds
+        the *inside* of a node, where a fan-out of researchers can otherwise
+        spend several calls past it before anything looks.
+
+        A resumed run starts from what it has already spent, read from the row
+        this worker just claimed. Starting every attempt at zero would give a
+        run that crashes twice three budgets.
+        """
+        if self._budget is None:
+            yield
+            return
+        async with self._budget.for_run(
+            run.id,
+            limit_usd=run.limits.max_cost_usd,
+            spent_usd=run.usage.cost_usd,
+        ):
+            yield
 
     async def _brief(self, run: ResearchRun) -> RunBrief:
         """Ingest the run's attached files, then describe the run to the graph.
@@ -149,12 +192,17 @@ class RunExecutor:
             )
         return RunBrief.from_run(run, has_attached_documents=ingested > 0)
 
-    async def _completed(self, lease: Lease, state: ResearchState) -> Outcome:
+    async def _completed(
+        self, lease: Lease, state: ResearchState, emitter: RunEventEmitter
+    ) -> Outcome:
         """Close a run the graph returned from.
 
         Returning is not the same as succeeding. A cancelled run also returns -
         the graph routes to the end without a report - and its row already says
         ``cancelled``, which ``finish`` will not overwrite.
+
+        The row is written before the event, always. A client told the run is
+        complete will ask for the report, and it must already be there.
         """
         cancelled = stop_reason(state) is StopReason.CANCELLED
         status = RunStatus.CANCELLED if cancelled else RunStatus.COMPLETED
@@ -166,6 +214,11 @@ class RunExecutor:
             progress=None if cancelled else 1.0,
             coverage_caveat=None if stop is None else stop.caveat,
         )
+        if cancelled:
+            await emitter.cancelled(state)
+        else:
+            await emitter.completed(state, await self._reports.facts_for(lease.run.id))
+        self._measured(lease, status)
         logger.info(
             "research run finished",
             extra={
@@ -178,7 +231,7 @@ class RunExecutor:
         )
         return Outcome(lease.run.id, status, status.value)
 
-    async def _failed(self, lease: Lease, exc: Exception) -> Outcome:
+    async def _failed(self, lease: Lease, exc: Exception, emitter: RunEventEmitter) -> Outcome:
         """Retry the run, or give up on it and say why.
 
         The graph's own taxonomy decides which: a ``GraphError`` knows whether
@@ -224,6 +277,18 @@ class RunExecutor:
             status=RunStatus.FAILED,
             error=failure,
         )
+        # Only here, and not on the retry path above: a paused run is going to
+        # continue, and telling the client it failed would close the stream on
+        # a run that is about to keep going.
+        await emitter.failed(
+            code=failure.code,
+            message=failure.message,
+            # A run can fail at the citation check with a report already
+            # projected from its last checkpoint; the reader is entitled to
+            # know there is something to open.
+            partial_report=await self._reports.facts_for(lease.run.id) is not None,
+        )
+        self._measured(lease, RunStatus.FAILED)
         logger.error(
             "research run failed",
             extra={
@@ -234,6 +299,22 @@ class RunExecutor:
             },
         )
         return Outcome(lease.run.id, RunStatus.FAILED, failure.code)
+
+    def _measured(self, lease: Lease, status: RunStatus) -> None:
+        """One finished run, for the failure-rate and latency graphs.
+
+        Only a run that *ended* is counted. A run paused for a retry has not
+        finished, and counting it would make the failure rate a count of
+        transient provider errors rather than of runs that went wrong.
+        """
+        if self._metrics is None:
+            return
+        started = lease.run.started_at
+        observe_run(
+            self._metrics,
+            status=status,
+            seconds=None if started is None else (utcnow() - started).total_seconds(),
+        )
 
     def _backoff(self, lease: Lease) -> float:
         """Exponential, capped, and spread out by the run's own id.
@@ -286,13 +367,20 @@ class RunExecutor:
 
 @dataclass(frozen=True, slots=True)
 class _StepReporter:
-    """One lease's ``StepListener``: what the graph reports, the run's row records."""
+    """One lease's ``StepListener``: the run's row, and then the run's stream.
+
+    The order is deliberate. ``advanced`` raises ``LeaseLost`` when the run has
+    stopped being this worker's, and a worker that has lost a run must not go
+    on narrating it.
+    """
 
     executor: RunExecutor
     lease: Lease
+    emitter: RunEventEmitter
 
     async def stepped(self, nodes: tuple[GraphNode, ...], state: ResearchState) -> None:
         await self.executor.advanced(self.lease, nodes, state)
+        await self.emitter.stepped(nodes, state)
 
 
 def _tokens(state: ResearchState) -> int:

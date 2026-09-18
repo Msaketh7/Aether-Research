@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from httpx import AsyncClient
 
+from app.core.config import Settings
+from app.core.enums import ResearchEventType, RunStatus
+from app.db.session import Database
+from app.research.eventbus import build_event_broker
+from app.research.events import EventDraft
 from tests.conftest import API, as_user, valid_request
 
 
@@ -163,3 +168,54 @@ async def test_an_open_stream_closes_at_the_connection_ceiling(client: AsyncClie
     # It ended on its own, having sent the replay and then heartbeats.
     assert "event: research_started" in body
     assert ": heartbeat" in body
+
+
+# --- what the worker publishes (Phase 14) ---------------------------------
+
+
+async def test_an_event_published_by_another_process_reaches_the_client(
+    client: AsyncClient, settings: Settings, database: Database
+):
+    """The worker is not the process holding this connection.
+
+    In the test environment the transport is in-process, so a second broker's
+    subscribers are not this app's - which is exactly the case the durable log
+    covers: the event is replayed from rows the other process wrote.
+    """
+    run_id = await create_run(client)
+    elsewhere = build_event_broker(settings, database=database)
+    await elsewhere.publish(
+        EventDraft(
+            type=ResearchEventType.SOURCE_FOUND,
+            run_id=UUID(run_id),
+            status=RunStatus.RESEARCHING,
+            payload={"source_id": str(uuid4()), "title": "A page a worker read"},
+        )
+    )
+
+    frames = await read_frames(client, run_id, limit=2)
+
+    assert [frame["event"] for frame in frames] == ["research_started", "source_found"]
+    assert [frame["id"] for frame in frames] == ["1", "2"]
+    assert frames[1]["data"]["payload"]["title"] == "A page a worker read"
+
+
+async def test_a_reconnect_after_a_worker_event_resumes_from_it(
+    client: AsyncClient, settings: Settings, database: Database
+):
+    """`Last-Event-ID` is answered from the log, not from this process's memory."""
+    run_id = await create_run(client)
+    elsewhere = build_event_broker(settings, database=database)
+    for index in range(3):
+        await elsewhere.publish(
+            EventDraft(
+                type=ResearchEventType.CLAIM_EXTRACTED,
+                run_id=UUID(run_id),
+                status=RunStatus.RESEARCHING,
+                payload={"claim_id": str(uuid4()), "text": f"Claim {index}"},
+            )
+        )
+
+    resumed = await read_frames(client, run_id, limit=2, headers={"Last-Event-ID": "2"})
+
+    assert [frame["id"] for frame in resumed] == ["3", "4"]

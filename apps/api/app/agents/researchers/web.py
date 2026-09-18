@@ -96,7 +96,7 @@ class WebResearchAgent(ModelAgent):
                 },
             )
             return NodeResult(
-                value=_empty(assignment),
+                value=_empty(assignment, tuple(queries)),
                 usage=with_searches(query_usage, searched),
             )
 
@@ -126,6 +126,7 @@ class WebResearchAgent(ModelAgent):
                 task_key=assignment.subtask.key,
                 iteration=assignment.subtask.iteration,
                 sources=collected.sources,
+                queries=tuple(queries),
             ),
             usage=with_searches(total_usage([query_usage, selection_usage]), searched),
         )
@@ -301,9 +302,13 @@ def _context(assignment: SubtaskAssignment) -> AgentContext:
     )
 
 
-def _empty(assignment: SubtaskAssignment) -> TaskOutcome:
+def _empty(assignment: SubtaskAssignment, queries: tuple[str, ...] = ()) -> TaskOutcome:
     return TaskOutcome(
         task_key=assignment.subtask.key,
         iteration=assignment.subtask.iteration,
         sources=(),
+        # A subtask that searched and found nothing still searched, and the
+        # stream reporting no query at all would read as a subtask that never
+        # ran.
+        queries=queries,
     )

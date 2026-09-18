@@ -18,6 +18,8 @@ four-round trace to prove it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from app.agents.schemas import GraphNode
 from app.core.enums import RunStatus
 
@@ -79,6 +81,17 @@ _ORDER: tuple[GraphNode, ...] = (
 def furthest(nodes: tuple[GraphNode, ...]) -> GraphNode:
     """The node a superstep got furthest with. Raises on an empty superstep."""
     return max(nodes, key=_ORDER.index)
+
+
+def in_order(nodes: Iterable[GraphNode]) -> tuple[GraphNode, ...]:
+    """The distinct nodes of a superstep, in the order the graph visits them.
+
+    The row only needs the furthest one; the progress *stream* needs each of
+    them, and in an order a reader can follow - a fan-out reports one node
+    several times, and two different nodes in one superstep must not be
+    announced back to front.
+    """
+    return tuple(sorted(set(nodes), key=_ORDER.index))
 
 
 def status_for(node: GraphNode) -> RunStatus:

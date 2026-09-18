@@ -12,9 +12,17 @@ reasons the threat model names directly:
   with jittered backoff, error classification, and a record per attempt. Adding
   a seventh tool cannot accidentally skip any of that.
 
-Deferred with their own phases, and the seams left where they belong: response
-caching (15), the per-run `SearchBudget` (16), OpenTelemetry spans (17), and
-semantic near-duplicate clustering (7, with the embeddings it needs).
+Three of the six are cached, and the caching goes *through* the executor
+rather than around it, so a hit is still a recorded tool call with
+``cache_hit`` set (Phase 15). Which three, and why not the other three: a
+search, a fetch and an extraction are deterministic given their inputs and
+expensive to repeat, while SEC, arXiv and GitHub answers are queries against
+indexes that change, are cheap to ask again, and are the sources a run is most
+entitled to expect current.
+
+Deferred with their own phases, and the seams left where they belong: the
+per-run `SearchBudget` (16), OpenTelemetry spans (17), and semantic
+near-duplicate clustering (7, with the embeddings it needs).
 """
 
 from __future__ import annotations
@@ -23,10 +31,22 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.cache import CacheNamespace, ResponseCache, disabled_cache
 from app.core.config import Settings
 from app.core.enums import ToolName
 from app.core.logging import get_logger
-from app.sources.base import CallRecorder, ToolExecutor, ToolResult
+from app.sources.base import CachePlan, CallRecorder, ToolExecutor, ToolResult
+from app.sources.caching import (
+    decode_extract,
+    decode_page,
+    decode_search,
+    encode_extract,
+    encode_page,
+    encode_search,
+    extract_key,
+    page_key,
+    search_key,
+)
 from app.sources.http import SafeHttpClient
 from app.sources.tools import arxiv, extract, fetch, github, search, sec
 
@@ -67,12 +87,17 @@ class Toolbelt:
         executor: ToolExecutor,
         config: ToolbeltConfig,
         permitted: frozenset[ToolName] = RESEARCH_TOOLS,
+        cache: ResponseCache | None = None,
     ) -> None:
         self._client = client
         self._executor = executor
         self._config = config
         self._permitted = permitted
         self._robots = fetch.RobotsCache(client, user_agent="AetherResearch")
+        # Never ``None`` past here: a disabled cache still coalesces
+        # simultaneous identical calls, so no call site has to ask whether
+        # there is one.
+        self._cache = cache or disabled_cache()
 
     @property
     def permitted(self) -> frozenset[ToolName]:
@@ -89,6 +114,9 @@ class Toolbelt:
             executor=self._executor,
             config=self._config,
             permitted=self._permitted & tools,
+            # And the same cache: two belts for one run that cached separately
+            # would fetch the same page twice.
+            cache=self._cache,
         )
 
     # --- the six tools ---------------------------------------------------
@@ -97,17 +125,26 @@ class Toolbelt:
         self, request: search.WebSearchInput
     ) -> ToolResult[search.WebSearchOutput]:
         self._require(ToolName.SEARCH)
+        provider = self._config.search_provider
         return await self._executor.run(
             ToolName.SEARCH,
             request,
-            lambda: search.web_search(
-                request, provider=self._config.search_provider, client=self._client
-            ),
+            lambda: search.web_search(request, provider=provider, client=self._client),
             summarize=lambda output: {
                 "results": len(output.results),
                 "domains": len(output.domains),
                 "provider": output.provider,
             },
+            plan=CachePlan(
+                cache=self._cache,
+                namespace=CacheNamespace.SEARCH,
+                # The provider is part of the key: two vendors answering one
+                # query are two answers, and a failover must not serve one of
+                # them under the name of the other.
+                key=search_key(request, provider.name if provider else "none"),
+                encode=encode_search,
+                decode=decode_search,
+            ),
         )
 
     async def fetch_url(self, request: fetch.FetchUrlInput) -> ToolResult[fetch.FetchedPage]:
@@ -117,6 +154,13 @@ class Toolbelt:
             request,
             lambda: fetch.fetch_url(request, client=self._client, robots=self._robots),
             summarize=fetch.summarize,
+            plan=CachePlan(
+                cache=self._cache,
+                namespace=CacheNamespace.PAGE,
+                key=page_key(request),
+                encode=encode_page,
+                decode=decode_page,
+            ),
         )
 
     async def extract_content(
@@ -130,6 +174,13 @@ class Toolbelt:
             request,
             lambda: asyncio.to_thread(extract.extract_content, request),
             summarize=extract.summarize,
+            plan=CachePlan(
+                cache=self._cache,
+                namespace=CacheNamespace.EXTRACT,
+                key=extract_key(request),
+                encode=encode_extract,
+                decode=decode_extract,
+            ),
         )
 
     async def search_sec(self, request: sec.SearchSecInput) -> ToolResult[sec.SearchSecOutput]:
@@ -197,6 +248,7 @@ def build_toolbelt(
     *,
     recorder: CallRecorder | None = None,
     permitted: frozenset[ToolName] = RESEARCH_TOOLS,
+    cache: ResponseCache | None = None,
 ) -> Toolbelt:
     """Assemble a toolbelt from configuration."""
     client = SafeHttpClient(
@@ -244,6 +296,7 @@ def build_toolbelt(
             search_provider=provider,
         ),
         permitted=permitted,
+        cache=cache,
     )
 
 

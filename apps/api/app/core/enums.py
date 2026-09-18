@@ -44,6 +44,51 @@ class RunStatus(StrEnum):
 _TERMINAL_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED})
 
 
+class ResearchEventType(StrEnum):
+    """The progress vocabulary (ADR 0006).
+
+    Mirrors ``RESEARCH_EVENT_TYPES`` in ``@aether/shared-types``, and
+    ``research_events.type`` is constrained to it - a check constraint rather
+    than prose, because an event the frontend cannot name is an event nobody
+    sees.
+    """
+
+    RESEARCH_STARTED = "research_started"
+    PLANNER_STARTED = "planner_started"
+    PLANNER_COMPLETED = "planner_completed"
+    SUBTASK_STARTED = "subtask_started"
+    SEARCH_STARTED = "search_started"
+    SOURCE_FOUND = "source_found"
+    SOURCE_PROCESSED = "source_processed"
+    SOURCES_PROGRESS = "sources_progress"
+    CLAIM_EXTRACTED = "claim_extracted"
+    EVIDENCE_PROGRESS = "evidence_progress"
+    VERIFICATION_STARTED = "verification_started"
+    CONTRADICTION_FOUND = "contradiction_found"
+    CRITIC_STARTED = "critic_started"
+    ADDITIONAL_RESEARCH_REQUESTED = "additional_research_requested"
+    ITERATION_STARTED = "iteration_started"
+    SYNTHESIS_STARTED = "synthesis_started"
+    CITATION_CHECK = "citation_check"
+    REPORT_COMPLETED = "report_completed"
+    RESEARCH_FAILED = "research_failed"
+    RESEARCH_CANCELLED = "research_cancelled"
+
+    @property
+    def is_terminal(self) -> bool:
+        """After a terminal event the stream is closed deliberately."""
+        return self in _TERMINAL_EVENTS
+
+
+_TERMINAL_EVENTS = frozenset(
+    {
+        ResearchEventType.REPORT_COMPLETED,
+        ResearchEventType.RESEARCH_FAILED,
+        ResearchEventType.RESEARCH_CANCELLED,
+    }
+)
+
+
 class TaskStatus(StrEnum):
     PENDING = "pending"
     RESEARCHING = "researching"

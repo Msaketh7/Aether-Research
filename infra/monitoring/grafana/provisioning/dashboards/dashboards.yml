@@ -1,0 +1,18 @@
+# Grafana loads every dashboard in the directory below on start, so a
+# dashboard is a reviewable file in this repository rather than a thing
+# someone clicked together and nobody else has.
+apiVersion: 1
+
+providers:
+  - name: aether
+    orgId: 1
+    folder: Aether
+    type: file
+    disableDeletion: false
+    # Editing in the UI is allowed and never written back: the file is the
+    # source of truth, and a change worth keeping is a change worth reviewing.
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

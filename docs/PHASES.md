@@ -27,12 +27,12 @@ Status legend: **Done** · **Next** · **Planned**
 | 11  | Evidence system            | Done     |
 | 12  | Report generation          | Done     |
 | 13  | Background workers         | Done     |
-| 14  | Streaming                  | **Next** |
-| 15  | Caching                    | Planned  |
-| 16  | Cost and token governance  | Planned  |
-| 17  | Observability              | Planned  |
-| 18  | Evaluation framework       | Planned  |
-| 19  | Testing                    | Planned  |
+| 14  | Streaming                  | Done     |
+| 15  | Caching                    | Done     |
+| 16  | Cost and token governance  | Done     |
+| 17  | Observability              | Done     |
+| 18  | Evaluation framework       | Done     |
+| 19  | Testing                    | **Next** |
 | 20  | Security                   | Planned  |
 | 21  | Load testing               | Planned  |
 | 22  | Optimization               | Planned  |
@@ -895,7 +895,7 @@ nobody; the Redis pub/sub broker and real emission are Phase 14, and until then
 `/events` relays only what the API itself publishes. No live model call has been
 made on this machine, so every run executed so far has been over scripted agents.
 
-## Phase 14 — Streaming · **Next**
+## Phase 14 — Streaming · **Done**
 
 Server-Sent Events. Frontend receives `research_started`, `planner_started`,
 `planner_completed`, `search_started`, `source_found`, `source_processed`,
@@ -903,27 +903,207 @@ Server-Sent Events. Frontend receives `research_started`, `planner_started`,
 `additional_research_requested`, `synthesis_started`, `report_completed`,
 `research_failed`. Store important events server-side.
 
-_Partially in place:_ the SSE endpoint, frame format, `Last-Event-ID` replay and
-the event vocabulary shipped in Phase 2. This phase adds the Redis pub/sub
-broker so multiple API replicas work, and real event emission from the worker.
+_Landed:_ a run narrates itself. The worker turns each of the graph's
+supersteps into the event vocabulary the frontend has rendered since Phase 1,
+Redis pub/sub carries it to whichever API replica is holding the stream, and
+`research_events` keeps every event so a reconnect replays exactly. ADR 0018
+records the decisions the rest of this rests on.
 
-## Phase 15 — Caching · Planned
+**The insert allocates the sequence, because nothing else can.** `seq` is the
+`id:` a browser echoes back in `Last-Event-ID`, so it has to be unique and
+monotonic per run across every process that emits - and from this phase the API
+and the worker both do. A per-process counter hands two events one id and the
+client silently skips one; a Redis counter has to expire, and a counter that
+expires mid-run restarts at 1. So the append is one
+`INSERT ... SELECT COALESCE(MAX(seq),0)+1 ... RETURNING seq` against a unique
+`(run_id, seq)`, and a loser re-reads and retries. `next_seq` and `publish` as
+two calls is exactly the shape that allocates a number in one place and uses it
+in another, and it is gone: `publish(draft)` returns the numbered event.
+
+**Everything emitted is observed, never predicted.** LangGraph reports a
+superstep after it finishes, so every event is derived from state that already
+contains the work it describes. A subtask is announced when its outcome exists;
+a second round when the _plan_ for it exists, with the critic's own words as
+the reason, rather than when the critic asks - the critic asking and the graph
+looping are not the same fact. The cost is that an event lags its work by one
+node. The benefit is that the stream never describes something that did not
+happen, which is the same rule as everywhere else in this system.
+
+**What has already been streamed is the cursor.** The emitter rebuilds what a
+run has already announced from the run's own events, so a worker that takes
+over a paused run continues the stream instead of re-announcing forty sources.
+It needs no state of its own: the record of what a client was told _is_ the
+record of what was told, and it survives a process replacement because the log
+does.
+
+**Redis carries events and never decides what they are.** The pub/sub channel
+and its capped, expiring buffer are the fast path; `history` reads rows. Losing
+all of Redis costs a client latency, not events - which is ADR 0005's "dispatch
+mechanism, not source of truth" applied to the second thing Redis does.
+
+Three graph values grew a field so the stream could describe real things rather
+than placeholders: a `SourceRef` now carries its type, publisher and chunk
+count, and a `TaskOutcome` carries the queries it actually issued. All
+defaulted, so a checkpoint written before this phase still loads.
+
+Migration 0010 adds `research_events`. 20 new tests, 1056 total.
+
+Found while building and running it:
+
+- **A `jsonb` payload does not come back in the order it went in.** The event
+  a client parses is identical; the _bytes_ of the SSE frame are not, because
+  the column stores an object rather than the text of one. A test that compared
+  frames as strings failed, and the fix was the test: the contract is the
+  parsed event, and a client that depended on key order would be broken by any
+  JSON library.
+- **A test that opened its own `Database` leaked a connection pool**, which
+  surfaced as an unraisable `ResourceWarning` about a socket during teardown -
+  a long way from the test that caused it. The suite already has a fixture that
+  disposes one.
+- **Waiting for "terminal or paused" races a run that is already paused.** The
+  restart test's second worker was stopped before it had looked at the run,
+  and the stream ended one event short. Phase 13 had already written that
+  warning into `run_one`'s docstring; this is the second time it was needed.
+
+## Phase 15 — Caching · **Done**
 
 Redis caching for search results, URL content, embeddings and safe deterministic
 transformations. Content hashes as keys. Invalidation rules. Never cache
 sensitive per-user information globally. Deduplicate simultaneous identical
 fetch/search operations.
 
-## Phase 16 — Cost and token governance · Planned
+_Landed:_ `app/cache` - a backend, a key scheme, a policy and a single-flight -
+and four things behind it: a search provider's answer, a fetched page, the
+article extracted from that page's HTML, and one text's embedding vector. ADR
+0019 records why those four and not the obvious fifth.
+
+**The namespace list is closed, and that is how the per-user rule is kept.**
+There is nowhere to put a retrieved passage, a run's evidence or a report, so
+none of them can be cached by accident. The one namespace that touches user
+content is the embedding cache, keyed by the hash of the exact prepared text -
+reading an entry requires already holding the text, so the cache cannot tell a
+caller anything it did not bring with it - and `CACHE_EMBEDDINGS=false` exists
+for a deployment that would rather not make that argument at all.
+
+**Completions are not cached, and the switch is deliberately not thrown.**
+"This prompt is deterministic" is a claim about a prompt that nothing here can
+check, and a wrong hit on a synthesis is the most expensive mistake the system
+could make. An embedding is deterministic by definition, which is why it is the
+only model call that is cached - per text rather than per batch, so a document
+sharing chunks with one already ingested sends only the new ones.
+
+**Caching and deduplication are two promises, and only one is optional.**
+Simultaneous identical calls are coalesced whether or not anything is stored:
+the researchers of one run, given overlapping subtasks, ask for the same URL in
+the same millisecond and all miss the cache. The scope is one process, which is
+the scope the architecture produces - a run has exactly one worker (ADR 0017).
+
+**A hit is still a recorded call.** `cache_hit` is on both ledgers now (the
+`llm_calls` record was missing it), because a run whose ledger simply lacks a
+call cannot be told from one that never made it, and Phase 18 has to be able to
+report what caching saved rather than estimate it.
+
+**A failure is a miss.** An unreachable backend, an entry written by an older
+encoding, a value over the size ceiling: each degrades to computing the value
+again. A research run must never fail because an optimisation was unavailable,
+and the policy layer enforces that rather than trusting each backend to.
+
+15 new tests, 1071 total. No cache-hit rate is reported yet: that is a metric,
+and metrics are Phase 17.
+
+Found while building and running it:
+
+- **The fetcher makes two requests the first time it visits an origin.** A test
+  counting sockets to prove the second fetch was served from cache counted
+  robots.txt as well and read 2 where it expected 1. The politeness fetch has
+  its own cache and its own lifetime; the test now counts pages.
+- **A cached page has to be reconstructed, not revived.** `UntrustedText`
+  sanitises on construction, so a decoder that trusted the stored string would
+  be a way for retrieved content to enter the system without crossing the
+  boundary that exists to clean it (ADR 0011). Both decoders go through the
+  constructor, and a test round-trips a bidirectional override character to
+  prove it.
+- **An embedding key must be the _prepared_ text.** The registry's model has a
+  task prefix, and a query and a passage differ only by it - so keying on the
+  caller's raw text would serve a question the vector of a passage, which is
+  the exact recall bug Phase 8 added the prefixes to avoid.
+
+## Phase 16 — Cost and token governance · **Done**
 
 Every LLM call records provider, model, prompt tokens, completion tokens, total
 tokens, latency, estimated cost, research_id, agent and timestamp. Per-run
 budgets. When a budget is exceeded, stop the workflow safely and return a
 partial result.
 
-_In place:_ the `llm_calls` table and the `RunLimits` frozen per run (Phase 3).
+_Landed:_ the trace tables are written, so "which step spent the money" is a
+query rather than an investigation, and a run's ceiling is enforced before the
+money is spent rather than noticed afterwards. `/activity` serves real rows for
+the first time (FR-10).
 
-## Phase 17 — Observability · Planned
+**A node execution is the unit of the ledger.** One `agent_runs` row per visit
+to a node, carrying its round and - for a researcher - the subtask it was
+given; every tool call and model call that node makes hangs from it. The
+current span travels in a `contextvars.ContextVar`, because a tool call is made
+deep inside a researcher through a belt shared by the whole process, and
+threading an id through every tool signature would be plumbing for a value that
+is genuinely ambient. Each researcher runs in its own task, so each gets its own
+copy.
+
+**Recording never fails the work.** Every write is wrapped: a node whose ledger
+row could not be written has still done its job, and a run that failed because
+its telemetry did would be a much worse outcome. The two database recorders
+wrap the logging ones rather than replacing them - a row is queryable and a log
+line is greppable, and losing either would be a step backwards.
+
+**The ceiling is enforced at the gateway, which is the only place it can be.**
+The graph has checked the budget between nodes since Phase 9; a node that
+starts under the ceiling may finish well over it, and a researcher fanned out
+four ways can overshoot by four model calls before anything looks. A refused
+call raises, the graph treats it as a _limit_ rather than as a broken agent, and
+the run proceeds to synthesis with a caveat naming what stopped it.
+
+**The step that writes the report is never refused, and that is the point.**
+FR-8 says a run that hits a limit returns a partial result; the partial result
+is a report, and a report costs a call. A guard that refused it would turn every
+budget stop into a run with nothing to show - the exact outcome the requirement
+exists to prevent. The overshoot is one call wide and the report says so itself.
+
+**An unpriced model is refused under a budget**, which is what Phase 9's own
+note in `app/agents/budget.py` pointed at: a run whose spend cannot be measured
+cannot be held to a limit. It fails over to the next model in the chain, and
+`REQUIRE_PRICED_MODELS=false` is there for a deployment that would rather run
+unpriced models and accept an unenforceable ceiling. Every model in the shipped
+registry is priced, the self-hosted ones explicitly at zero.
+
+Migration 0011 makes two columns nullable. 40 new tests, 1111 total.
+
+Found while building and running it:
+
+- **The ledger could not say "not measured".** `llm_calls.cost_usd` and
+  `agent_runs.cost_usd` were `NOT NULL DEFAULT 0`, and Phase 16 is the first
+  code to write them. A model the registry does not price produces _no_ cost,
+  which is not a cost of zero: recorded as `0`, an unpriced run reads as a free
+  one and contradicts the caveat the graph attaches beside it. Both are nullable
+  now. `tool_calls.cost_usd` is left alone - a tool call that costs nothing
+  genuinely costs nothing.
+- **A budget the guard remembered by itself gave a crashed run three budgets.**
+  The first version kept a run's spend in the process and restored it on
+  re-enrolment, which works only if the same process picks the run up again -
+  and a resumed run is usually a different one, which has never seen the first
+  attempt. The caller now supplies the starting point from the row it claimed,
+  because the caller is the one holding the row.
+- **The event sequence's retry count was a guess, and eight concurrent writers
+  beat it.** Phase 14's append relied on a unique constraint and three retries,
+  reasoned from "contention is one event wide". A test that emitted eight at
+  once exhausted them. A transaction-scoped advisory lock keyed by the run
+  makes the allocation atomic instead; the constraint and the retry stay as
+  what would catch an emitter that skipped the lock.
+- **The worker harness had no tracer, so the first end-to-end trace test found
+  nothing.** Correct of the test and wrong of the harness: the trace is a
+  deliverable of a run, and a harness that leaves it out tests a worker no
+  deployment runs.
+
+## Phase 17 — Observability · **Done**
 
 OpenTelemetry tracing across HTTP request, research run, agent node, LLM call,
 tool call, retrieval and database queries where practical. Prometheus metrics,
@@ -932,7 +1112,69 @@ P50/P95/P99 latency, LLM latency, tool latency, tokens, cost, cache hit rate,
 retrieval metrics, queue depth, active workers, database pool saturation.
 Integrate LangSmith when configured; the system stays usable when it is not.
 
-## Phase 18 — Evaluation framework · Planned
+_Landed:_ both processes expose Prometheus metrics, every seam opens a span,
+`trace_id` and `span_id` finally reach the rows that have carried the columns
+since Phase 3, and `/evaluations/system` serves measured numbers instead of a
+`501`. The Grafana dashboard is a file in `infra/monitoring`, so a panel is
+reviewable rather than something someone clicked together.
+
+**Tracing is configured or absent, never half-on.** With no exporter endpoint
+the global no-op provider stays in place: every span in the code still runs,
+costs nothing measurable, and records nothing. That is what keeps `if tracing
+is enabled` out of the hot path entirely - there is no such check anywhere
+outside `app/observability`. The OTel _API_ is a hard dependency for that
+reason; the SDK and the exporter are imported inside `configure_tracing`, and
+`import app.main` still costs the same six seconds it did before.
+
+**A label is bounded or it is not a label.** The route template is rebuilt by
+substituting the captured path parameters back into the path, so a run id
+cannot reach a label unless the router never captured it, and an unmatched
+path - which is attacker-controlled - is reported as `unmatched` without being
+read. Provider, model, role, tool and status are closed vocabularies. What
+belongs per run is in the ledger, which is a database and is built for it.
+
+**Absence is reported as absence.** `/evaluations/system` returns `null` for a
+window in which nothing finished, and `total_cost_usd` is `null` when _any_
+call in the window was unpriced - one `COUNT(*) FILTER` away from a partial
+sum presented as a total, which is the specific dishonesty this system is
+built to avoid. A run whose start is unknown is counted but not timed: a
+histogram with a false observation in it is worse than one with a gap.
+
+**Telemetry cannot break the work it watches.** Every observation is wrapped,
+and a test replaces a counter with one that raises to prove the call still
+succeeds. The same rule the ledger writes follow, for the same reason.
+
+**LangSmith is on only if asked, and is configured by construction.** Phase 9
+turned it off because the library reads `LANGSMITH_TRACING` directly, past the
+typed settings layer. The fix is not to set that variable from the settings -
+that would leave two places the decision can be made, and would break the rule
+that the settings layer is the only reader of the environment. The client is
+built from the typed key and handed to `tracing_context`, so the decision
+exists exactly once and an unset key means no client and no tracing.
+
+Four dependencies added: `opentelemetry-api`, `opentelemetry-sdk`,
+`opentelemetry-exporter-otlp-proto-http`, `prometheus-client`. 23 new tests,
+1134 total.
+
+Found while building and running it:
+
+- **This FastAPI mounts its routers rather than flattening them**, so the
+  matched route on the scope carries its _router-relative_ path:
+  `/api/v1/research/{run_id}` arrived as `/research/{run_id}`, which would
+  silently merge with any future `/api/v2` route of the same shape. The
+  template is rebuilt from the path and its captured parameters instead -
+  which also makes the no-run-ids-in-labels property structural rather than a
+  consequence of how a library happens to name things.
+- **Enabling LangSmith the obvious way broke a security test, correctly.**
+  Setting the library's environment variables from the settings is what the
+  library's own documentation suggests, and
+  `test_settings_are_the_only_reader_of_the_environment` failed on it.
+  Building the client explicitly is both the fix and the better design.
+- **The default Prometheus registry is process-wide and raises on a duplicate
+  name**, so a second application instance in one test session would bring the
+  process down over telemetry. Every process builds its own registry.
+
+## Phase 18 — Evaluation framework · **Done**
 
 `data/eval/` dataset; each case has question, expected topics, expected source
 types and expected claims where practical. An evaluation runner. Metrics —
@@ -943,7 +1185,62 @@ recovery rate. System: latency, cost, failure rate. Evaluation reports and
 thresholds (e.g. citation correctness ≥ a configurable gate). **Never fabricate
 benchmark results; display only measured values.**
 
-## Phase 19 — Testing · Planned
+_Landed:_ `make evaluate` runs a versioned dataset through the real research
+graph, scores what came back, stores one row per case with the commit and the
+thresholds in force, prints a report and exits non-zero when a gate regresses.
+`/evaluations` serves it instead of a `501`.
+
+**A case says what a good answer contains, never what it says.** The system is
+non-deterministic by construction - a model writes the prose and a critic
+decides how many rounds to run - so a golden text would measure agreement with
+one past run. A case asserts topics the plan should cover, source types the
+run should reach, and claims named by _normalised key_, which is exactly what
+the claim normalizer exists to make stable across two differently worded
+correct answers.
+
+**Structural before semantic.** Whether a citation resolves - claim to
+evidence to source - is arithmetic over the run's own data and is measured
+here. Whether the evidence _supports_ the claim is a judgement that needs a
+model, and conflating the two hides bugs inside model-quality noise: a
+structural failure is a defect, not a weak model.
+
+**Unmeasurable is `None`, in every layer.** The scorer returns it, the
+aggregate skips it rather than averaging in a zero, the stored row omits the
+key, the API reports `null`, the printed report says `not measured`, and the
+gate cannot fail on it. That last one matters most: a gate that failed on
+absence would go red on any partially labelled dataset and teach everyone to
+ignore it. The dataset is what needs fixing, and the report names the metric.
+
+**Every threshold ships ungated, and that is the honest state.** A gate
+written before a baseline is an aspiration presented as a requirement. They
+are configuration so they can be ratcheted upward from the first real
+measurement, and they are stored _with_ each result so a later edit cannot
+turn a past failure into a pass.
+
+**The four case classes `docs/evaluation.md` names are all present**, and the
+one that matters most is the question with no good public answer: the correct
+behaviour there is a low-coverage report that says so, and a run that produces
+confident claims is the failure being tested for.
+
+25 new tests, 1159 total.
+
+**No benchmark has been executed.** The suite is built and tested against
+scripted agents; running it needs model credentials and spends real money on
+every case, and no baseline is published that was not measured. That is the
+rule this phase exists to enforce, so it applies to this phase first.
+
+Found while building and running it:
+
+- **The dataset directory resolved one level short.** `parents[3]` from
+  `app/evaluations/dataset.py` is `apps/`, not the repository root -
+  `app/core/config.py` walks four for the same depth. It failed loudly
+  because the first test asserts the shipped dataset loads, which is the
+  reason to have that test at all rather than only unit-testing the loader.
+- **Making the store a base class instead of a Protocol broke structural
+  typing**, quietly for ruff and loudly for mypy. Every other seam in this
+  codebase is a Protocol; this one now is too.
+
+## Phase 19 — Testing · **Next**
 
 pytest, Vitest, Playwright, integration tests, agent workflow tests, retriever
 tests, evaluation tests. Scenarios that must be covered: successful deep

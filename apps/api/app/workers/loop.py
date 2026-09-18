@@ -25,6 +25,7 @@ from uuid import UUID
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.observability.metrics import Metrics
 from app.workers.lifecycle import Lease, RunLifecycle
 from app.workers.queue import JobQueue
 from app.workers.worker import Outcome, RunExecutor
@@ -43,7 +44,9 @@ class ResearchWorker:
         executor: RunExecutor,
         settings: Settings,
         worker_id: str,
+        metrics: Metrics | None = None,
     ) -> None:
+        self._metrics = metrics
         self._queue = queue
         self._lifecycle = lifecycle
         self._executor = executor
@@ -175,6 +178,7 @@ class ResearchWorker:
         if not self._sweep_due():
             return 0
         self._swept_at = asyncio.get_running_loop().time()
+        await self._gauge()
         try:
             due = await self._lifecycle.due(
                 lease_seconds=self._settings.worker_lease_seconds,
@@ -194,6 +198,23 @@ class ResearchWorker:
                 extra={"count": len(due), "worker_id": self._worker_id},
             )
         return len(due)
+
+    async def _gauge(self) -> None:
+        """Publish the queue depth on the sweep's tick.
+
+        On the sweep rather than on every reserve: the depth is a gauge a
+        human reads on a dashboard, and one reading every thirty seconds is
+        the resolution that question has. It also means the extra round trip
+        happens exactly as often as the sweep's own.
+        """
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.queue_depth.set(await self._queue.depth())
+        except Exception:
+            # A depth nobody could read is left at its last value rather than
+            # zeroed: a graph that drops to zero says the backlog cleared.
+            logger.debug("could not read the queue depth for the gauge")
 
     def _sweep_due(self) -> bool:
         now = asyncio.get_running_loop().time()

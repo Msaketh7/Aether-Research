@@ -54,6 +54,11 @@ class LlmCallRecord:
     attempt: int
     #: Set when this attempt followed a failure on a different model.
     fell_back_from: str | None = None
+    #: True when nothing was sent to the provider: the value was already
+    #: stored (Phase 15). Recorded rather than omitted, because a run whose
+    #: ledger simply lacks the call cannot be told from one that never made
+    #: it - and a saving nobody can see is one nobody believes.
+    cache_hit: bool = False
     error_code: str | None = None
     run_id: UUID | None = None
     request_id: str | None = None
@@ -102,6 +107,7 @@ class LoggingCallRecorder:
                 "prompt_version": call.prompt_version,
                 "attempt": call.attempt,
                 "fell_back_from": call.fell_back_from,
+                "cache_hit": call.cache_hit,
                 "error_code": call.error_code,
                 "run_id": str(call.run_id) if call.run_id else None,
                 "request_id": call.request_id,

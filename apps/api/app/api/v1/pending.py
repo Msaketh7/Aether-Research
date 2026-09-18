@@ -23,20 +23,3 @@ async def get_settings() -> None:
         "User preferences are stored with the accounts system in Phase 20.",
         code="settings_not_implemented",
     )
-
-
-@router.get("/evaluations", summary="Benchmark results (Phase 18)")
-async def get_evaluations() -> None:
-    raise NotImplementedYet(
-        "The evaluation suite is built in Phase 18. No benchmark has been executed, "
-        "so there are no results to report.",
-        code="evaluations_not_implemented",
-    )
-
-
-@router.get("/evaluations/system", summary="Live system metrics (Phase 17)")
-async def get_system_metrics() -> None:
-    raise NotImplementedYet(
-        "System metrics come from the telemetry pipeline built in Phase 17.",
-        code="metrics_not_implemented",
-    )

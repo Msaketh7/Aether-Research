@@ -6,6 +6,7 @@ silently never gets created.
 """
 
 from app.db.models.evaluation import EvaluationRow, FeedbackRow
+from app.db.models.event import ResearchEventRow
 from app.db.models.evidence import ClaimRow, ContradictionRow, EvidenceRow
 from app.db.models.report import CitationRow, ReportRow, ReportSectionRow
 from app.db.models.research import ResearchProjectRow, ResearchRunRow, ResearchTaskRow
@@ -27,6 +28,7 @@ __all__ = [
     "LlmCallRow",
     "ReportRow",
     "ReportSectionRow",
+    "ResearchEventRow",
     "ResearchProjectRow",
     "ResearchRunRow",
     "ResearchRunUploadRow",

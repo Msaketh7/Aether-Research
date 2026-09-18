@@ -1,0 +1,46 @@
+{
+  "version": "core-v1",
+  "description": "The four case classes docs/evaluation.md names, one each: a straightforward factual question, a multi-entity comparison, a question with known contradictory sources, and a question with no good sources - whose correct behaviour is an honest low-coverage report rather than a confident one. Small on purpose: every case executes a real research run, so a dataset is something someone chooses to spend money on. Labels are keys and topics, never expected prose: the system is non-deterministic by construction and scoring against a golden text would measure agreement with one past run.",
+  "cases": [
+    {
+      "id": "inference-pricing-comparison",
+      "question": "Compare the published per-token pricing of the major hosted AI inference providers, and explain what each includes and excludes.",
+      "mode": "deep",
+      "expected_topics": ["pricing", "per-token", "input", "output", "provider"],
+      "expected_source_types": ["web"],
+      "expected_claims": [{ "key": "pricing", "must_be_present": true }],
+      "checks": "comparison",
+      "notes": "The canonical multi-entity comparison. Tests whether the planner decomposes by provider and by dimension rather than issuing one broad search."
+    },
+    {
+      "id": "transformer-attention-origin",
+      "question": "Which paper introduced the transformer architecture, who wrote it, and what problem with recurrent models did it set out to solve?",
+      "mode": "quick",
+      "expected_topics": ["transformer", "attention", "recurrent"],
+      "expected_source_types": ["arxiv"],
+      "expected_claims": [{ "key": "attention", "must_be_present": true }],
+      "checks": "factual",
+      "notes": "A settled fact with one obvious primary source. A run that needs four rounds for this is over-researching; a run that cites a blog post instead of the paper is under-sourcing."
+    },
+    {
+      "id": "restated-revenue-contradiction",
+      "question": "What was NVIDIA's data centre segment revenue in its most recently reported fiscal year, and do the figures reported by different sources agree?",
+      "mode": "deep",
+      "expected_topics": ["revenue", "data centre", "fiscal year", "restated"],
+      "expected_source_types": ["sec", "web"],
+      "expected_claims": [{ "key": "revenue", "must_be_present": true }],
+      "checks": "contradiction",
+      "notes": "Secondary sources routinely quote figures from different fiscal periods or before a restatement. The correct behaviour is to record the disagreement rather than to pick a number, so the metric that matters here is contradictions_found being non-zero with citation precision intact."
+    },
+    {
+      "id": "unanswerable-private-metric",
+      "question": "What was the exact monthly active user count of a specific private startup's internal admin dashboard last quarter?",
+      "mode": "quick",
+      "expected_topics": [],
+      "expected_source_types": [],
+      "expected_claims": [],
+      "checks": "no-good-sources",
+      "notes": "There is no public answer. The correct behaviour is a low-coverage report that says so, so this case is scored on citation precision and groundedness staying high while claim counts stay low - a run that produces confident claims here is the failure being tested for, not a run that produces few."
+    }
+  ]
+}

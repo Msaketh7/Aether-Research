@@ -70,6 +70,13 @@ migrate-check: ## Verify migrations are reversible against a throwaway database
 benchmark-retrieval: ## Measure the retrieval strategies and the chunk size (ADR 0013)
 	cd $(API) && uv run python scripts/with_test_db.py uv run python scripts/benchmark_retrieval.py
 
+# Every case is a real research run against real providers, so this spends
+# real money and needs Postgres and credentials. It exits non-zero when a
+# gated metric regresses, which is what CI gates on (Phase 18).
+.PHONY: evaluate
+evaluate: ## Run the evaluation dataset against this build
+	cd $(API) && uv run python -m app.evaluations $(ARGS)
+
 # --- frontend --------------------------------------------------------------
 .PHONY: dev
 dev: ## Run the Next.js app in development (mock API mode)

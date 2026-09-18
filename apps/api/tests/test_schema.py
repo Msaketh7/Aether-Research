@@ -36,6 +36,7 @@ EXPECTED_TABLES = {
     "llm_calls",
     "report_sections",
     "reports",
+    "research_events",
     "research_projects",
     "research_run_uploads",
     "research_runs",

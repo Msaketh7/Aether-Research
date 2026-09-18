@@ -1,0 +1,261 @@
+{
+  "uid": "aether-research",
+  "title": "Aether Research",
+  "tags": ["aether"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "description": "The questions an on-call engineer asks first: are runs finishing, what are they costing, and is anything saturated. Every panel is a query over the metrics in app/observability/metrics.py; a panel with no data means nothing has been measured yet, which is a different thing from zero.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Research runs",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Runs finished per minute, by outcome",
+      "description": "A rate rather than a total: a counter that only goes up tells you nothing about now.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(aether_research_runs_total[5m])) * 60",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Failure rate",
+      "description": "Failed runs as a share of finished runs. Undefined - and so blank - while nothing has finished, rather than drawn as 0.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(aether_research_runs_total{status=\"failed\"}[15m])) / sum(rate(aether_research_runs_total[15m]))",
+          "legendFormat": "failed",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Run duration percentiles",
+      "description": "p50, p95 and p99 from the histogram. Measured from a worker claiming a run, so queue time is not counted as the graph being slow.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(aether_research_run_duration_seconds_bucket[15m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(aether_research_run_duration_seconds_bucket[15m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(aether_research_run_duration_seconds_bucket[15m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Queue depth and active workers",
+      "description": "Depth rising while workers stay flat is the signal to scale the worker out; both flat with depth high is a stuck worker.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "expr": "max(aether_queue_depth)", "legendFormat": "queued", "refId": "A" },
+        { "expr": "sum(aether_active_workers)", "legendFormat": "workers", "refId": "B" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Models and tools",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Spend per hour, by model",
+      "description": "Estimated, from the registry's declared prices. A model with no declared price contributes nothing here and shows up as an uncosted call on its run instead - so a flat line is not proof of a free hour.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(aether_llm_cost_usd_total[15m])) * 3600",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Tokens per minute",
+      "description": "Split by direction: output tokens cost several times input, so one line would hide the expensive half.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(aether_llm_tokens_total[5m])) * 60",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Model call latency (p95), by model",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(aether_llm_call_duration_seconds_bucket[15m])))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Tool call latency (p95), by tool",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(aether_tool_call_duration_seconds_bucket[15m])))",
+          "legendFormat": "{{tool}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Model and tool errors per minute",
+      "description": "Every attempt is counted, retries included, so a provider that is failing and being retried is visible before it exhausts a chain.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(aether_llm_calls_total{status=\"error\"}[5m])) * 60",
+          "legendFormat": "llm {{model}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (tool) (rate(aether_tool_calls_total{status!=\"ok\"}[5m])) * 60",
+          "legendFormat": "tool {{tool}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Cache hit rate, by namespace",
+      "description": "A value served from the store and one that joined a call already in flight both count as a hit: neither made a request. They are separate series because they are different optimisations.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace) (rate(aether_cache_lookups_total{origin!=\"loader\"}[15m])) / sum by (namespace) (rate(aether_cache_lookups_total[15m]))",
+          "legendFormat": "{{namespace}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "API and saturation",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "HTTP p95 by route",
+      "description": "Labelled by route template. The SSE stream is deliberately absent from the histogram - it is held open for minutes by design, and timing it would make the p99 a measure of how long people watch.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(aether_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "HTTP 5xx per minute",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(aether_http_requests_total{status=~\"5..\"}[5m])) * 60",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Database pool",
+      "description": "In use against idle and overflow. Saturation here is felt as slow requests long before anything errors, which is why it is a panel rather than an alert.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (state) (aether_db_pool_connections)",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Retrieval: latency p95 and results returned",
+      "description": "A retrieval that got slower and one that quietly started returning two chunks instead of ten look the same from outside until both are on a graph.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(aether_retrieval_duration_seconds_bucket[15m])))",
+          "legendFormat": "p95 seconds",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(aether_retrieval_results_bucket[15m])))",
+          "legendFormat": "median chunks",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

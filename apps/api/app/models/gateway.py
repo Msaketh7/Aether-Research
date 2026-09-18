@@ -25,10 +25,23 @@ the eighth:
 * **Capability enforcement.** A model that rejects `temperature` never receives
   it; a model with no embeddings endpoint is never asked for a vector.
 
-Deliberately *not* here yet, each with its own phase: response caching (15),
-budget enforcement (16), OpenTelemetry spans (17). The seams are left where they
-go - the recorder is an interface, and every call already passes through one
-place.
+**Embeddings are cached; completions are not.** An embedding is a
+deterministic function of its text and its model, which is exactly the property
+a cache needs, and re-ingesting a document the corpus already holds is the
+common case. A completion is not: "this prompt is deterministic" is a claim
+about a prompt, and nothing here can check it, so caching one would trade
+correctness for cost on the most expensive mistake the system can make. The
+seam is the one the recorder already uses - every call passes through one
+place (Phase 15, TDD 13).
+
+**Nothing is spent without asking.** A ``BudgetGuard`` is consulted before
+every call, which is the only place a per-run ceiling can actually bound
+spending: the graph checks its budget between nodes, and a node that starts
+under the ceiling may finish far over it (Phase 16, ``app.models.budget``). A
+refused call is recorded like any other attempt, because a run that hit its
+limit should be able to show where.
+
+Deliberately *not* here yet: OpenTelemetry spans (17).
 """
 
 from __future__ import annotations
@@ -38,6 +51,7 @@ import random
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from uuid import UUID
 
+from app.cache import CacheNamespace, ResponseCache, disabled_cache
 from app.core.enums import AgentName, LlmCallStatus, LlmProvider, ResearchMode
 from app.core.logging import get_logger
 from app.models.base import (
@@ -52,6 +66,7 @@ from app.models.base import (
     StructuredT,
     TokenUsage,
 )
+from app.models.budget import BudgetGuard, NullBudgetGuard
 from app.models.errors import CapabilityNotSupported, ModelError, ModelNotConfigured
 from app.models.recording import CallRecorder, LlmCallRecord
 from app.models.registry import ModelRegistry, ModelSpec
@@ -75,6 +90,8 @@ class LLMGateway:
         router: ModelRouter,
         providers: Mapping[LlmProvider, LLMProvider],
         recorder: CallRecorder,
+        cache: ResponseCache | None = None,
+        budget: BudgetGuard | None = None,
         max_concurrent_calls: int = 8,
         max_attempts_per_model: int = 3,
         request_timeout_seconds: float = 60.0,
@@ -85,6 +102,8 @@ class LLMGateway:
         self._router = router
         self._providers = dict(providers)
         self._recorder = recorder
+        self._cache = cache or disabled_cache()
+        self._budget = budget or NullBudgetGuard()
         self._semaphore = asyncio.Semaphore(max_concurrent_calls)
         self._max_attempts = max_attempts_per_model
         self._timeout = request_timeout_seconds
@@ -277,12 +296,26 @@ class LLMGateway:
         prefix = spec.embedding_prefix(purpose)
         prepared = [prefix + text for text in texts] if prefix else list(texts)
 
+        known, missing = await self._known_vectors(spec, prepared, run_id=run_id)
+        if not missing:
+            # Every text was already known, so nothing was sent anywhere and
+            # nothing was spent. Zero latency here is the truth, not a default.
+            return EmbeddingResult(
+                vectors=[known[index] for index in range(len(prepared))],
+                provider=spec.provider,
+                model=spec.model_id,
+                usage=TokenUsage(prompt_tokens=0, completion_tokens=0),
+                latency_ms=0,
+            )
+        outstanding = [prepared[index] for index in missing]
+
         for attempt in range(1, self._max_attempts + 1):
             started = asyncio.get_running_loop().time()
             try:
+                self._budget.authorise(run_id=run_id, spec=spec, operation="embed")
                 async with self._semaphore:
                     async with asyncio.timeout(self._timeout):
-                        result = await provider.embed(prepared, model=spec.model_id)
+                        result = await provider.embed(outstanding, model=spec.model_id)
             except (ModelError, TimeoutError) as exc:
                 error = _as_model_error(exc, spec)
                 await self._record(
@@ -313,11 +346,95 @@ class LLMGateway:
                 attempt=attempt,
                 run_id=run_id,
             )
-            return result
+            return await self._merge_vectors(
+                spec, prepared, known=known, missing=missing, result=result
+            )
 
         raise ModelNotConfigured(  # pragma: no cover - the loop returns or raises
             "The embedding retry loop ended without a result or an error.",
             context={"model": spec.key},
+        )
+
+    async def _known_vectors(
+        self, spec: ModelSpec, prepared: Sequence[str], *, run_id: UUID | None
+    ) -> tuple[dict[int, Sequence[float]], list[int]]:
+        """Which of these texts are already embedded, and which still cost money.
+
+        Keyed by the *prepared* text - the model's task prefix included, since
+        an asymmetric model gives a passage and a question different vectors -
+        and by the provider and model id rather than the registry key, for the
+        reason ``ChunkEmbedder`` gives: an operator can repoint a key at
+        another model, and two models' vectors are not comparable.
+        """
+        known: dict[int, Sequence[float]] = {}
+        missing: list[int] = []
+        for index, text in enumerate(prepared):
+            stored = await self._cache.stored(
+                CacheNamespace.EMBEDDING,
+                spec.provider.value,
+                spec.model_id,
+                text,
+                decode=_as_vector,
+            )
+            if stored is None:
+                missing.append(index)
+            else:
+                known[index] = stored[0]
+        if known:
+            # One record for the whole hit, with no tokens, because none were
+            # spent. Without it the ledger of a re-ingested document shows
+            # nothing at all, which reads as a document nobody embedded.
+            await self._record(
+                spec=spec,
+                decision=None,
+                operation="embed",
+                status=LlmCallStatus.OK,
+                usage=TokenUsage(prompt_tokens=0, completion_tokens=0),
+                latency_ms=0,
+                prompt_version="n/a",
+                attempt=1,
+                run_id=run_id,
+                cache_hit=True,
+            )
+        return known, missing
+
+    async def _merge_vectors(
+        self,
+        spec: ModelSpec,
+        prepared: Sequence[str],
+        *,
+        known: dict[int, Sequence[float]],
+        missing: Sequence[int],
+        result: EmbeddingResult,
+    ) -> EmbeddingResult:
+        """Put the fresh vectors back where their texts were, and store them.
+
+        A provider that returned the wrong number of vectors is not corrected
+        here. The result passes through untouched and ``ChunkEmbedder`` refuses
+        it, which is the one place that check belongs - and one vector fewer
+        than there were texts would otherwise be silently repaired into the
+        wrong chunk.
+        """
+        fresh = list(result.vectors)
+        if len(fresh) != len(missing):
+            return result
+
+        for position, index in enumerate(missing):
+            known[index] = fresh[position]
+            await self._cache.remember(
+                CacheNamespace.EMBEDDING,
+                spec.provider.value,
+                spec.model_id,
+                prepared[index],
+                value=list(fresh[position]),
+                encode=list,
+            )
+        return EmbeddingResult(
+            vectors=[known[index] for index in range(len(prepared))],
+            provider=result.provider,
+            model=result.model,
+            usage=result.usage,
+            latency_ms=result.latency_ms,
         )
 
     async def count_tokens(
@@ -404,6 +521,10 @@ class LLMGateway:
             for attempt in range(1, self._max_attempts + 1):
                 started = asyncio.get_running_loop().time()
                 try:
+                    # Before the semaphore, so a run that has spent its
+                    # allowance does not first queue behind eight calls it is
+                    # not allowed to make.
+                    self._budget.authorise(run_id=run_id, spec=spec, operation=operation, role=role)
                     async with self._semaphore:
                         async with asyncio.timeout(self._timeout):
                             completion = await invoke(provider, request)
@@ -543,6 +664,7 @@ class LLMGateway:
         fell_back_from: str | None = None,
         run_id: UUID | None = None,
         request_id: str | None = None,
+        cache_hit: bool = False,
     ) -> None:
         await self._recorder.record(
             LlmCallRecord(
@@ -562,8 +684,21 @@ class LLMGateway:
                 error_code=error_code,
                 run_id=run_id,
                 request_id=request_id,
+                cache_hit=cache_hit,
             )
         )
+
+
+def _as_vector(raw: object) -> list[float]:
+    """A cached embedding, checked to be a list of numbers before it is used.
+
+    A malformed entry raises, which the cache treats as a miss and replaces -
+    far better than handing a chunk a vector of strings and discovering it at
+    the pgvector write.
+    """
+    if not isinstance(raw, list):
+        raise TypeError("a cached embedding must be a list of numbers")
+    return [float(value) for value in raw]
 
 
 def _as_model_error(exc: BaseException, spec: ModelSpec) -> ModelError:

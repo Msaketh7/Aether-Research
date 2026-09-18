@@ -486,8 +486,12 @@ variable, with no code change
 | 11    | Evidence system: the claim, evidence and contradiction chain persisted, source deduplication, credibility         | Done    |
 | 12    | Report generation: the structured report, citations by source, a validator that proves each one                   | Done    |
 | 13    | Background workers: the queue, the worker process, resumable runs that survive a restart                          | Done    |
-| 14    | Streaming: progress events from the worker, over a bus that works with more than one API process                  | Next    |
-| 15+   | Caching, cost governance, evaluation, observability, load testing, deployment                                     | Planned |
+| 14    | Streaming: progress events from the worker, over a bus that works with more than one API process                  | Done    |
+| 15    | Caching: searches, pages, extractions and embeddings by content hash, with simultaneous identical calls done once | Done    |
+| 16    | Cost and token governance: the call ledger written, a run's ceiling enforced before the money is spent            | Done    |
+| 17    | Observability: Prometheus metrics, OpenTelemetry spans, a Grafana dashboard, a measured system panel              | Done    |
+| 18    | Evaluation: a versioned dataset, structural scorers, configurable gates, `make evaluate`                          | Done    |
+| 19+   | Testing, security, load testing, optimisation, infrastructure, CI/CD, documentation                               | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -508,16 +512,39 @@ offered the same job are all settled by the database; a run whose worker is
 killed or deployed over is resumed at the node that had not finished rather than
 started again.
 
-**What the worker does not do yet is talk.** It records progress on the run as it
-goes, but publishes no live events: the event bus is in-process, so a worker
-publishing to it would reach nobody. The Redis bus and real emission are
-Phase 14, and until then the agent timeline in live mode updates when the page
-is loaded rather than as the run moves. Capabilities whose phase has not landed
-return `501 not_implemented`, so "not built yet" is always distinguishable from
-"no results".
+**And it narrates what it is doing.** Every superstep of the graph becomes
+progress events - the plan, each subtask and query, each source read, each claim
+extracted, each contradiction found, the critic asking for another round, the
+report - carried over Redis to whichever API process is holding the stream. Each
+one is numbered by being stored, so a browser that reconnects with
+`Last-Event-ID` resumes exactly where it stopped, hours later or against a
+different replica. A worker that takes over a paused run continues the stream
+rather than repeating it.
 
-The one benchmark executed so far is the retrieval benchmark (Phase 8, lexical
-arm only). No end-to-end evaluation has run, and the evaluations page says so.
+**Work is not paid for twice.** A search, a fetched page, the article extracted
+from it and a text's embedding are cached by content hash, and identical calls
+still in flight are done once rather than several times - which is the normal
+case when parallel researchers are given overlapping subtasks. Nothing that
+belongs to one person is cached: there is no namespace to put it in. A cache hit
+is recorded as a call that cost nothing, rather than as no call at all.
+
+**And it can be watched and measured.** Every node execution is a row with
+the tool and model calls it made hanging from it, so "which step spent the
+money" is a query; a run's cost ceiling is enforced before each call rather
+than noticed after one, and a run that hits it still writes its report with a
+caveat saying why. Both processes export Prometheus metrics, every seam opens
+an OpenTelemetry span, and the Grafana dashboard is a file in the repository.
+
+Capabilities whose phase has not landed return `501 not_implemented`, so
+"not built yet" is always distinguishable from "no results".
+
+The evaluation suite is built: a versioned dataset in `data/eval/cases`,
+structural scorers, gates that are configuration and are stored with each
+result, and `make evaluate`. **It has not been run.** Every case is a real
+research run against real providers, so a baseline costs money, and this
+repository publishes no number it did not measure - the page and the API both
+report "not measured" rather than a zero. The one benchmark executed so far is
+the retrieval benchmark (Phase 8, lexical arm only).
 
 ---
 

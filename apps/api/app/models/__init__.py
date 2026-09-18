@@ -12,6 +12,7 @@ the moment a model name is written into a node.
 
 from __future__ import annotations
 
+from app.cache import ResponseCache
 from app.core.config import Settings
 from app.core.enums import LlmProvider
 from app.core.logging import get_logger
@@ -27,6 +28,14 @@ from app.models.base import (
     Prompt,
     StructuredCompletion,
     TokenUsage,
+)
+from app.models.budget import (
+    BudgetExhausted,
+    BudgetGuard,
+    ModelNotPriced,
+    NullBudgetGuard,
+    RunBudgetGuard,
+    RunSpend,
 )
 from app.models.errors import (
     CapabilityNotSupported,
@@ -95,6 +104,8 @@ def build_gateway(
     *,
     providers: dict[LlmProvider, LLMProvider] | None = None,
     recorder: CallRecorder | None = None,
+    cache: ResponseCache | None = None,
+    budget: BudgetGuard | None = None,
 ) -> LLMGateway:
     """Assemble the gateway from configuration.
 
@@ -109,6 +120,8 @@ def build_gateway(
         router=router,
         providers=providers if providers is not None else build_providers(settings),
         recorder=recorder or LoggingCallRecorder(),
+        cache=cache,
+        budget=budget,
         max_concurrent_calls=settings.llm_max_concurrent_calls,
         max_attempts_per_model=settings.llm_max_attempts,
         request_timeout_seconds=settings.llm_request_timeout_seconds,
@@ -119,6 +132,8 @@ def build_gateway(
 
 __all__ = [
     "AnthropicProvider",
+    "BudgetExhausted",
+    "BudgetGuard",
     "CallRecorder",
     "CapabilityNotSupported",
     "ChatMessage",
@@ -136,10 +151,12 @@ __all__ = [
     "MessageRole",
     "ModelError",
     "ModelNotConfigured",
+    "ModelNotPriced",
     "ModelRegistry",
     "ModelRouter",
     "ModelSpec",
     "ModelTier",
+    "NullBudgetGuard",
     "OllamaProvider",
     "OpenAIProvider",
     "Pricing",
@@ -150,6 +167,8 @@ __all__ = [
     "ProviderTimeout",
     "ProviderUnavailable",
     "RoutingDecision",
+    "RunBudgetGuard",
+    "RunSpend",
     "StructuredCompletion",
     "StructuredOutputInvalid",
     "TokenUsage",

@@ -61,9 +61,10 @@ class AgentRunRow(Base, TimestampMixin):
 
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    cost_usd: Mapped[float] = mapped_column(
-        Numeric(10, 4), nullable=False, server_default=text("0")
-    )
+    #: ``None`` is *not measured*: a step that called a model the registry does
+    #: not price has no cost, which is a different fact from costing nothing
+    #: (migration 0011).
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 4))
     #: OpenTelemetry ids, so a row links to a trace once Phase 17 lands.
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
     span_id: Mapped[str | None] = mapped_column(String(32))
@@ -156,9 +157,8 @@ class LlmCallRow(Base, TimestampMixin):
     completion_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
-    cost_usd: Mapped[float] = mapped_column(
-        Numeric(10, 4), nullable=False, server_default=text("0")
-    )
+    #: ``None`` is *not measured*. See ``agent_runs.cost_usd`` above.
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 4))
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     temperature: Mapped[float | None] = mapped_column(Numeric(3, 2))
     cache_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

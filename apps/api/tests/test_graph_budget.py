@@ -19,7 +19,8 @@ from app.agents.budget import (
 )
 from app.agents.schemas import CostEstimate, Critique, MissingInfo, StopReason, Subtask
 from app.core.enums import ResearchMode, TaskPriority
-from tests.support.graph import budget
+from app.models.budget import BudgetExhausted, ModelNotPriced
+from tests.support.graph import Script, ScriptedNodes, brief, budget, make_runner
 
 BUDGET = budget()
 
@@ -188,3 +189,53 @@ def test_an_iterations_caveat_names_what_was_still_missing():
 def test_a_cancelled_run_carries_no_caveat():
     """It produces no report for a caveat to be read in."""
     assert coverage_caveat(StopReason.CANCELLED, BUDGET, used()) is None
+
+
+# --- a refusal at the gateway ---------------------------------------------------
+#
+# The rules above are checked between nodes. A per-run ceiling is also enforced
+# *before* each model call (Phase 16), and what the graph must do with that
+# refusal is treat it as a limit rather than as a broken agent: FR-8 says a run
+# that hits a limit finishes with a partial report, not that it fails.
+
+
+async def test_a_refused_call_ends_discovery_and_still_writes_a_report():
+    """The planner is refused before it spends anything.
+
+    There is no plan, so there is nothing to research - and the run still has
+    to produce the report that is its partial result.
+    """
+    nodes = ScriptedNodes(Script(raises={"planner": BudgetExhausted()}))
+    runner, _, _ = make_runner(nodes)
+
+    state = await runner.run(brief())
+
+    assert state["stop"].reason is StopReason.COST
+    assert nodes.calls["synthesizer"] == 1
+    assert state["report"] is not None
+    assert "cost" in (state["stop"].caveat or "").lower()
+
+
+async def test_a_refusal_partway_through_a_round_stops_the_round():
+    """The overshoot this bounds: a node that started under the ceiling and a
+    sibling that would otherwise carry on spending past it."""
+    nodes = ScriptedNodes(Script(raises={"evidence_extractor": BudgetExhausted()}))
+    runner, _, _ = make_runner(nodes)
+
+    state = await runner.run(brief())
+
+    assert state["stop"].reason is StopReason.COST
+    assert state["report"] is not None
+    assert [error.code for error in state["errors"]] == ["budget_exhausted"]
+
+
+async def test_an_unpriced_model_stops_the_run_the_same_way():
+    """A ceiling that cannot be measured against is a ceiling that is not
+    enforced, which the run says out loud rather than ignoring."""
+    nodes = ScriptedNodes(Script(raises={"critic": ModelNotPriced()}))
+    runner, _, _ = make_runner(nodes)
+
+    state = await runner.run(brief())
+
+    assert state["stop"].reason is StopReason.COST
+    assert state["report"] is not None

@@ -126,6 +126,36 @@ When no benchmark has run, the page says so rather than rendering zeros.
 
 ## 7. Current status
 
-**No evaluation has been executed yet.** The suite is built in Phase 18; the
-first baseline is recorded here when it exists, together with its dataset
-version, git SHA and model configuration.
+**The suite is built (Phase 18) and no evaluation has been executed.** Running
+it needs model credentials and spends real money on every case, because every
+case is a real research run - a benchmark that exercised a special evaluation
+path would measure that path.
+
+The first baseline is recorded here when it exists, together with its dataset
+version, git SHA and model configuration. Until then every threshold in §5 is
+ungated: a gate written before a measurement is an aspiration presented as a
+requirement.
+
+```bash
+make evaluate                       # every dataset in data/eval/cases
+make evaluate ARGS="--mode quick"   # a cheaper smoke run
+```
+
+What is implemented, and where:
+
+| Piece                               | Module                               |
+| ----------------------------------- | ------------------------------------ |
+| Case and dataset schema             | `app/evaluations/dataset.py`         |
+| Structural scorers                  | `app/evaluations/metrics.py`         |
+| Retrieval metrics                   | `app/retrieval/metrics.py` (Phase 8) |
+| Thresholds and the gate             | `app/evaluations/thresholds.py`      |
+| Runner                              | `app/evaluations/runner.py`          |
+| Printed report                      | `app/evaluations/report.py`          |
+| Results as rows, and `/evaluations` | `app/db/repositories/evaluations.py` |
+
+The judged metrics in §3.2 - correctness and faithfulness - are the half that
+needs a model and are not implemented: the structural half (does the citation
+chain resolve, does every claim have a span) is measured, and a structural
+failure is a defect rather than a model-quality signal. Adding the judge means
+fixing a model and a prompt version and recording both with every result, and
+it is worth doing against a real baseline rather than against none.

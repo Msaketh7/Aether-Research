@@ -30,10 +30,12 @@ Four settings are made per invocation, each for a stated reason:
 * ``recursion_limit`` from the run's shape (``budget.recursion_limit``):
   LangGraph's default of 25 would end a four-round deep run with an exception.
 * ``max_concurrency`` from settings: how many researchers run at once.
-* LangSmith tracing **off**. Prompts and retrieved documents would otherwise
-  leave the system for a third party whenever ``LANGSMITH_TRACING`` happened to
-  be set in the environment - read by the library directly, past the typed
-  settings layer. Turning tracing on is Phase 17's decision to make on purpose.
+* LangSmith tracing **off unless a deployment asked for it**, and configured
+  by handing this runner a client rather than by setting the variable the
+  library reads. Prompts and retrieved documents would otherwise leave the
+  system for a third party whenever ``LANGSMITH_TRACING`` happened to be set
+  in a shell (Phase 9's finding). No client means ``enabled=False``, which is
+  what every test and every default deployment gets.
 """
 
 from __future__ import annotations
@@ -62,6 +64,7 @@ from app.agents.graph import (
 from app.agents.nodes import ResearchNodes
 from app.agents.schemas import GraphNode
 from app.agents.state import ResearchState, RunBrief, initial_state
+from app.agents.tracing import AgentTracer, NullTracer
 from app.core.enums import ResearchMode
 from app.core.logging import get_logger
 
@@ -125,6 +128,9 @@ class ResearchGraphRunner:
         bounds: GraphBounds,
         recorder: ResultRecorder,
         now: Clock = utcnow,
+        tracer: AgentTracer | None = None,
+        langsmith: Any | None = None,
+        langsmith_project: str | None = None,
     ) -> None:
         self._nodes = nodes
         self._checkpointer = checkpointer
@@ -132,6 +138,14 @@ class ResearchGraphRunner:
         self._bounds = bounds
         self._recorder = recorder
         self._now = now
+        # One tracer for every run this process executes, like the graphs it
+        # builds: a span is opened per node execution, not per runner.
+        self._tracer: AgentTracer = tracer or NullTracer()
+        # A client, or None. Passed to the library per invocation rather
+        # than left to whatever it reads out of the environment, so there is
+        # one place the decision is made. See the module notes.
+        self._langsmith = langsmith
+        self._langsmith_project = langsmith_project
         self._graphs: dict[ResearchMode, ResearchGraph] = {}
 
     def graph(self, mode: ResearchMode) -> ResearchGraph:
@@ -144,6 +158,7 @@ class ResearchGraphRunner:
                 bounds=self._bounds,
                 checkpointer=self._checkpointer,
                 now=self._now,
+                tracer=self._tracer,
             )
         return self._graphs[mode]
 
@@ -171,7 +186,11 @@ class ResearchGraphRunner:
         # question come from the checkpoint rather than from this brief.
         payload = None if saved.values else initial_state(brief, now=started)
         try:
-            with tracing_context(enabled=False):
+            with tracing_context(
+                enabled=self._langsmith is not None,
+                client=self._langsmith,
+                project_name=self._langsmith_project,
+            ):
                 final = await self._stream(
                     graph, payload, config, started=started, listener=listener
                 )

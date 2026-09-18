@@ -37,6 +37,7 @@ from app.core.enums import (
     EvidenceStance,
     ReportSectionKind,
     ResearchMode,
+    SourceType,
     TaskPriority,
 )
 from app.research.schemas import (
@@ -51,6 +52,9 @@ from app.research.schemas import (
 #: (``max_subtasks_per_iteration``), which may not exceed this.
 MAX_PLANNED_SUBTASKS = 20
 MAX_SOURCES_PER_TASK = 100
+#: Searches one subtask may report having issued. The run's query ceiling is
+#: what actually bounds them; this is the shape a checkpoint may hold.
+MAX_QUERIES_PER_TASK = 25
 MAX_EVIDENCE_PER_CLAIM = 50
 MAX_REPORT_SECTIONS = 20
 MAX_CLAIMS_PER_SECTION = 500
@@ -351,18 +355,38 @@ class SubtaskAssignment(GraphValue):
 
 
 class SourceRef(GraphValue):
-    """A source a researcher recorded. The row itself lives in ``sources``."""
+    """A source a researcher recorded. The row itself lives in ``sources``.
+
+    The last three fields are what the progress stream says about a source
+    (Phase 14). They are carried here rather than read back from the row
+    because the worker announces a source at the node boundary that found it,
+    and a query per source to describe work the researcher had just done would
+    be a query the researcher already paid for. Every one is defaulted: a
+    checkpoint written before Phase 14 still loads, and reports what it knows.
+    """
 
     source_id: UUID
     task_key: str = Field(pattern=TASK_KEY_PATTERN)
     title: str = Field(max_length=1000)
     url: str = Field(min_length=1, max_length=4096)
+    source_type: SourceType = SourceType.WEB
+    #: The registrable domain, or the name the finding API gave - never a name
+    #: taken from the document, for the reason ``SourceDescriptor`` states.
+    publisher: str = Field(default="", max_length=300)
+    #: Chunks the ingester produced. 0 also means "not recorded", which is why
+    #: the event that carries it is about progress rather than about size.
+    chunk_count: int = Field(default=0, ge=0)
 
 
 class TaskOutcome(GraphValue):
     task_key: str = Field(pattern=TASK_KEY_PATTERN)
     iteration: int = Field(ge=1)
     sources: tuple[SourceRef, ...] = Field(default=(), max_length=MAX_SOURCES_PER_TASK)
+    #: The searches this subtask actually issued, in the order they were
+    #: written. Carried so the stream can report a real query rather than the
+    #: subtask's question standing in for one (Phase 14); bounded by the
+    #: run's own query ceiling long before it reaches this length.
+    queries: tuple[str, ...] = Field(default=(), max_length=MAX_QUERIES_PER_TASK)
 
     @model_validator(mode="after")
     def _own_sources(self) -> TaskOutcome:

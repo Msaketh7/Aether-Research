@@ -78,10 +78,12 @@ from app.agents.schemas import (
     TaskOutcome,
 )
 from app.agents.state import ResearchState, consumption, stop_reason
+from app.agents.tracing import AgentTracer, NullTracer
 from app.core.config import Settings
 from app.core.enums import ResearchMode
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.models.budget import BudgetExhausted, ModelNotPriced
 
 logger = get_logger(__name__)
 
@@ -95,6 +97,12 @@ _ERROR_CODE = re.compile(ERROR_CODE_PATTERN)
 #: Raised through a node's failure handling untouched: LangGraph's own control
 #: flow, and contract violations, which are bugs rather than failures.
 _PROPAGATE: tuple[type[BaseException], ...] = (GraphBubbleUp, NodeContractViolated)
+#: Refused by the budget guard before anything was spent (Phase 16). Handled as
+#: a *limit* rather than as a failure: a run that has spent its allowance has
+#: not gone wrong, and FR-8 says it finishes with a partial report and a caveat
+#: naming what stopped it. The synthesizer is never refused, which is what
+#: leaves a report to write.
+_BUDGET_REFUSED: tuple[type[Exception], ...] = (BudgetExhausted, ModelNotPriced)
 
 _PLANNER = GraphNode.PLANNER.value
 _RESEARCHER = GraphNode.RESEARCHER.value
@@ -155,9 +163,10 @@ def build_research_graph(
     bounds: GraphBounds,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     now: Clock = utcnow,
+    tracer: AgentTracer | None = None,
 ) -> ResearchGraph:
     """The graph for one mode. Deep and conversational runs share a shape."""
-    governed = _Governed(nodes, probe=probe, bounds=bounds, now=now)
+    governed = _Governed(nodes, probe=probe, bounds=bounds, now=now, tracer=tracer)
     graph = StateGraph(ResearchState, context_schema=GraphContext)
 
     graph.add_node(_PLANNER, governed.planner)
@@ -198,11 +207,15 @@ class _Governed:
         probe: CancellationProbe,
         bounds: GraphBounds,
         now: Clock,
+        tracer: AgentTracer | None = None,
     ) -> None:
         self._nodes = nodes
         self._probe = probe
         self._bounds = bounds
         self._now = now
+        # Never ``None`` past here: a graph with no ledger behaves identically,
+        # which is what lets every graph test run without a database.
+        self._tracer: AgentTracer = tracer or NullTracer()
 
     # --- discovery ---------------------------------------------------------------
 
@@ -225,10 +238,24 @@ class _Governed:
 
         iteration = state.get("iteration", 0) + 1
         try:
-            result = await self._call(lambda: self._nodes.planner.plan(state))
+            result = await self._call(
+                GraphNode.PLANNER,
+                lambda: self._nodes.planner.plan(state),
+                research_id=state["research_id"],
+                iteration=iteration,
+            )
             plan = _expect(GraphNode.PLANNER, result.value, Plan)
         except _PROPAGATE:
             raise
+        except _BUDGET_REFUSED as exc:
+            # Not a failed planner: the run may not spend any more. Ending
+            # discovery here is what leaves a report to write (FR-8).
+            now = self._now()
+            return {
+                **self._accounted(state, now),
+                **self._stop(state, StopReason.COST, self._used(state, now)),
+                "errors": [self._failure(GraphNode.PLANNER, iteration, exc)],
+            }
         except Exception as exc:
             if iteration == 1:
                 raise PlanningFailed(context={"research_id": str(state["research_id"])}) from exc
@@ -272,7 +299,12 @@ class _Governed:
         timeout = min(self._bounds.node_timeout_seconds, work.time_allowance_seconds)
         try:
             result = await self._call(
-                lambda: self._nodes.researcher.research(work), limit_seconds=timeout
+                GraphNode.RESEARCHER,
+                lambda: self._nodes.researcher.research(work),
+                research_id=work.research_id,
+                iteration=subtask.iteration,
+                task_key=subtask.key,
+                limit_seconds=timeout,
             )
             outcome = _expect(GraphNode.RESEARCHER, result.value, TaskOutcome)
         except _PROPAGATE:
@@ -377,10 +409,22 @@ class _Governed:
             return self._accounted(state, now)
         iteration = state.get("iteration", 0)
         try:
-            result = await self._call(lambda: self._nodes.critic.critique(state))
+            result = await self._call(
+                GraphNode.CRITIC,
+                lambda: self._nodes.critic.critique(state),
+                research_id=state["research_id"],
+                iteration=iteration,
+            )
             critique = _expect(GraphNode.CRITIC, result.value, Critique)
         except _PROPAGATE:
             raise
+        except _BUDGET_REFUSED as exc:
+            now = self._now()
+            return {
+                **self._accounted(state, now),
+                **self._stop(state, StopReason.COST, self._used(state, now)),
+                "errors": [self._failure(GraphNode.CRITIC, iteration, exc)],
+            }
         except Exception as exc:
             now = self._now()
             return {
@@ -412,7 +456,12 @@ class _Governed:
         if await self._cancelled(state):
             return self._cancel(state, now)
         try:
-            result = await self._call(lambda: self._nodes.synthesizer.synthesize(state))
+            result = await self._call(
+                GraphNode.SYNTHESIZER,
+                lambda: self._nodes.synthesizer.synthesize(state),
+                research_id=state["research_id"],
+                iteration=state.get("iteration", 0),
+            )
             draft = _expect(GraphNode.SYNTHESIZER, result.value, ReportDraft)
         except _PROPAGATE:
             raise
@@ -442,7 +491,12 @@ class _Governed:
         if report is None:
             raise NodeContractViolated(context={"node": _VALIDATOR, "reason": "no draft"})
         try:
-            result = await self._call(lambda: self._nodes.citation_validator.validate(state))
+            result = await self._call(
+                GraphNode.CITATION_VALIDATOR,
+                lambda: self._nodes.citation_validator.validate(state),
+                research_id=state["research_id"],
+                iteration=state.get("iteration", 0),
+            )
             check = _expect(GraphNode.CITATION_VALIDATOR, result.value, CitationCheck)
         except _PROPAGATE:
             raise
@@ -542,10 +596,22 @@ class _Governed:
         if await self._cancelled(state):
             return self._cancel(state, now)
         try:
-            result = await self._call(work)
+            result = await self._call(
+                node,
+                work,
+                research_id=state["research_id"],
+                iteration=state.get("iteration", 0),
+            )
             items = _expect_items(node, result.value, item_type)
         except _PROPAGATE:
             raise
+        except _BUDGET_REFUSED as exc:
+            now = self._now()
+            return {
+                **self._accounted(state, now),
+                **self._stop(state, StopReason.COST, self._used(state, now)),
+                "errors": [self._failure(node, state.get("iteration", 0), exc)],
+            }
         except Exception as exc:
             return {
                 **self._accounted(state, self._now()),
@@ -605,16 +671,36 @@ class _Governed:
 
     async def _call[T](
         self,
+        node: GraphNode,
         work: Callable[[], Awaitable[NodeResult[T]]],
         *,
+        research_id: UUID,
+        iteration: int,
+        task_key: str | None = None,
         limit_seconds: float | None = None,
     ) -> NodeResult[T]:
+        """Run one node's work, bounded, inside a span the ledger records.
+
+        The span is opened here rather than in each node because this is
+        already the one place every node's work passes through - the same
+        argument that put the timeout here. A node that raises marks its span
+        failed on the way past and the exception continues; the node's own
+        handler decides what the *run* does about it.
+        """
         limit = self._bounds.node_timeout_seconds if limit_seconds is None else limit_seconds
-        async with asyncio.timeout(limit):
-            result = await work()
-        if not isinstance(result, NodeResult):
-            raise NodeContractViolated(context={"returned": type(result).__name__})
-        return result
+        async with self._tracer.span(
+            node, research_id=research_id, iteration=iteration, task_key=task_key
+        ) as span:
+            try:
+                async with asyncio.timeout(limit):
+                    result = await work()
+                if not isinstance(result, NodeResult):
+                    raise NodeContractViolated(context={"returned": type(result).__name__})
+            except Exception as exc:
+                span.failed(_node_error(node, iteration, exc, task_key=task_key))
+                raise
+            span.succeeded(result.usage)
+            return result
 
     def _failure(
         self,
@@ -624,31 +710,40 @@ class _Governed:
         *,
         task_key: str | None = None,
     ) -> NodeError:
-        """A failure as the trace records it.
-
-        The message is written here, not taken from the exception: an agent's
-        exception may quote the hostile page it was reading. An ``AppError``
-        message is safe by that class's contract, so it is the one exception.
-        """
-        if isinstance(exc, TimeoutError):
-            code, message = "node_timeout", "The step did not finish within its time limit."
-        elif isinstance(exc, AppError) and _ERROR_CODE.fullmatch(exc.code):
-            code, message = exc.code, exc.message[:1000]
-        else:
-            code, message = "node_failed", f"The step raised {type(exc).__name__}."
+        """A failure as the run's state records it, logged once."""
+        error = _node_error(node, iteration, exc, task_key=task_key)
         logger.warning(
             "research node failed",
             extra={
                 "node": node.value,
                 "iteration": iteration,
                 "task_key": task_key,
-                "error_code": code,
+                "error_code": error.code,
                 "error_type": type(exc).__name__,
             },
         )
-        return NodeError(
-            node=node, iteration=iteration, code=code, message=message, task_key=task_key
-        )
+        return error
+
+
+def _node_error(
+    node: GraphNode, iteration: int, exc: Exception, *, task_key: str | None = None
+) -> NodeError:
+    """A failure in the vocabulary the state and the ledger both hold.
+
+    The message is written here, not taken from the exception: an agent's
+    exception may quote the hostile page it was reading. An ``AppError``
+    message is safe by that class's contract, so it is the one exception.
+    """
+    if isinstance(exc, TimeoutError):
+        code, message = "node_timeout", "The step did not finish within its time limit."
+    elif isinstance(exc, AppError) and _ERROR_CODE.fullmatch(exc.code):
+        code, message = exc.code, exc.message[:1000]
+    else:
+        code, message = "node_failed", f"The step raised {type(exc).__name__}."
+    # ``iteration`` is 0 before the first plan exists, which the schema allows.
+    return NodeError(
+        node=node, iteration=max(0, iteration), code=code, message=message, task_key=task_key
+    )
 
 
 def _expect[V](node: GraphNode, value: object, expected: type[V]) -> V:

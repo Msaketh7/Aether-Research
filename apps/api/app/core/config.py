@@ -174,6 +174,67 @@ class Settings(BaseSettings):
     # Last-Event-ID, which is cheaper than holding a connection open forever.
     sse_max_connection_seconds: int = 900
     sse_replay_buffer_size: int = 500
+    #: How long the Redis fan-out keeps a run's buffered events and its
+    #: counter. Long enough to cover a reconnect during a run, short enough
+    #: that a finished run is not Redis' problem: the durable log below is
+    #: what a client reconnecting hours later is served from.
+    sse_event_buffer_ttl_seconds: int = 3600
+    #: Whether every streamed event is also written to `research_events`
+    #: (ADR 0006). Turning it off makes replay depend on the Redis buffer,
+    #: which is bounded and expires - a real trade, so it is a real setting
+    #: rather than something that happens when a dependency is missing.
+    persist_research_events: bool = True
+
+    # --- observability (Phase 17) -----------------------------------------
+    #: Where spans are exported. Unset means no tracer provider is installed
+    #: at all: every span in the code still runs against the API's no-op
+    #: implementation, costs almost nothing and records nothing, which is why
+    #: there is no "is tracing on" check anywhere outside `app.observability`.
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_service_name: str = "aether-api"
+    #: Whether this process collects and exposes Prometheus metrics. On by
+    #: default: they are cheap, and a deployment that cannot see its own
+    #: failure rate is one nobody can operate.
+    metrics_enabled: bool = True
+    #: The worker serves nothing else, so it needs a socket of its own for
+    #: Prometheus to pull from. Matches `infra/monitoring/prometheus.yml`.
+    worker_metrics_port: int = 9100
+
+    #: LangSmith. Off unless asked for, and asked for here rather than through
+    #: the library's own environment variables: it reads those directly, past
+    #: the typed settings layer, so prompts and retrieved documents would
+    #: otherwise leave the system for a third party whenever a variable
+    #: happened to be set in a shell (found in Phase 9).
+    langsmith_tracing: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "aether-research"
+
+    # --- caching (Phase 15, TDD 13) ---------------------------------------
+    #: Whether anything is stored. Off still coalesces simultaneous identical
+    #: calls: doing one piece of work once and remembering it afterwards are
+    #: two different promises, and only the second is optional.
+    cache_enabled: bool = True
+    #: Short: a search answer goes stale, and the point is to avoid paying
+    #: twice for the same query inside one run or between two near each other.
+    cache_search_ttl_seconds: int = 6 * 3600
+    #: Medium: a fetched page and the article extracted from it. Both are
+    #: keyed by content, so a page that changes gets a new key rather than a
+    #: stale value - the TTL is about storage, not about correctness.
+    cache_page_ttl_seconds: int = 3 * 24 * 3600
+    #: Long: an embedding is a deterministic function of its text and model.
+    cache_embedding_ttl_seconds: int = 30 * 24 * 3600
+    #: Whether embeddings are cached at all. The key is a hash of the exact
+    #: text, so a lookup requires already having the content - but a
+    #: deployment that would rather not cache a function of user documents at
+    #: all turns it off here, and pays for the vectors again.
+    cache_embeddings: bool = True
+    #: Refuse to store a value larger than this. A whole large page is not
+    #: worth a cache key, and accepting one is how a cache fills up with the
+    #: few entries that never get read.
+    cache_max_value_bytes: int = 1024 * 1024
+    #: Entries the in-process backend holds. Bounded, because these are pages
+    #: and vectors rather than counters.
+    cache_max_entries: int = 2048
 
     # --- model gateway (ADR 0007) -----------------------------------------
     # A provider with no credential is simply not built. Ollama needs none,
@@ -192,6 +253,14 @@ class Settings(BaseSettings):
     llm_max_attempts: int = 3
     llm_retry_base_delay_seconds: float = 0.5
     llm_retry_max_delay_seconds: float = 8.0
+    #: Whether a run under a cost ceiling may call a model the registry does
+    #: not price. Refused by default (Phase 16): a run whose spend cannot be
+    #: measured cannot be held to a limit, and the limit is the promise. The
+    #: refusal fails over to the next model in the chain, so a chain with one
+    #: priced model still works. Turn it off for a deployment that would
+    #: rather run unpriced models and accept an unenforceable ceiling.
+    require_priced_models: bool = True
+
     #: Fifty parallel researchers become this many concurrent calls and the
     #: rest queue (TDD 6.3). Without it, fan-out becomes a rate-limit wall.
     llm_max_concurrent_calls: int = 8
@@ -279,6 +348,7 @@ class Settings(BaseSettings):
         "anthropic_api_key",
         "tavily_api_key",
         "brave_api_key",
+        "langsmith_api_key",
         "github_token",
         "s3_access_key_id",
         "s3_secret_access_key",

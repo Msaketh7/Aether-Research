@@ -57,11 +57,16 @@ async def test_validation_details_are_keyed_by_the_field_the_client_sent(client:
 
 
 async def test_a_not_implemented_capability_says_so(client: AsyncClient):
-    """501 rather than an empty 200: 'not built yet' must be distinguishable."""
-    response = await client.get(f"{API}/evaluations")
+    """501 rather than an empty 200: 'not built yet' must be distinguishable.
+
+    Asserted against a capability that genuinely has not landed. This used to
+    point at `/evaluations`, which Phase 18 implemented - and the test failing
+    was the correct signal that it had.
+    """
+    response = await client.get(f"{API}/settings")
 
     assert response.status_code == 501
-    assert response.json()["error"]["code"] == "evaluations_not_implemented"
+    assert response.json()["error"]["code"] == "settings_not_implemented"
 
 
 async def test_unexpected_exceptions_do_not_leak_internals(

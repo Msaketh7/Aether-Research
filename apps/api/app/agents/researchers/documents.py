@@ -28,7 +28,7 @@ from app.agents.nodes import NodeResult
 from app.agents.outputs import MAX_QUERIES_PER_SUBTASK, SearchQueries
 from app.agents.prompting import render
 from app.agents.schemas import SourceRef, SubtaskAssignment, TaskOutcome
-from app.core.enums import AgentName
+from app.core.enums import AgentName, SourceType
 from app.core.logging import get_logger
 from app.db.repositories.documents import SqlAlchemyDocumentRepository
 from app.db.session import Database
@@ -124,6 +124,7 @@ class DocumentResearchAgent(ModelAgent):
                 task_key=assignment.subtask.key,
                 iteration=assignment.subtask.iteration,
                 sources=tuple(sources[: assignment.source_allowance]),
+                queries=tuple(queries),
             ),
             usage=usage,
         )
@@ -164,4 +165,7 @@ def _ref(hit: RetrievedChunk, assignment: SubtaskAssignment) -> SourceRef:
         task_key=assignment.subtask.key,
         title="",
         url=hit.chunk.text.source_url,
+        # An attached document, by construction: this researcher is given no
+        # network tools and reads only the corpus the user uploaded.
+        source_type=SourceType.UPLOAD,
     )

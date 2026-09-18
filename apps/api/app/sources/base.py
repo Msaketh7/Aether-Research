@@ -25,10 +25,12 @@ import random
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
+from app.cache.keys import CacheNamespace
+from app.cache.store import ResponseCache
 from app.core.enums import ToolName, ToolStatus
 from app.core.logging import get_logger
 from app.sources.errors import ToolError
@@ -112,6 +114,27 @@ class ToolResult[T]:
     latency_ms: int
     attempts: int = 1
     summary: Mapping[str, object] = field(default_factory=dict)
+    #: True when nothing left the process for this call - it was served from
+    #: the cache, or it joined a call already in flight. ``attempts`` is then
+    #: 0, because no request was attempted.
+    cache_hit: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CachePlan[T]:
+    """How one tool call is cached, handed to the executor with the call.
+
+    Passed in rather than wrapped around, so a hit is still a recorded tool
+    call. A cache that made calls disappear from the ledger would make the
+    trace disagree with the run: the agent did ask, and the answer it acted on
+    came from somewhere.
+    """
+
+    cache: ResponseCache
+    namespace: CacheNamespace
+    key: tuple[Any, ...]
+    encode: Callable[[T], Any]
+    decode: Callable[[Any], T]
 
 
 class ToolExecutor:
@@ -147,8 +170,71 @@ class ToolExecutor:
         operation: Callable[[], Awaitable[T]],
         *,
         summarize: Callable[[T], Mapping[str, object]] | None = None,
+        plan: CachePlan[T] | None = None,
     ) -> ToolResult[T]:
-        """Execute one tool call under the shared policy."""
+        """Execute one tool call under the shared policy, cached where asked.
+
+        The cache wraps the *whole* bounded call, retries included: a value
+        that took three attempts to obtain is still one value, and the point
+        of caching it is that the next caller does not repeat any of them.
+        """
+        if plan is None:
+            return await self._execute(tool_name, request, operation, summarize)
+
+        started = time.perf_counter()
+        fresh: list[ToolResult[T]] = []
+
+        async def produce() -> T:
+            result = await self._execute(tool_name, request, operation, summarize)
+            fresh.append(result)
+            return result.value
+
+        cached = await plan.cache.through(
+            plan.namespace,
+            *plan.key,
+            loader=produce,
+            encode=plan.encode,
+            decode=plan.decode,
+        )
+        if fresh:
+            # This caller did the work, and ``_execute`` already recorded it.
+            return fresh[-1]
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        summary = dict(summarize(cached.value)) if summarize else {}
+        await self._recorder.record(
+            ToolCallRecord(
+                tool_name=tool_name,
+                status=ToolStatus.OK,
+                request=_summarize_request(request),
+                response_summary=summary,
+                # What the caller waited: a lookup, or the call it joined.
+                latency_ms=latency_ms,
+                attempt=1,
+                cache_hit=True,
+            )
+        )
+        logger.debug(
+            "tool call served without a request",
+            extra={"tool": tool_name.value, "origin": cached.origin},
+        )
+        return ToolResult(
+            value=cached.value,
+            tool_name=tool_name,
+            latency_ms=latency_ms,
+            attempts=0,
+            summary=summary,
+            cache_hit=True,
+        )
+
+    async def _execute[T](
+        self,
+        tool_name: ToolName,
+        request: ToolInput,
+        operation: Callable[[], Awaitable[T]],
+        summarize: Callable[[T], Mapping[str, object]] | None,
+    ) -> ToolResult[T]:
+        """Actually make the call: bounded, retried, classified, recorded."""
         request_summary = _summarize_request(request)
         last_error: ToolError | None = None
 

@@ -47,21 +47,22 @@ they share models, migrations and configuration.
 
 ## 3. Module boundaries (`apps/api/app/`)
 
-| Module           | Owns                                                   |
-| ---------------- | ------------------------------------------------------ |
-| `api/`           | HTTP routing, request/response DTOs, SSE relay         |
-| `core/`          | settings, logging, errors, typed config                |
-| `auth/`          | sessions, password hashing, authz helpers              |
-| `research/`      | run lifecycle, orchestration entry, status transitions |
-| `agents/`        | LangGraph nodes and agent implementations              |
-| `retrieval/`     | `Retriever` interface, hybrid search, reranking        |
-| `sources/`       | connectors, fetch pipeline, SSRF guard, dedupe         |
-| `evidence/`      | claim/evidence/contradiction domain logic              |
-| `reports/`       | report schema, synthesis assembly, citation validation |
-| `evaluations/`   | benchmark runner, metrics, thresholds                  |
-| `observability/` | tracing, metrics, structured logging                   |
-| `db/`            | SQLAlchemy models, repositories, migrations            |
-| `workers/`       | queue consumer, job lifecycle, checkpoint recovery     |
+| Module           | Owns                                                               |
+| ---------------- | ------------------------------------------------------------------ |
+| `api/`           | HTTP routing, request/response DTOs, SSE relay                     |
+| `core/`          | settings, logging, errors, typed config                            |
+| `auth/`          | sessions, password hashing, authz helpers                          |
+| `research/`      | run lifecycle, status transitions, the progress event bus          |
+| `agents/`        | LangGraph nodes and agent implementations                          |
+| `retrieval/`     | `Retriever` interface, hybrid search, reranking                    |
+| `sources/`       | connectors, fetch pipeline, SSRF guard, dedupe                     |
+| `evidence/`      | claim/evidence/contradiction domain logic                          |
+| `reports/`       | report schema, synthesis assembly, citation validation             |
+| `evaluations/`   | benchmark runner, metrics, thresholds                              |
+| `observability/` | tracing, metrics, structured logging                               |
+| `cache/`         | content-hash response cache, TTL policy, single-flight             |
+| `db/`            | SQLAlchemy models, repositories, migrations                        |
+| `workers/`       | queue consumer, job lifecycle, checkpoint recovery, event emission |
 
 Modules talk through typed service interfaces. A module never imports another
 module's ORM models directly.

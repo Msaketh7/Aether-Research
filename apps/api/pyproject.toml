@@ -35,6 +35,15 @@ dependencies = [
   "langgraph>=1.2.11",
   "langgraph-checkpoint-postgres>=3.1.2",
   "psycopg[binary]>=3.3.5",
+  # Observability (Phase 17). The OTel *API* is a hard dependency because the
+  # code opens spans unconditionally - against a no-op implementation when
+  # nothing is configured, which is what keeps the hot path free of "is
+  # tracing on" checks. The SDK and the exporter are imported only inside
+  # `configure_tracing`, so a process with no collector never loads them.
+  "opentelemetry-api>=1.30.0",
+  "opentelemetry-sdk>=1.30.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+  "prometheus-client>=0.21.0",
 ]
 
 [dependency-groups]

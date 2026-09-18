@@ -1,16 +1,29 @@
 """Research progress events and the broker that relays them (ADR 0006).
 
 The worker publishes; the API relays to whichever client holds the SSE
-connection. Two properties the frontend already depends on are guaranteed here:
+connection. Three properties the frontend depends on are guaranteed here:
 
 * ``seq`` is monotonic per run, so a client reconnecting with ``Last-Event-ID``
   is replayed from exactly where it stopped rather than from the beginning;
 * every event carries the run ``status``, so the UI never needs a second
-  request to keep its header correct.
+  request to keep its header correct;
+* a terminal event is the last one, so the stream can be closed rather than
+  held open on a run that will never change again.
 
-Phase 2 ships the in-memory broker, which is correct for a single API process.
-Phase 14 adds the Redis pub/sub implementation behind the same interface, which
-is what makes multiple API replicas possible.
+**A caller hands over a draft and gets back a numbered event.** Numbering is
+not something a publisher does for itself: the number has to be unique per run
+across every process that emits, and the only component that can promise that
+is the one that stores the event. Phase 2 had ``next_seq`` and ``publish`` as
+two calls, which is a sequence allocated in one place and used in another - and
+that is exactly the shape that produces a duplicate ``id:`` the first time two
+processes emit for one run. ``publish`` now does both, and ``relay`` is what a
+broker that numbers elsewhere uses to hand an already-numbered event to a
+transport.
+
+Phase 2 shipped the in-memory broker, which is correct for a single API
+process. Phase 14 adds the Redis pub/sub transport and the durable log behind
+the same interface (``app.research.eventbus``), which is what makes multiple
+API replicas - and a worker in a different process - possible.
 """
 
 from __future__ import annotations
@@ -20,52 +33,31 @@ import contextlib
 from collections import defaultdict, deque
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.enums import RunStatus
+from app.core.enums import ResearchEventType, RunStatus
+
+__all__ = [
+    "EventBroker",
+    "EventDraft",
+    "InMemoryEventBroker",
+    "ResearchEvent",
+    "ResearchEventType",
+]
 
 
-class ResearchEventType(StrEnum):
-    """Mirrors ``RESEARCH_EVENT_TYPES`` in ``@aether/shared-types``."""
+class EventDraft(BaseModel):
+    """An event before it has a number. What a publisher constructs."""
 
-    RESEARCH_STARTED = "research_started"
-    PLANNER_STARTED = "planner_started"
-    PLANNER_COMPLETED = "planner_completed"
-    SUBTASK_STARTED = "subtask_started"
-    SEARCH_STARTED = "search_started"
-    SOURCE_FOUND = "source_found"
-    SOURCE_PROCESSED = "source_processed"
-    SOURCES_PROGRESS = "sources_progress"
-    CLAIM_EXTRACTED = "claim_extracted"
-    EVIDENCE_PROGRESS = "evidence_progress"
-    VERIFICATION_STARTED = "verification_started"
-    CONTRADICTION_FOUND = "contradiction_found"
-    CRITIC_STARTED = "critic_started"
-    ADDITIONAL_RESEARCH_REQUESTED = "additional_research_requested"
-    ITERATION_STARTED = "iteration_started"
-    SYNTHESIS_STARTED = "synthesis_started"
-    CITATION_CHECK = "citation_check"
-    REPORT_COMPLETED = "report_completed"
-    RESEARCH_FAILED = "research_failed"
-    RESEARCH_CANCELLED = "research_cancelled"
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @property
-    def is_terminal(self) -> bool:
-        """After a terminal event the stream is closed deliberately."""
-        return self in _TERMINAL_EVENTS
-
-
-_TERMINAL_EVENTS = frozenset(
-    {
-        ResearchEventType.REPORT_COMPLETED,
-        ResearchEventType.RESEARCH_FAILED,
-        ResearchEventType.RESEARCH_CANCELLED,
-    }
-)
+    type: ResearchEventType
+    run_id: UUID
+    status: RunStatus
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResearchEvent(BaseModel):
@@ -81,22 +73,15 @@ class ResearchEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def build(
-        cls,
-        *,
-        seq: int,
-        type: ResearchEventType,
-        run_id: UUID,
-        status: RunStatus,
-        payload: dict[str, Any] | None = None,
-    ) -> ResearchEvent:
+    def of(cls, draft: EventDraft, *, seq: int, at: datetime | None = None) -> ResearchEvent:
+        """Number a draft. ``at`` is the store's timestamp where there is one."""
         return cls(
             seq=seq,
-            type=type,
-            run_id=run_id,
-            at=datetime.now(UTC),
-            status=status,
-            payload=payload or {},
+            type=draft.type,
+            run_id=draft.run_id,
+            at=at or datetime.now(UTC),
+            status=draft.status,
+            payload=dict(draft.payload),
         )
 
     def to_sse_frame(self) -> str:
@@ -113,10 +98,21 @@ class ResearchEvent(BaseModel):
 class EventBroker(Protocol):
     """What the API and the worker need from the progress bus."""
 
-    async def publish(self, event: ResearchEvent) -> None: ...
+    async def publish(self, draft: EventDraft) -> ResearchEvent:
+        """Number the draft, record it, deliver it, and return what was sent."""
+        ...
+
+    async def relay(self, event: ResearchEvent) -> None:
+        """Deliver an event that already has its number.
+
+        Used by a broker that numbers events somewhere else - the durable one
+        numbers them in Postgres - to hand the result to its transport. A
+        caller emitting progress uses ``publish``.
+        """
+        ...
 
     async def history(self, run_id: UUID, *, after_seq: int = 0) -> list[ResearchEvent]:
-        """Buffered events after ``after_seq``, for reconnect replay."""
+        """Events after ``after_seq``, oldest first, for reconnect replay."""
         ...
 
     def subscribe(self, run_id: UUID) -> AsyncGenerator[ResearchEvent, None]:
@@ -128,17 +124,16 @@ class EventBroker(Protocol):
         """
         ...
 
-    async def next_seq(self, run_id: UUID) -> int:
-        """Allocate the next sequence number for a run."""
-        ...
+    async def close(self) -> None: ...
 
 
 class InMemoryEventBroker:
     """Single-process broker.
 
-    Correct while the API runs as one process, which is the Phase 2 topology.
-    A bounded buffer per run caps memory: a long deep run can emit thousands of
-    events, and holding all of them forever would be a slow leak.
+    Correct while the API runs as one process and nothing else emits, which is
+    the Phase 2 topology and the shape of a test. A bounded buffer per run caps
+    memory: a long deep run can emit thousands of events, and holding all of
+    them forever would be a slow leak.
     """
 
     def __init__(self, buffer_size: int = 500) -> None:
@@ -150,14 +145,20 @@ class InMemoryEventBroker:
         self._sequences: dict[UUID, int] = defaultdict(int)
         self._lock = asyncio.Lock()
 
-    async def next_seq(self, run_id: UUID) -> int:
+    async def publish(self, draft: EventDraft) -> ResearchEvent:
         async with self._lock:
-            self._sequences[run_id] += 1
-            return self._sequences[run_id]
+            self._sequences[draft.run_id] += 1
+            event = ResearchEvent.of(draft, seq=self._sequences[draft.run_id])
+        await self.relay(event)
+        return event
 
-    async def publish(self, event: ResearchEvent) -> None:
+    async def relay(self, event: ResearchEvent) -> None:
         async with self._lock:
             self._buffers[event.run_id].append(event)
+            # A relayed event was numbered elsewhere; keep the local counter
+            # ahead of it so a later publish on this broker cannot reuse a
+            # number that has already been sent.
+            self._sequences[event.run_id] = max(self._sequences[event.run_id], event.seq)
             subscribers = list(self._subscribers[event.run_id])
 
         for queue in subscribers:
