@@ -946,7 +946,7 @@ than placeholders: a `SourceRef` now carries its type, publisher and chunk
 count, and a `TaskOutcome` carries the queries it actually issued. All
 defaulted, so a checkpoint written before this phase still loads.
 
-Migration 0010 adds `research_events`. 20 new tests, 1056 total.
+Migration 0010 adds `research_events`. 26 new tests, 1069 total.
 
 Found while building and running it:
 
@@ -1008,8 +1008,8 @@ encoding, a value over the size ceiling: each degrades to computing the value
 again. A research run must never fail because an optimisation was unavailable,
 and the policy layer enforces that rather than trusting each backend to.
 
-15 new tests, 1071 total. No cache-hit rate is reported yet: that is a metric,
-and metrics are Phase 17.
+37 new tests, 1106 total. No cache-hit rate is reported yet: that is a
+metric, and metrics are Phase 17.
 
 Found while building and running it:
 
@@ -1075,7 +1075,7 @@ cannot be held to a limit. It fails over to the next model in the chain, and
 unpriced models and accept an unenforceable ceiling. Every model in the shipped
 registry is priced, the self-hosted ones explicitly at zero.
 
-Migration 0011 makes two columns nullable. 40 new tests, 1111 total.
+Migration 0011 makes two columns nullable. 30 new tests, 1136 total.
 
 Found while building and running it:
 
@@ -1153,8 +1153,8 @@ built from the typed key and handed to `tracing_context`, so the decision
 exists exactly once and an unset key means no client and no tracing.
 
 Four dependencies added: `opentelemetry-api`, `opentelemetry-sdk`,
-`opentelemetry-exporter-otlp-proto-http`, `prometheus-client`. 23 new tests,
-1134 total.
+`opentelemetry-exporter-otlp-proto-http`, `prometheus-client`. 22 new tests,
+1158 total.
 
 Found while building and running it:
 
@@ -1222,7 +1222,7 @@ one that matters most is the question with no good public answer: the correct
 behaviour there is a low-coverage report that says so, and a run that produces
 confident claims is the failure being tested for.
 
-25 new tests, 1159 total.
+25 new tests, 1183 total.
 
 **No benchmark has been executed.** The suite is built and tested against
 scripted agents; running it needs model credentials and spends real money on
