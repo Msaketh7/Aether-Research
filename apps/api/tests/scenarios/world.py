@@ -266,6 +266,12 @@ class ScriptedBrain:
     asked: list[type[BaseModel]] = field(default_factory=list)
     prompt_tokens: int = 120
     completion_tokens: int = 60
+    #: Seconds this provider takes to answer one call. Zero for the
+    #: scenarios, which are about what a run does and not how long it
+    #: takes; the load test (Phase 21) sets it, because a system measured
+    #: against an instant provider is a system with no concurrency to
+    #: overlap and therefore no queueing to observe.
+    latency_seconds: float = 0.0
     _rules: list[tuple[type[BaseModel], str | None, Rule]] = field(default_factory=list)
     _failures: list[tuple[type[BaseModel], list[BaseException | None]]] = field(
         default_factory=list
@@ -361,6 +367,8 @@ class ScriptedBrain:
         self.prompts.append(request)
         self.asked.append(schema)
         self._maybe_fail(schema)
+        if self.latency_seconds:
+            await asyncio.sleep(self.latency_seconds)
         value = await self._answer(request, schema)
         if not isinstance(value, schema):
             raise StructuredOutputInvalid(
@@ -377,7 +385,7 @@ class ScriptedBrain:
                     prompt_tokens=self.prompt_tokens, completion_tokens=self.completion_tokens
                 ),
                 finish_reason="stop",
-                latency_ms=7,
+                latency_ms=int(self.latency_seconds * 1000) or 7,
             ),
         )
 

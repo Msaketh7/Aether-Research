@@ -17,3 +17,9 @@ apps/web/next-env.d.ts
 # turns *why* into _why_ - would change what a model reads without changing the
 # version that is supposed to identify it. See docs/ADRs/0015-agent-outputs.md.
 apps/api/app/agents/prompts
+
+# Load-test output (Phase 21). Written by `make loadtest`, not by hand: a
+# formatter that rewrapped it would put the committed artefact permanently out
+# of step with what the next run produces. The prose version is
+# docs/load-testing.md, which is formatted.
+data/loadtest

@@ -26,6 +26,7 @@ failed because a counter did is a worse outcome than a missing number.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +34,8 @@ from app.core.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - import cost, see the note below
     from prometheus_client import CollectorRegistry
+
+    from app.models.limiter import Saturation
 
 logger = get_logger(__name__)
 
@@ -43,6 +46,12 @@ logger = get_logger(__name__)
 REQUEST_BUCKETS = (0.005, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 CALL_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0)
 RUN_BUCKETS = (5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
+
+#: Waiting for the gateway's own concurrency slot (Phase 21). A fourth
+#: ladder because the interesting region is *below* a call's: zero is the
+#: common case and a tenth of a second already means the ceiling is biting,
+#: which `CALL_BUCKETS` would put in its first bucket and hide.
+SLOT_BUCKETS = (0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
 
 CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
@@ -65,6 +74,8 @@ class Metrics:
     llm_duration: Any
     llm_tokens: Any
     llm_cost: Any
+    llm_slot_wait: Any
+    llm_in_flight: Any
     tool_calls: Any
     tool_duration: Any
     cache_lookups: Any
@@ -149,6 +160,17 @@ def build_metrics(namespace: str = "aether") -> Metrics:
             "and are counted as uncosted on the run instead.",
             ("provider", "model"),
         ),
+        llm_slot_wait=histogram(
+            "llm_slot_wait_seconds",
+            "Time a model call spent queued behind this process's own "
+            "concurrency ceiling, before the provider was contacted.",
+            SLOT_BUCKETS,
+            (),
+        ),
+        llm_in_flight=gauge(
+            "llm_calls_in_flight",
+            "Model calls holding a gateway slot right now.",
+        ),
         tool_calls=counter(
             "tool_calls_total",
             "Tool call attempts, by tool and outcome.",
@@ -220,3 +242,31 @@ def observe_pool(metrics: Metrics, engine: Any) -> None:
         metrics.db_pool.labels(state="overflow").set(max(0, pool.overflow()))
     except Exception as exc:  # pragma: no cover - pool internals vary by dialect
         logger.debug("could not read the database pool", extra={"error": str(exc)})
+
+
+def bind_levels(metrics: Metrics, *, engine: Any, saturation: Callable[[], Saturation]) -> None:
+    """Have the level gauges read themselves whenever Prometheus collects.
+
+    The API calls ``observe_pool`` from inside its own ``/metrics`` handler,
+    so its pool gauge is fresh on every scrape. The worker has no handler -
+    ``prometheus_client`` serves the registry from a thread of its own - so a
+    gauge nothing writes reads as zero forever, which is the difference
+    between *not measured* and *zero* that this repository refuses to blur.
+    A collect-time callback is how a process without a request exports a level,
+    and it runs on the scrape thread, which is why every reader below is a
+    plain attribute access and nothing here awaits.
+    """
+    pool = engine.pool
+    metrics.db_pool.labels(state="in_use").set_function(lambda: _level(pool.checkedout))
+    metrics.db_pool.labels(state="idle").set_function(lambda: _level(pool.checkedin))
+    metrics.db_pool.labels(state="overflow").set_function(lambda: max(0.0, _level(pool.overflow)))
+    metrics.llm_in_flight.set_function(lambda: float(saturation().in_flight))
+
+
+def _level(read: Callable[[], int]) -> float:
+    """A pool counter, or zero if this dialect's pool does not keep it."""
+    try:
+        return float(read())
+    except Exception as exc:  # pragma: no cover - pool internals vary by dialect
+        logger.debug("could not read a pool level", extra={"error": str(exc)})
+        return 0.0

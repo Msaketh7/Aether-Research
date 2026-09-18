@@ -256,6 +256,26 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Model-call queueing (our ceiling, not theirs)",
+      "description": "Time a model call spent waiting for one of this process's llm_max_concurrent_calls slots, and how many calls hold one. A rising p95 here is our own throttle, not a slow provider: llm_call_duration_seconds starts once the slot is held. If this climbs and call latency does not, raise the ceiling or add a worker; if both climb, it is the provider.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 59 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(aether_llm_slot_wait_seconds_bucket[5m])))",
+          "legendFormat": "slot wait p95",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(aether_llm_calls_in_flight)",
+          "legendFormat": "calls in flight",
+          "refId": "B"
+        }
+      ]
     }
   ]
 }

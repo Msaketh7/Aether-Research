@@ -50,6 +50,7 @@ from app.models.errors import (
     StructuredOutputInvalid,
 )
 from app.models.gateway import LLMGateway
+from app.models.limiter import ConcurrencyLimiter, Saturation, SlotObserver
 from app.models.providers import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.models.recording import (
     CallRecorder,
@@ -106,6 +107,7 @@ def build_gateway(
     recorder: CallRecorder | None = None,
     cache: ResponseCache | None = None,
     budget: BudgetGuard | None = None,
+    slot_observer: SlotObserver | None = None,
 ) -> LLMGateway:
     """Assemble the gateway from configuration.
 
@@ -127,6 +129,7 @@ def build_gateway(
         request_timeout_seconds=settings.llm_request_timeout_seconds,
         retry_base_delay_seconds=settings.llm_retry_base_delay_seconds,
         retry_max_delay_seconds=settings.llm_retry_max_delay_seconds,
+        slot_observer=slot_observer,
     )
 
 
@@ -141,6 +144,7 @@ __all__ = [
     "Completion",
     "CompletionChunk",
     "CompletionRequest",
+    "ConcurrencyLimiter",
     "ContextWindowExceeded",
     "EmbeddingPurpose",
     "EmbeddingResult",
@@ -169,6 +173,8 @@ __all__ = [
     "RoutingDecision",
     "RunBudgetGuard",
     "RunSpend",
+    "Saturation",
+    "SlotObserver",
     "StructuredCompletion",
     "StructuredOutputInvalid",
     "TokenUsage",

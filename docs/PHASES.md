@@ -34,8 +34,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 18  | Evaluation framework       | Done     |
 | 19  | Testing                    | Done     |
 | 20  | Security                   | Done     |
-| 21  | Load testing               | **Next** |
-| 22  | Optimization               | Planned  |
+| 21  | Load testing               | Done     |
+| 22  | Optimization               | **Next** |
 | 23  | Infrastructure             | Planned  |
 | 24  | CI/CD                      | Planned  |
 | 25  | Documentation              | Planned  |
@@ -1447,14 +1447,91 @@ Playwright journeys, 21 total - one of which is sign-out, because that was the
 half a unit test would have let through. Everything is green; nothing is skipped
 except the pgvector and Redis tests that skip everywhere on this machine.
 
-## Phase 21 — Load testing · **Next**
+## Phase 21 — Load testing · **Done**
 
 Locust or k6 scenarios at 10, 25, 50 and 100 concurrent research jobs. Measure
 throughput, queue depth, completion rate, P50/P95/P99, database and Redis
 utilisation, worker utilisation, LLM throttling. **Do not fake performance
 numbers** — generate benchmark reports from actual tests.
 
-## Phase 22 — Optimization · Planned
+_Landed:_ two load tests, because there are two ceilings, plus the instrument
+that was missing to measure the third thing the phase asks for. The measured
+report is [`docs/load-testing.md`](load-testing.md) and the raw artefact is
+`data/loadtest/results.json`. **185 research runs were executed to produce
+it.**
+
+**The pipeline arm** (`make loadtest`) offers 10, 25, 50 and 100 jobs at once
+to a real worker with four execution slots, against real Postgres, the real
+queue and lease, the real graph, all nine real agents, the real toolbelt behind
+its SSRF guard, real ingestion, real retrieval and the real projections. It
+scripts the same two things the scenario suite scripts and for the same reason:
+the model, behind the real gateway at a declared 0.5 s per call, and the socket,
+behind the real guarded client. Provider latency is therefore an _input_,
+printed beside every number it produced - a load test that made real calls would
+measure a vendor's queue rather than this system's, cost hundreds of dollars a
+profile, and not be reproducible.
+
+**The surface arm** (`make loadtest-api-local`, or `make loadtest-api` against a
+deployment) is Locust, driving the reads the frontend actually issues from
+simulated users who each register their own account. Locust is fetched by
+`uv run --with locust` rather than added to the lockfile, the arrangement
+`make audit` already uses for `pip-audit`.
+
+**LLM throttling needed an instrument that did not exist.** The gateway has
+always held a concurrency semaphore, and a call that waited nine seconds behind
+it was indistinguishable from a slow provider in every record this repository
+keeps - `latency_ms` is the provider's own measure and starts once the slot is
+held. `ConcurrencyLimiter` wraps the semaphore with the clock either side of the
+acquire: same acquire, same fairness, plus `gateway.saturation` for a load test
+and an `llm_slot_wait_seconds` histogram and `llm_calls_in_flight` gauge for
+Grafana, which has a panel for them. Every acquisition is observed, the
+immediate ones included, because a histogram fed only the waits reports a
+healthy median while the system queues.
+
+What the measurement says:
+
+- **100% completion at every load.** 185 offered, 185 completed, none lost.
+- **Throughput flattens at about 39 runs/min** on this machine at four slots.
+  The rise from 22 is the ramp disappearing into the average, not a scaling
+  gain.
+- **The run does not get slower; the queue gets longer.** Execution P50 is
+  6.6 s at ten jobs and 6.1 s at a hundred, and its P95 at a hundred is _lower_
+  than at ten. Queue wait is what grows, linearly: 14.5 s to 75.8 s. That is
+  the behaviour ADR 0001 was chosen for, stated as a measurement.
+- **The worker's slots are the ceiling and nothing else is close.** Slots busy
+  in 100% of samples at a hundred jobs; the database peaked at 5 connections of
+  15 available and never touched overflow; **of 1,480 model calls, zero waited
+  for a gateway slot** and peak in-flight was 4 of 8. Raising
+  `llm_max_concurrent_calls` would do nothing - the lever is worker concurrency
+  or a second worker.
+
+**And it found a defect, which is what it is for.** Peak queue depth reached
+**4,662 entries for 100 offered jobs**. The reconciliation sweep asks Postgres
+which runs should be on the queue, and a run still `queued` because the worker
+is busy answers yes on every sweep; neither the sweep nor the queue
+deduplicates. Nothing runs twice - the claim is a conditional update and the
+duplicate is dropped - but `queue_depth` is the metric on the dashboard and the
+obvious signal for scaling workers, and it is wrong by a factor of 46; under
+Redis the list grows without bound for as long as the backlog lasts. Every test
+of the sweep passes and the scenario suite drives it fifteen ways, because none
+of them holds a backlog open for longer than the grace period. It is fixed and
+re-measured in Phase 22.
+
+Two defects in the load test itself, both found by running it and both fixed
+before it landed, because each would have produced a plausible wrong number:
+the generated addresses used `.invalid`, which `email-validator` rejects as a
+special-use domain, so every registration 422'd and - since the development
+identity answers an unauthenticated request in `test` - the load silently ran as
+one shared user against one shared rate-limit bucket, measuring contention no
+deployment has; and it called `/auth/login` after `/auth/register`, which
+already signs the account in, doubling the spend on the bucket that exists to
+bound brute force. The run now closes the development identity outright, so a
+broken sign-in fails loudly instead of measuring the wrong system.
+
+32 new API tests, and the four declared loads are asserted against this document
+so that dropping one fails the build.
+
+## Phase 22 — Optimization · **Next**
 
 Profile first. Then, based on measurements: parallel agent execution, async I/O,
 connection pooling, Redis caching, search-result deduplication, embedding

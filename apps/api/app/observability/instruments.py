@@ -114,6 +114,19 @@ def observe_cache(metrics: Metrics, namespace: CacheNamespace, origin: str) -> N
         _guard("cache_lookups")
 
 
+def observe_slot_wait(metrics: Metrics, seconds: float) -> None:
+    """One model call's wait for the gateway's concurrency slot (Phase 21).
+
+    Every acquisition is observed, the immediate ones included. A histogram
+    fed only the waits would report a healthy median while the system queued,
+    because the calls that did not queue would not be in the denominator.
+    """
+    try:
+        metrics.llm_slot_wait.observe(seconds)
+    except Exception:
+        _guard("llm_slot_wait")
+
+
 def observe_retrieval(metrics: Metrics, *, seconds: float, results: int) -> None:
     try:
         metrics.retrieval_duration.observe(seconds)

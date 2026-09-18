@@ -30,6 +30,7 @@ import uuid
 from pathlib import Path
 
 import sqlalchemy as sa
+from tests.support.postgres import apply_migrations
 
 from app.core.config import Settings
 from app.core.enums import DocumentFormat, SourceType
@@ -239,13 +240,7 @@ def migrate(database_url: str, *, with_vector: bool) -> None:
     the same rule as the suite: both branches where pgvector exists, the
     relational one where it does not.
     """
-    from alembic import command
-    from alembic.config import Config
-
-    config = Config(str(API_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(API_ROOT / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url)
-    command.upgrade(config, "heads" if with_vector else "core@head")
+    apply_migrations(database_url, with_vector=with_vector)
 
 
 async def has_pgvector(database: Database) -> bool:

@@ -69,6 +69,16 @@ class ResearchWorker:
         """Whether this worker is executing anything. Drives nothing; reported."""
         return bool(self._tasks)
 
+    @property
+    def active(self) -> int:
+        """Runs this worker is executing right now, out of ``worker_concurrency``.
+
+        The numerator of worker utilisation. Reported, never acted on: the
+        semaphore is what bounds the work, and a second count used to make
+        decisions would be the one that drifts.
+        """
+        return len(self._tasks)
+
     def stop(self) -> None:
         """Ask the loop to finish. Safe from a signal handler."""
         self._stopping.set()

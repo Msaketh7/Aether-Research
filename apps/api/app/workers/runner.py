@@ -50,13 +50,14 @@ from app.observability.instruments import (
     MeteredCallRecorder,
     MeteredToolRecorder,
     observe_cache,
+    observe_slot_wait,
 )
 from app.observability.ledger import (
     DatabaseCallRecorder,
     DatabaseToolRecorder,
     DatabaseTracer,
 )
-from app.observability.metrics import build_metrics, serve_metrics
+from app.observability.metrics import bind_levels, build_metrics, serve_metrics
 from app.observability.tracing import build_langsmith_client, configure_tracing
 from app.research.cancellation import PostgresCancellationProbe
 from app.research.eventbus import build_event_broker
@@ -139,7 +140,23 @@ async def build_worker(settings: Settings) -> AsyncIterator[ResearchWorker]:
     tool_recorder: Any = DatabaseToolRecorder(trace, LoggingToolRecorder())
     if metrics is not None:
         tool_recorder = MeteredToolRecorder(metrics, tool_recorder)
-    gateway = build_gateway(settings, cache=cache, recorder=budget, budget=budget)
+    # The gateway's own concurrency ceiling is a throttle, and a call that
+    # waited behind it is indistinguishable from a slow provider in every
+    # other record - `latency_ms` starts once the slot is held (Phase 21).
+    gateway = build_gateway(
+        settings,
+        cache=cache,
+        recorder=budget,
+        budget=budget,
+        slot_observer=(
+            None if metrics is None else lambda waited: observe_slot_wait(metrics, waited)
+        ),
+    )
+    if metrics is not None:
+        # Levels, read when Prometheus collects. Until this existed the
+        # worker's pool gauge read zero forever: nothing in this process
+        # serves `/metrics`, so nothing was writing it.
+        bind_levels(metrics, engine=database.engine, saturation=lambda: gateway.saturation)
     dependencies = build_dependencies(
         settings,
         gateway=gateway,

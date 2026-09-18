@@ -78,6 +78,38 @@ migrate-check: ## Verify migrations are reversible against a throwaway database
 benchmark-retrieval: ## Measure the retrieval strategies and the chunk size (ADR 0013)
 	cd $(API) && uv run python scripts/with_test_db.py uv run python scripts/benchmark_retrieval.py
 
+# Load testing (Phase 21). Two halves, because there are two ceilings.
+#
+# `loadtest` drives the research pipeline: the declared profiles from
+# app/loadtest/profiles.py against a real worker, a real graph and real
+# Postgres, with the model and the socket scripted. It provisions its own
+# throwaway database and needs no credentials, so it runs anywhere.
+#
+# `loadtest-api` drives the HTTP surface with Locust, against an API that is
+# already running (`make api`). Locust is fetched into a throwaway environment
+# rather than added to the lockfile, the same way `make audit` fetches
+# pip-audit: neither belongs in every developer's virtualenv.
+.PHONY: loadtest
+loadtest: ## Load test the research pipeline (provisions its own database)
+	cd $(API) && uv run python scripts/with_test_db.py uv run python scripts/loadtest.py $(ARGS)
+
+USERS ?= 20
+SPAWN ?= 2
+RUNTIME ?= 60s
+HOST ?= http://localhost:8000
+
+.PHONY: loadtest-api
+loadtest-api: ## Load test the HTTP surface with Locust (needs `make api` running)
+	mkdir -p data/loadtest
+	cd $(API) && uv run --with locust locust -f loadtest/locustfile.py --headless --host $(HOST) --users $(USERS) --spawn-rate $(SPAWN) --run-time $(RUNTIME) --csv ../../data/loadtest/api $(ARGS)
+
+# The same load against a stack this target stands up and throws away: a
+# throwaway Postgres, a migrated schema and a uvicorn on a spare port. What to
+# run when there is no deployment to point at, which is the usual case here.
+.PHONY: loadtest-api-local
+loadtest-api-local: ## Load test the HTTP surface against a disposable local stack
+	cd $(API) && uv run python scripts/with_test_db.py bash scripts/loadtest_api.sh
+
 # Every case is a real research run against real providers, so this spends
 # real money and needs Postgres and credentials. It exits non-zero when a
 # gated metric regresses, which is what CI gates on (Phase 18).

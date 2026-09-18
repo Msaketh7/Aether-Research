@@ -394,3 +394,31 @@ SKIP_REASON = (
     "No Postgres available. Set AETHER_TEST_DATABASE_URL, or install the "
     "PostgreSQL client tools so a throwaway cluster can be created."
 )
+
+
+#: What to migrate to when pgvector is unavailable: the head of the relational
+#: line. Migrations form two branches (see 0003_document_ingestion); only the
+#: ``vector`` line needs the extension.
+CORE_ONLY = "core@head"
+
+
+def apply_migrations(database_url: str, *, with_vector: bool) -> None:
+    """Build the schema the way every other environment builds it.
+
+    A provisioned cluster has no schema at all, so a script pointed at one has
+    to migrate before it can do anything - and it has to migrate rather than
+    call ``Base.metadata.create_all``, which would test the models against
+    themselves and prove nothing about the migrations that build the real
+    thing.
+
+    Alembic's ``env.py`` calls ``asyncio.run`` itself, so a caller inside a
+    running loop must hand this to a thread.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "heads" if with_vector else CORE_ONLY)

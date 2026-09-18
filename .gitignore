@@ -40,3 +40,8 @@ Thumbs.db
 
 # next.js
 apps/web/tsconfig.tsbuildinfo
+
+# load test output (Phase 21). The pipeline sweep's results.json and results.md
+# are committed - they are the measurement. Locust's CSVs are per-invocation
+# scratch and the numbers that matter from them live in docs/load-testing.md.
+data/loadtest/api_*.csv

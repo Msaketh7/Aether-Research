@@ -68,6 +68,7 @@ from app.models.base import (
 )
 from app.models.budget import BudgetGuard, NullBudgetGuard
 from app.models.errors import CapabilityNotSupported, ModelError, ModelNotConfigured
+from app.models.limiter import ConcurrencyLimiter, Saturation, SlotObserver
 from app.models.recording import CallRecorder, LlmCallRecord
 from app.models.registry import ModelRegistry, ModelSpec
 from app.models.routing import ModelRouter, RoutingDecision
@@ -97,6 +98,7 @@ class LLMGateway:
         request_timeout_seconds: float = 60.0,
         retry_base_delay_seconds: float = 0.5,
         retry_max_delay_seconds: float = 8.0,
+        slot_observer: SlotObserver | None = None,
     ) -> None:
         self._registry = registry
         self._router = router
@@ -104,7 +106,7 @@ class LLMGateway:
         self._recorder = recorder
         self._cache = cache or disabled_cache()
         self._budget = budget or NullBudgetGuard()
-        self._semaphore = asyncio.Semaphore(max_concurrent_calls)
+        self._slots = ConcurrencyLimiter(max_concurrent_calls, observer=slot_observer)
         self._max_attempts = max_attempts_per_model
         self._timeout = request_timeout_seconds
         self._base_delay = retry_base_delay_seconds
@@ -213,7 +215,7 @@ class LLMGateway:
         error_code: str | None = None
         started = asyncio.get_running_loop().time()
 
-        async with self._semaphore:
+        async with self._slots.slot():
             try:
                 async for chunk in provider.stream(request):
                     if chunk.usage is not None:
@@ -237,6 +239,16 @@ class LLMGateway:
                     error_code=error_code,
                     run_id=run_id,
                 )
+
+    @property
+    def saturation(self) -> Saturation:
+        """How hard this process's own throttle is being pushed (Phase 21).
+
+        The gateway is the only place that knows how many calls are queued
+        behind the concurrency ceiling, and "slow model" and "eight calls
+        deep in our own queue" are different problems with different fixes.
+        """
+        return self._slots.saturation
 
     def cost_of(self, completion: Completion) -> float | None:
         """What a finished call cost, or ``None`` when its price is not declared.
@@ -313,7 +325,7 @@ class LLMGateway:
             started = asyncio.get_running_loop().time()
             try:
                 self._budget.authorise(run_id=run_id, spec=spec, operation="embed")
-                async with self._semaphore:
+                async with self._slots.slot():
                     async with asyncio.timeout(self._timeout):
                         result = await provider.embed(outstanding, model=spec.model_id)
             except (ModelError, TimeoutError) as exc:
@@ -525,7 +537,7 @@ class LLMGateway:
                     # allowance does not first queue behind eight calls it is
                     # not allowed to make.
                     self._budget.authorise(run_id=run_id, spec=spec, operation=operation, role=role)
-                    async with self._semaphore:
+                    async with self._slots.slot():
                         async with asyncio.timeout(self._timeout):
                             completion = await invoke(provider, request)
                 except (ModelError, TimeoutError) as exc:
