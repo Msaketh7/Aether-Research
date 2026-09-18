@@ -187,18 +187,51 @@ Hard-won; do not rediscover them.
 - **A few tests make real DNS and HTTP calls.** The SSRF guard's allow-path test
   resolves a real hostname (it skips cleanly with no DNS). Everything else uses
   `httpx2.MockTransport`.
-- **The repo path contains a space.** Vitest's `forks` pool cannot hand off to
-  workers, so the config pins `pool: 'threads'`. On this machine the default
-  thread count then loses the race too - every worker reports "Timeout waiting
-  for worker to respond" and the run ends with `no tests`. `npx vitest run
---maxWorkers=2` is green in about 90 seconds; it is a local resource limit, not
-  a broken test.
+- **The repo lives under OneDrive, and its path contains a space.** Desktop is
+  redirected into OneDrive, so all 77k files - `.venv` (31k) and `node_modules`
+  (42k) among them - are tracked by the sync engine, which has burned over seven
+  hours of CPU. Moving the repo to `C:/dev/aether-research` was tried, measured
+  and reverted by choice; if it is ever moved again, two repairs follow, and
+  neither is optional: `npm ci`, because npm's workspace links are absolute
+  junctions and every `@aether/*` import fails silently at collection time
+  without it, and `uv sync`, because the editable install records a path. The
+  space in the path is why Vitest's `forks` pool cannot hand off to workers, so
+  the config pins `pool: 'threads'`.
+- **Vitest needs its worker count capped, and the config does it.** Vitest
+  defaults to one worker per core; that many jsdom environments starting at once
+  on this CPU makes every worker miss its startup handshake, and the run reports
+  `no tests` rather than a failure. `maxWorkers: 4` is set in
+  `apps/web/vitest.config.mts`; `npm run test` is green in about 40 seconds.
 - **npm cold resolve crashes** (arborist bug in the vitest peer graph) without
   `--legacy-peer-deps`. `npm ci` from the committed lockfile is fine.
 - **The API suite takes longer than twenty minutes here**, so running it in one
   command times out. Split it - three roughly equal slices of `tests/test_*.py`
   plus `tests/checkpointer` - and run the slices one at a time; two at once
-  contend for the machine and both get slower.
+  contend for the machine and both get slower. Prefer running only the modules a
+  change touches, and the whole suite once at the end.
+- **Every pytest invocation costs about seventy seconds before it runs a test**,
+  so the number of invocations matters more than the number of tests. Measured:
+  `import app.main` 20-28 s (17.9 s of that is the Anthropic and OpenAI SDKs
+  building their Pydantic models - CPU, not disk: reading all of openai's
+  bytecode takes 0.39 s), whole-suite collection 47 s, throwaway Postgres cluster
+  8.4 s + 3 s of migrations. `uv run` adds a further 2.8 s per command over
+  calling `.venv/Scripts/python.exe` directly.
+- **This machine's CPU is downclocked to about a third of its capability.**
+  `% Processor Performance` reads 68-71 against a nominal 2.1 GHz on an i5-13420H
+  that boosts to 4.6, and it never turbos even under load; a pure-Python loop
+  runs 3-4x slower than the chip should manage. Everything here is
+  single-threaded CPU-bound Python, so estimate accordingly - and if timings ever
+  improve sharply, the power mode was changed rather than the code.
+- **A killed pytest run leaks its Postgres cluster.** The harness destroys the
+  throwaway cluster on a clean exit only, so every `timeout`-killed run leaves an
+  `aether-pg-*` directory in `%TEMP%` - twenty of them, 1.4 GB, accumulated in one
+  session. The postmasters do exit; the data directories do not. Sweep them with
+  `Remove-Item "$env:TEMP\aether-pg-*" -Recurse -Force`, and never kill a
+  `postgres.exe` without checking its `-D` first: the real PostgreSQL 17 service
+  is running on 5432 and looks the same in a process list.
+- **Windows Defender exclusions are the user's to set, not the agent's.** They
+  are security settings and need an elevated shell; recommended entries are the
+  repository root and `%TEMP%\aether-pg-*`.
 - Bash heredocs fail above roughly 8 KB — use the Write tool for larger files.
 - **Ollama is installed but not running**, and has pulled neither the registry's
   chat model nor `nomic-embed-text`. Live embeddings are unverified here; tests

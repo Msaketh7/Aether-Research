@@ -7,9 +7,16 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     environment: 'jsdom',
-    // The forks pool fails to hand off to workers when the repository path
-    // contains a space (Windows); threads is unaffected and is faster here.
+    // Threads rather than forks: measurably faster here, and forks additionally
+    // failed to hand off to workers while the repository lived under a path
+    // containing a space (Windows). It no longer does, but threads stays.
     pool: 'threads',
+    // Vitest defaults to one worker per core. On a laptop CPU that is being
+    // downclocked, spinning up that many jsdom environments at once makes every
+    // worker miss its startup handshake and the whole run reports `no tests` -
+    // which looks like a broken suite rather than an exhausted machine. Four is
+    // green and no slower, and CI runners have four cores anyway.
+    maxWorkers: 4,
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     // Playwright owns e2e/; Vitest must not try to run those specs.
