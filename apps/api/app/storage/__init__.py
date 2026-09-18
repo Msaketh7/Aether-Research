@@ -12,6 +12,8 @@ what makes the provider replaceable.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.storage.base import (
@@ -43,9 +45,28 @@ from app.storage.keys import (
     user_uploads_prefix,
     validate_key,
 )
-from app.storage.s3 import S3ObjectStorage
+
+if TYPE_CHECKING:
+    from app.storage.s3 import S3ObjectStorage
 
 logger = get_logger(__name__)
+
+
+def __getattr__(name: str) -> Any:
+    """Expose ``S3ObjectStorage`` without importing aioboto3 to do it (PEP 562).
+
+    The S3 backend pulls in aioboto3, and botocore's service model loading costs
+    about 2.6 s of import time. Under ``APP_ENV=test`` the filesystem backend is
+    the one selected, so a test process would pay that for a module it never
+    constructs. The name stays importable from this package - it is in
+    ``__all__``, and the S3 suite imports it from here - it just arrives on
+    first use rather than on first import.
+    """
+    if name == "S3ObjectStorage":
+        from app.storage.s3 import S3ObjectStorage
+
+        return S3ObjectStorage
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_object_storage(settings: Settings) -> ObjectStorage:
@@ -73,6 +94,8 @@ def build_object_storage(settings: Settings) -> ObjectStorage:
             settings.storage_local_path,
             max_bytes=settings.max_artifact_bytes,
         )
+
+    from app.storage.s3 import S3ObjectStorage
 
     return S3ObjectStorage(settings)
 

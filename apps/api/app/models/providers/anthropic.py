@@ -20,11 +20,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator, Sequence
-from typing import Any, NoReturn
-
-import anthropic
-from anthropic import AsyncAnthropic
-from anthropic.types import MessageParam
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from app.core.enums import LlmProvider
 from app.core.logging import get_logger
@@ -50,6 +46,14 @@ from app.models.errors import (
     StructuredOutputInvalid,
 )
 
+if TYPE_CHECKING:
+    # Type-checking only. The SDK builds several thousand Pydantic models on
+    # import - about ten seconds of CPU - and a deployment routed at OpenAI or
+    # Ollama, or a test process that never constructs this provider, should not
+    # pay for it. The runtime imports are inside the two functions that need
+    # them; see ``__init__`` below.
+    from anthropic.types import MessageParam
+
 logger = get_logger(__name__)
 
 #: Anthropic's stop reasons mapped onto the vocabulary the gateway records.
@@ -74,6 +78,11 @@ class AnthropicProvider:
         base_url: str | None = None,
         http_client: Any | None = None,
     ) -> None:
+        # Imported here rather than at module scope - see the TYPE_CHECKING
+        # block above. A provider is only constructed when a credential exists
+        # for it, so this is the point at which the cost is actually owed.
+        from anthropic import AsyncAnthropic
+
         self._client = AsyncAnthropic(
             api_key=api_key,
             base_url=base_url,
@@ -114,9 +123,10 @@ class AnthropicProvider:
                 **self._payload(request),
                 output_format=schema,
             )
-        except anthropic.APIError as exc:
-            _fail(exc, model=request.model, operation="generate_structured")
         except Exception as exc:
+            # One handler, not two: the `anthropic.APIError` branch that used to
+            # sit above this did exactly the same thing, and `_fail` already
+            # sorts SDK errors by type.
             _fail(exc, model=request.model, operation="generate_structured")
 
         completion = self._to_completion(message, started)
@@ -259,11 +269,14 @@ def _messages(messages: Sequence[ChatMessage]) -> list[MessageParam]:
     an operator-authority channel that a prompt must not be able to reach into
     by accident.
     """
+    # A dict literal rather than `MessageParam(...)`: the TypedDict constructor
+    # only builds a dict, and spelling it this way keeps the SDK out of this
+    # module's runtime imports. The annotation still checks the shape.
     return [
-        MessageParam(
-            role="assistant" if message.role is MessageRole.ASSISTANT else "user",
-            content=message.content,
-        )
+        {
+            "role": "assistant" if message.role is MessageRole.ASSISTANT else "user",
+            "content": message.content,
+        }
         for message in messages
         if message.role is not MessageRole.SYSTEM
     ]
@@ -275,6 +288,11 @@ def _fail(exc: Exception, *, model: str, operation: str) -> NoReturn:
     The classification is the product here. A 429 and a 401 are both
     `APIStatusError`; one should be retried and the other must never be.
     """
+    # Both imports are local for the same reason the client's is. Reaching here
+    # means a call was made, so the SDK is already in ``sys.modules`` and this
+    # costs a dictionary lookup.
+    import anthropic
+
     from app.core.errors import AppError
 
     if isinstance(exc, AppError):

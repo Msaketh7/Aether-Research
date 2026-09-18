@@ -40,9 +40,15 @@ api-lint: ## Format check, lint and typecheck the API
 	cd $(API) && uv run ruff check .
 	cd $(API) && uv run mypy app
 
+# Test workers. The suite is a mix of CPU-bound imports and Postgres round
+# trips, and each worker provisions a database of its own, so this trades memory
+# for wall clock. Four measured best on a 12-thread laptop; `make api-test
+# WORKERS=0` runs it serially, which is what to do when a failure needs reading.
+WORKERS ?= 4
+
 .PHONY: api-test
-api-test: ## Run the API test suite
-	cd $(API) && uv run pytest
+api-test: ## Run the API test suite in parallel (WORKERS=0 for serial)
+	cd $(API) && uv run pytest $(if $(filter 0,$(WORKERS)),,-n $(WORKERS))
 
 # Migrations form two branches: `core` (relational) and `vector` (needs
 # pgvector). See apps/api/migrations/versions/0003_document_ingestion.py.

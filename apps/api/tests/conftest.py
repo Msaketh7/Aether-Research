@@ -94,6 +94,14 @@ def settings(postgres: ProvisionedDatabase | None, tmp_path: Path) -> Settings:
         log_level="warning",
         database_url=postgres.url,
         storage_local_path=tmp_path / "object-storage",
+        # No provider credentials, whatever the developer's shell holds. Two
+        # reasons, and the second is why it is pinned here rather than left to
+        # chance: a suite whose provider list depends on the machine it runs on
+        # is not hermetic, and constructing a provider imports its SDK - about
+        # sixteen seconds of CPU that a test process should never spend, since
+        # every test that needs a gateway passes its own provider in.
+        openai_api_key=None,
+        anthropic_api_key=None,
         sse_heartbeat_seconds=1,
         sse_max_connection_seconds=2,
         max_concurrent_runs_per_user=3,

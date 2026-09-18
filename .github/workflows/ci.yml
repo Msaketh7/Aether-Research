@@ -124,8 +124,11 @@ jobs:
       # packages/shared-types and fail if the Python and TypeScript
       # vocabularies have diverged, and the schema tests, which run against the
       # database Alembic actually built.
+      # Parallel, with a database per worker on the service container (see
+      # tests/support/postgres.py). Two workers, not four: the hosted runner has
+      # two cores, and oversubscribing only adds contention.
       - name: Tests
-        run: uv run pytest
+        run: uv run pytest -n 2
 
   e2e:
     name: End-to-end smoke tests

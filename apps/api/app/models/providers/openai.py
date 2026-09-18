@@ -27,9 +27,6 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, NoReturn
 
-import openai
-from openai import AsyncOpenAI
-
 from app.core.enums import LlmProvider
 from app.core.logging import get_logger
 from app.models.base import (
@@ -75,6 +72,15 @@ class OpenAIProvider:
         base_url: str | None = None,
         http_client: Any | None = None,
     ) -> None:
+        # Imported here, not at module scope: the SDK builds several thousand
+        # Pydantic models on import, which costs about six seconds of CPU. A
+        # deployment that routes to Anthropic or Ollama should not pay it, and
+        # neither should a test process that never constructs this provider -
+        # and a provider is only constructed when a credential exists for it
+        # (``app.models.build_providers``). Measured in Phase 13's slow-phase
+        # investigation; the same reasoning is why LlamaIndex is lazy (ADR 0012).
+        from openai import AsyncOpenAI
+
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -258,6 +264,11 @@ def _message(message: ChatMessage) -> dict[str, str]:
 
 
 def _fail(exc: Exception, *, model: str, operation: str) -> NoReturn:
+    # Both imports are local for the same reason the client's is. Reaching here
+    # means a call was made, so the SDK is already in ``sys.modules`` and this
+    # costs a dictionary lookup.
+    import openai
+
     from app.core.errors import AppError
 
     if isinstance(exc, AppError):

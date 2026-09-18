@@ -47,6 +47,7 @@ dev = [
   "moto[s3,server]>=5.1.0",
   "types-aioboto3[s3]>=15.5.0",
   "types-defusedxml>=0.7",
+  "pytest-xdist>=3.8.0",
 ]
 
 [build-system]

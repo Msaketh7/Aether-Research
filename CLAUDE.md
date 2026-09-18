@@ -23,7 +23,7 @@ untrusted-content handling, measured evaluation, observability, deployment.
 | Layer                         | State                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Frontend (`apps/web`)         | Complete product surface, 100 unit + 18 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                        |
-| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 1036 tests.                                                                                                                                                                                                                              |
+| API (`apps/api`)              | FastAPI: research surface, file uploads, SSE, authorisation, error contract, health probes. 1043 tests.                                                                                                                                                                                                                              |
 | Database                      | PostgreSQL, 21 tables, Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). A run's row carries the worker's lease (ADR 0017); UUIDs come back as `uuid.UUID`, never the driver's subclass.                                                                          |
 | Object storage                | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                                 |
 | Model gateway                 | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`.                                                                                                                                           |
@@ -204,28 +204,41 @@ Hard-won; do not rediscover them.
   `apps/web/vitest.config.mts`; `npm run test` is green in about 40 seconds.
 - **npm cold resolve crashes** (arborist bug in the vitest peer graph) without
   `--legacy-peer-deps`. `npm ci` from the committed lockfile is fine.
-- **The API suite takes longer than twenty minutes here**, so running it in one
-  command times out. Split it - three roughly equal slices of `tests/test_*.py`
-  plus `tests/checkpointer` - and run the slices one at a time; two at once
-  contend for the machine and both get slower. Prefer running only the modules a
-  change touches, and the whole suite once at the end.
-- **Every pytest invocation costs about seventy seconds before it runs a test**,
-  so the number of invocations matters more than the number of tests. Measured:
-  `import app.main` 20-28 s (17.9 s of that is the Anthropic and OpenAI SDKs
-  building their Pydantic models - CPU, not disk: reading all of openai's
-  bytecode takes 0.39 s), whole-suite collection 47 s, throwaway Postgres cluster
-  8.4 s + 3 s of migrations. `uv run` adds a further 2.8 s per command over
-  calling `.venv/Scripts/python.exe` directly.
+- **The API suite runs in parallel and takes about eleven minutes.** `make
+api-test` uses four xdist workers; `WORKERS=0` makes it serial, which is what
+  to do when a failure needs reading. Every worker provisions a database of its
+  own - a whole cluster locally, a separate database on the server when
+  `AETHER_TEST_DATABASE_URL` is set - because the suite truncates every table
+  between tests and workers sharing one would delete each other's rows. It was
+  over twenty minutes serially, which no single command could finish here; still
+  prefer running only the modules a change touches.
+- **The heavy third-party imports are deliberately lazy; keep them that way.**
+  The Anthropic SDK costs about 10 s to import, OpenAI 6.5 s and aioboto3 2.6 s,
+  all of it CPU spent building Pydantic models rather than reading files. Each is
+  imported inside the function that needs it, so `import app.main` is about 6 s
+  rather than 28, and a test process imports none of them. Moving any of these
+  back to module scope puts 20 s on every pytest run and every worker start. The
+  test settings pin the provider credentials to `None` for the same reason, and
+  because a suite whose provider list depends on the developer's shell is not
+  hermetic.
+- **A pytest invocation still costs about forty-five seconds before it runs a
+  test**, so the number of invocations matters more than the number of tests.
+  Collection is 35 s and a throwaway cluster 8.4 s plus 3 s of migrations.
+  `uv run` adds a further 2.8 s per command over calling
+  `.venv/Scripts/python.exe` directly.
 - **This machine's CPU is downclocked to about a third of its capability.**
   `% Processor Performance` reads 68-71 against a nominal 2.1 GHz on an i5-13420H
   that boosts to 4.6, and it never turbos even under load; a pure-Python loop
   runs 3-4x slower than the chip should manage. Everything here is
   single-threaded CPU-bound Python, so estimate accordingly - and if timings ever
   improve sharply, the power mode was changed rather than the code.
-- **A killed pytest run leaks its Postgres cluster.** The harness destroys the
-  throwaway cluster on a clean exit only, so every `timeout`-killed run leaves an
-  `aether-pg-*` directory in `%TEMP%` - twenty of them, 1.4 GB, accumulated in one
-  session. The postmasters do exit; the data directories do not. Sweep them with
+- **A killed pytest run used to leak its Postgres cluster**, and the harness now
+  clears up after itself: each cluster records the pid that created it, and every
+  run stops and removes the ones whose process is gone. `pg_ctl` starts a
+  _detached_ postmaster, so killing pytest leaves a running server - which is why
+  the test is whether the owner is alive, not whether the cluster is. Twenty of
+  them and 1.4 GB accumulated in one session before this existed. If one ever
+  survives anyway, sweep with
   `Remove-Item "$env:TEMP\aether-pg-*" -Recurse -Force`, and never kill a
   `postgres.exe` without checking its `-D` first: the real PostgreSQL 17 service
   is running on 5432 and looks the same in a process list.
