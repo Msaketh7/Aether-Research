@@ -39,6 +39,19 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  /** Optional; the API derives one from the address when it is blank. */
+  name?: string;
+}
+
+/** Registration returns the same body as sign-in: the account is signed in. */
 export interface LoginResponse {
   user: User;
+}
+
+/** How many other devices `DELETE /auth/sessions` signed out. */
+export interface RevokedSessions {
+  revoked: number;
 }

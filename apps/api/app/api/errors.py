@@ -65,6 +65,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=error_body(code=exc.code, message=exc.message, details=exc.details),
+            # `Retry-After` on a 429 is the only part of a refusal a client can
+            # act on automatically, so it travels with the envelope.
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

@@ -25,6 +25,45 @@ test('a user can sign in and reach the dashboard', async ({ page }) => {
   await expect(page.getByTestId('demo-banner')).toBeVisible();
 });
 
+test('a new user can register, arrive signed in, and sign out again', async ({ page }) => {
+  // The first acceptance criterion, and the one Phase 20 made real. Sign-out is
+  // the half worth a journey: it used to be a link to /login, which left the
+  // session alive on the server and one person's research in the browser cache
+  // for whoever used the machine next.
+  await page.goto('/login');
+  await page.getByRole('link', { name: 'Create one' }).click();
+
+  await expect(page).toHaveURL(/\/register$/);
+  await page.getByLabel('Email').fill('ada@example.com');
+  await page.getByLabel('Password').fill('correct-horse-battery-staple');
+  await page.getByTestId('register-submit').click();
+
+  await expect(page).toHaveURL(/\/dashboard$/);
+
+  const logout = page.waitForResponse(
+    (response) => response.url().includes('/auth/logout') && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByTestId('sign-out').click();
+
+  await logout;
+  await expect(page).toHaveURL(/\/login$/);
+});
+
+test('registration renders the API refusal beside the field that caused it', async ({ page }) => {
+  // The password policy lives on the server, so the page's job is to put the
+  // server's answer where the user is typing rather than to hold a second copy
+  // of the rules.
+  await page.goto('/register');
+
+  await page.getByLabel('Email').fill('ada@example.com');
+  await page.getByLabel('Password').fill('short');
+  await page.getByTestId('register-submit').click();
+
+  await expect(page.getByText(/at least 12 characters/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/register$/);
+});
+
 test('the dashboard lists research history with measured totals', async ({ page }) => {
   await page.goto('/dashboard');
 

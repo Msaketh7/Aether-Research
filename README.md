@@ -288,7 +288,7 @@ exist, and none of these numbers has been measured yet.
 | Vectors          | pgvector (inside Postgres)                                    | "Search by meaning" lives in the same database, one less moving part                                    |
 | Object storage   | S3                                                            | Cheap warehouse for big files (PDFs, saved pages, reports)                                              |
 | Cache / queue    | Redis + Celery/ARQ                                            | The ticket queue for jobs and a fast cache to avoid repeat work                                         |
-| Auth             | Auth.js + PostgreSQL                                          | Handles sign-up / login ourselves so we understand and control it                                       |
+| Auth             | Argon2id + server-side sessions in PostgreSQL                 | Sign-up and login owned rather than rented, and a session that can be revoked per device (ADR 0021)     |
 | Observability    | OpenTelemetry, Prometheus, Grafana, LangSmith                 | Tracing, metrics, dashboards, and AI-call inspection, so we can see what happened                       |
 | Infra            | Docker, AWS, Terraform, GitHub Actions                        | Packaging, cloud hosting, "infrastructure written as code", and automated deploys                       |
 
@@ -365,11 +365,24 @@ persists, publishes a started event and pushes a job. That boundary is an
 explicit `JobQueue` interface rather than a function call, so it cannot later be
 "optimised" into an inline await ([ADR 0001](docs/ADRs/0001-modular-monolith.md)).
 
-**Authorisation is enforced before authentication exists.** Every research
+**Authorisation was enforced before authentication existed.** Every research
 object carries a `user_id`, every repository read is scoped by it, and a run
 belonging to someone else returns the same `run_not_found` as one that never
-existed - a 403 would confirm the id. Real sessions land in Phase 20; the
-ownership rules are tested now rather than retrofitted onto a leaking surface.
+existed - a 403 would confirm the id. Those rules were tested from the first
+endpoint, so when Phase 20 put real sessions underneath them there was nothing
+to retrofit.
+
+**A session is a row; the cookie is a pointer to it.** Argon2id passwords, a
+256-bit token stored as a SHA-256, and an `HttpOnly` cookie - so "sign this
+device out" takes effect on that device's next request. Not a JWT, which either
+cannot be revoked or is checked against a list on every request, at which point
+it is a session with extra cryptography
+([ADR 0021](docs/ADRs/0021-sessions-not-tokens.md)). Every request also draws on
+a token bucket keyed by identity and route class, declared once on the whole
+`/api/v1` router so a route added later is limited before anybody remembers to;
+and every authentication event and research mutation lands in an append-only
+audit log, written outside the request's transaction so a refused login still
+leaves a record.
 
 **One error envelope.** Every failure - validation, framework 404, dependency
 outage, unhandled exception - leaves as `ApiErrorBody`, carrying the request id
@@ -413,9 +426,10 @@ other, so this is the seam that keeps them honest.
 ```
 apps/api/app/
 ├── api/            routing, DI, error handlers, SSE relay
-│   └── v1/         health, auth, research, pending
+│   └── v1/         health, auth, research, files, settings, telemetry
 ├── core/           settings, logging, error taxonomy, enums, pagination
-├── auth/           principal resolution and ownership
+├── auth/           passwords, sessions, cookies, principal resolution
+├── security/       rate limiting, client address, audit log
 ├── research/       schemas, repository boundary, event broker, service
 ├── db/             engine, session factory, ORM models, repositories, migrations
 ├── workers/        the queue, the run's lease, and the worker process itself
@@ -491,7 +505,9 @@ variable, with no code change
 | 16    | Cost and token governance: the call ledger written, a run's ceiling enforced before the money is spent            | Done    |
 | 17    | Observability: Prometheus metrics, OpenTelemetry spans, a Grafana dashboard, a measured system panel              | Done    |
 | 18    | Evaluation: a versioned dataset, structural scorers, configurable gates, `make evaluate`                          | Done    |
-| 19+   | Testing, security, load testing, optimisation, infrastructure, CI/CD, documentation                               | Planned |
+| 19    | Testing: the fifteen end-to-end research scenarios, each driven through the whole vertical slice                  | Done    |
+| 20    | Security: authentication, per-identity rate limiting, an audit log, dependency scanning                           | Done    |
+| 21+   | Load testing, optimisation, infrastructure, CI/CD, documentation                                                  | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate
@@ -634,7 +650,7 @@ report.
 | 5   | Multi-agent, add Critic + Verifier, run researchers in parallel                               | Done        | The graph runs researchers in parallel and loops under a critic (Phase 9), and the critic, verifier and three researchers that fill it are built (Phase 10).                                                                                               |
 | 6   | Durable execution, save-points, queue, background workers, resume                             | Yes         | Runs are queued (Phase 2), save-points and resuming from them are built (Phase 9), and the worker that executes them survives a restart by resuming at the node it had not finished (Phase 13).                                                            |
 | 7   | Evaluation, the test set, the scoreboard, the release gate                                    | Not started | Only the retrieval benchmark has run (Phase 8). The test set, scoreboard and release gate are Phase 18.                                                                                                                                                    |
-| 8   | Production engineering, monitoring, rate limits, caching, load tests, security                | Partly      | Security groundwork is built: authorisation, request validation, the SSRF guard and untrusted-content handling (Phases 2-6). Caching, monitoring, rate limits and load tests are Phases 15, 17, 20 and 21.                                                 |
+| 8   | Production engineering, monitoring, rate limits, caching, load tests, security                | Partly      | Caching (15), monitoring (17) and security (20) are built: authentication, per-identity rate limiting, an audit log, the SSRF guard, untrusted-content handling and dependency scanning. Load testing is Phase 21.                                         |
 | 9   | Deployment, cloud hosting, infrastructure-as-code, automated deploys, monitoring              | Not started | Nothing is hosted or deployed (Phases 23-24). CI already runs the tests on pushes to `main` and on pull requests.                                                                                                                                          |
 
 ---

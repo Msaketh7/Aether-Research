@@ -8,10 +8,12 @@ import type {
   LoginRequest,
   LoginResponse,
   Page,
+  RegisterRequest,
   ReportResponse,
   ResearchPlan,
   ResearchRun,
   ResearchRunSummary,
+  RevokedSessions,
   SessionInfo,
   SourcesResponse,
   SystemMetrics,
@@ -29,11 +31,15 @@ import { apiRequest } from './client';
  */
 
 export const authApi = {
+  register: (body: RegisterRequest) =>
+    apiRequest<LoginResponse>('/auth/register', { method: 'POST', body }),
   login: (body: LoginRequest) => apiRequest<LoginResponse>('/auth/login', { method: 'POST', body }),
   logout: () => apiRequest<void>('/auth/logout', { method: 'POST' }),
   me: (signal?: AbortSignal) => apiRequest<User>('/auth/me', { signal }),
   sessions: () => apiRequest<SessionInfo[]>('/auth/sessions'),
   revokeSession: (id: string) => apiRequest<void>(`/auth/sessions/${id}`, { method: 'DELETE' }),
+  /** Sign out every device but this one. */
+  revokeOtherSessions: () => apiRequest<RevokedSessions>('/auth/sessions', { method: 'DELETE' }),
 };
 
 export interface ListRunsParams {

@@ -51,7 +51,8 @@ they share models, migrations and configuration.
 | ---------------- | ------------------------------------------------------------------ |
 | `api/`           | HTTP routing, request/response DTOs, SSE relay                     |
 | `core/`          | settings, logging, errors, typed config                            |
-| `auth/`          | sessions, password hashing, authz helpers                          |
+| `auth/`          | sessions, password hashing, principal resolution                   |
+| `security/`      | rate limiting, client address resolution, the audit log            |
 | `research/`      | run lifecycle, status transitions, the progress event bus          |
 | `agents/`        | LangGraph nodes and agent implementations                          |
 | `retrieval/`     | `Retriever` interface, hybrid search, reranking                    |
@@ -133,6 +134,8 @@ hope about the model.
 | Web content is untrusted data, never instructions                     | `sources/` sanitizer + prompt structure |
 | Every list query is bounded and paginated                             | repository layer                        |
 | Every research object is checked for ownership                        | `auth/` dependency                      |
+| Every request draws on a token bucket for its route class             | `security/ratelimit` on the v1 router   |
+| Every auth event and research mutation is recorded                    | `security/audit` -> `audit_log`         |
 | Run state is durable and resumable                                    | LangGraph checkpointer + Postgres       |
 
 ## 8. Delivery phases

@@ -56,6 +56,16 @@ export function useSessions() {
   });
 }
 
+export function useRegister() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: authApi.register,
+    // Registration signs the account in, so the account menu and every guarded
+    // page can render immediately instead of waiting for a `/auth/me` round trip.
+    onSuccess: (data) => queryClient.setQueryData(queryKeys.auth.me(), data.user),
+  });
+}
+
 export function useLogin() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -70,7 +80,26 @@ export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: authApi.logout,
-    onSuccess: () => queryClient.clear(),
+    // Cleared whether or not the request succeeded. The cache holds one
+    // person's research; leaving it in place after a sign-out that failed at
+    // the network would show it to whoever signs in next on this machine.
+    onSettled: () => queryClient.clear(),
+  });
+}
+
+export function useRevokeSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => authApi.revokeSession(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.auth.sessions() }),
+  });
+}
+
+export function useRevokeOtherSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: authApi.revokeOtherSessions,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.auth.sessions() }),
   });
 }
 

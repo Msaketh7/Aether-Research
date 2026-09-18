@@ -118,6 +118,21 @@ test-e2e: ## Playwright end-to-end smoke tests
 .PHONY: ci
 ci: format-check lint typecheck test api-lint api-test migrate-check ## Everything a pull request must pass
 
+# --- security --------------------------------------------------------------
+# Advisory scanning of what is actually installed, on both sides. Neither is a
+# guarantee - a database only contains what someone has reported - so this is
+# "known vulnerable dependencies", not "no vulnerable dependencies".
+#
+# `npm audit` is capped at high on purpose: the transitive dev graph of a
+# Next.js toolchain produces a steady trickle of low and moderate advisories
+# that do not reach a production bundle, and a gate that fails every week is a
+# gate people learn to skip. Container image scanning arrives with the images
+# themselves, in Phase 23.
+.PHONY: audit
+audit: ## Scan both dependency trees for known vulnerabilities
+	cd $(API) && uv run --with pip-audit pip-audit
+	npm audit --audit-level=high
+
 .PHONY: format-check
 format-check:
 	npm run format:check

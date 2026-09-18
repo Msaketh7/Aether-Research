@@ -231,3 +231,36 @@ class FeedbackCategory(StrEnum):
     CITATIONS = "citations"
     READABILITY = "readability"
     OTHER = "other"
+
+
+class AuditAction(StrEnum):
+    """What an audit row records (Phase 20).
+
+    A closed vocabulary, so the log can be queried by action rather than by
+    grepping free text, and so adding an auditable operation is a deliberate
+    edit here rather than a new string invented at a call site.
+
+    Two halves, per the threat model's repudiation control: authentication
+    events, and the research mutations that change what a user owns. Reads are
+    not audited - every request is already in the access log, and an audit
+    trail that records everything records nothing.
+    """
+
+    LOGIN = "auth.login"
+    LOGIN_FAILED = "auth.login_failed"
+    LOGOUT = "auth.logout"
+    REGISTER = "auth.register"
+    REGISTER_REJECTED = "auth.register_rejected"
+    SESSION_REVOKED = "auth.session_revoked"
+    SESSIONS_REVOKED = "auth.sessions_revoked"
+    SETTINGS_UPDATED = "account.settings_updated"
+
+    RUN_CREATED = "research.run_created"
+    RUN_CANCELLED = "research.run_cancelled"
+    RUN_FOLLOWUP = "research.run_followup"
+    FILE_UPLOADED = "research.file_uploaded"
+
+
+class AuditOutcome(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"

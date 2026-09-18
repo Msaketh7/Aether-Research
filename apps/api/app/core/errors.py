@@ -33,12 +33,17 @@ class AppError(Exception):
         code: str | None = None,
         details: dict[str, list[str]] | None = None,
         context: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.message = message or self.message
         self.code = code or self.code
         self.details = details
         # Diagnostic context for the logs only. Never serialised to a client.
         self.context = context or {}
+        # Response headers the failure itself carries - `Retry-After` on a
+        # refusal that says when to come back. Part of the contract, unlike
+        # `context`: a client that is told to wait cannot read a log line.
+        self.headers = headers
         super().__init__(self.message)
 
 
@@ -92,6 +97,15 @@ class Forbidden(AppError):
     message = "You do not have access to this resource."
 
 
+class RegistrationClosed(AppError):
+    """``REGISTRATION_ENABLED=false``. A deployment that provisions accounts
+    some other way, saying so rather than silently accepting sign-ups."""
+
+    status_code = 403
+    code = "registration_closed"
+    message = "This deployment does not accept new registrations."
+
+
 class Conflict(AppError):
     status_code = 409
     code = "conflict"
@@ -107,6 +121,22 @@ class TooManyConcurrentRuns(AppError):
     status_code = 429
     code = "too_many_concurrent_runs"
     message = "You already have the maximum number of research runs in flight."
+
+
+class RateLimited(AppError):
+    """Too many requests from one identity for one class of route (Phase 20).
+
+    Distinct from `too_many_concurrent_runs`, which is about how much work is
+    in flight rather than how fast it was asked for; a client's response to the
+    two is different, so the codes are.
+
+    Always carries `Retry-After`, because a 429 without one is an invitation to
+    retry immediately.
+    """
+
+    status_code = 429
+    code = "rate_limited"
+    message = "Too many requests. Try again shortly."
 
 
 # --- server and dependency errors ----------------------------------------

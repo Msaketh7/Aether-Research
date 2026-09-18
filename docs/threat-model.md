@@ -190,9 +190,88 @@ have no resource ceiling, only the deadline.
 
 ### 3.7 Session and transport (boundaries 1, 2)
 
-Hashed session tokens at rest, rotation on privilege change, revocation list
-visible to the user in `/settings`, `HttpOnly`/`Secure`/`SameSite` cookies,
-HSTS, CSP, `X-Content-Type-Options`, and a strict CORS origin allowlist.
+**Threat.** A session token is stolen - from a log, a database dump, a script on
+the page - and replayed; or a password is guessed, one account at a time or many
+at once.
+
+**Controls.** Hashed session tokens at rest, a revocation list the user can see
+and act on in `/settings`, `HttpOnly`/`Secure`/`SameSite` cookies, HSTS, CSP,
+`X-Content-Type-Options`, and a strict CORS origin allowlist.
+
+_Implemented in Phase 20 (ADR 0021)._ The session is a row and the cookie is a
+pointer to it, so revoking a device takes effect on that device's next request
+rather than whenever a signed token would have expired. The row stores a
+SHA-256 of a 256-bit CSPRNG token and never the token, so a database leak hands
+over no live sessions. Passwords are Argon2id at RFC 9106's low-memory profile,
+hashed in a thread so the defence cannot stall the event loop, and re-hashed at
+the next sign-in when the configured cost is raised. A wrong password and an
+unregistered address return the same status, the same code, the same message
+and - because the login path verifies against a throwaway hash when the account
+does not exist - the same amount of time. The cookie is `HttpOnly` by
+construction rather than by configuration; `SameSite=None` is refused without
+`Secure`, so no deployment can set a cookie browsers will silently drop. A
+user's live sessions are capped, so a stolen credential used repeatedly cannot
+accumulate an unbounded set of tokens.
+
+_Residual._ There is no second factor and no password reset, so a compromised
+password is a compromised account until the owner notices and signs their
+devices out. A session is not bound to an address or a device fingerprint: a
+stolen cookie works from anywhere, which is the trade every cookie session makes
+against breaking every user behind a mobile network.
+
+### 3.7.1 Abuse of the public surface (boundary 2)
+
+**Threat.** An unauthenticated caller brute-forces a password, enumerates
+addresses, or exhausts the queue and the model budget by creating runs as fast
+as the API will accept them.
+
+**Controls.** _Implemented in Phase 20 (ADR 0021)._ A token bucket per identity
+and route class, attached to the whole versioned router rather than to each
+endpoint - so a route added later is limited before anybody remembers to
+decorate it. Three classes: reading, starting work, and attempting a credential.
+The credential endpoints draw on two buckets, one keyed by the client address
+and one by the address being attempted, because an address-only limit bounds one
+attacker trying many accounts and misses many clients trying one account. Both
+are spent before any password is verified, so a refusal costs the attacker a
+round trip and this process no Argon2. The client address itself is resolved
+through a _declared_ number of proxy hops; `X-Forwarded-For` is ignored entirely
+unless a deployment says how many trusted hops append to it, because a caller
+who can choose their own bucket key has no limit at all.
+
+_Residual, and deliberate._ The limiter **fails open**: a backend it cannot
+reach allows the request and logs an error. Rate limiting protects against
+abuse, and an outage of Redis turning into an outage of the product would be the
+worse failure. The audit log still records what happened during that window.
+Registration also remains an enumeration surface - any refusal of a well-formed
+address with an acceptable password means the address is taken, whatever the
+message says. Closing that needs confirm-by-email, which needs mail delivery
+this system does not have.
+
+### 3.7.2 Repudiation (boundaries 1, 2)
+
+**Threat.** Nobody can answer "who signed in from there", "who cancelled that
+run", or "has anyone been failing to sign in to this account".
+
+**Controls.** _Implemented in Phase 20._ An append-only `audit_log`: every
+authentication event and every research mutation, with the actor, the outcome,
+the resolved client address, the user agent and the request id that ties the row
+to the logs of the request that produced it. Reads are not audited - every
+request is already in the access log, and a trail that records everything
+records nothing.
+
+Two properties make it a control rather than a table. It is written in a
+transaction of its own, because the most valuable rows are written on paths that
+end in an exception and would be rolled back with the request. And it holds no
+foreign keys: `user_id` and `resource_id` are identifiers, so the row survives
+the account or the run it names being deleted, which is when the record matters
+most.
+
+_Residual._ A failed write is logged and swallowed rather than failing the
+request, for the same reason the limiter fails open - so a database problem
+leaves a gap in the trail that only the application log covers. And the log is
+append-only by construction rather than by permission: anyone with write access
+to the database can edit it. Splitting it onto a separate credential is a
+deployment concern (ADR 0008), not an application one.
 
 ### 3.8 Development affordances reaching a real deployment
 
@@ -289,11 +368,11 @@ exposition that would read as a healthy process reporting nothing.
 
 | Threat                     | Primary control                                                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **S**poofing               | Auth.js sessions, hashed tokens, ownership checks                                                                   |
+| **S**poofing               | Argon2id passwords, opaque server-side sessions, hashed tokens, ownership checks                                    |
 | **T**ampering              | Content hashes on every document; append-only evidence trail; allowlisted checkpoint deserialization                |
-| **R**epudiation            | Audit log of auth and research mutations; full agent trace                                                          |
+| **R**epudiation            | Append-only audit log of auth and research mutations; full agent trace                                              |
 | **I**nformation disclosure | Per-user authz, secret redaction, no secrets client-side, third-party tracing off by default, bounded metric labels |
-| **D**enial of service      | Rate limits, run ceilings enforced before each call, bounded queues, timeouts, bounded metric cardinality           |
+| **D**enial of service      | Per-identity token buckets, run ceilings enforced before each call, bounded queues, timeouts, bounded cardinality   |
 | **E**levation of privilege | Least-privilege tools, no shell, scoped IAM/DB roles                                                                |
 
 ## 5. What is explicitly out of scope for v1
@@ -306,6 +385,27 @@ exposition that would read as a healthy process reporting nothing.
 
 ## 6. Verification
 
-Each control above has a corresponding test in the Phase 19 scenario list -
-notably prompt injection in source content, SSRF attempts, budget exhaustion,
-and cross-user access. A control without a test is not considered implemented.
+Each control above has a corresponding test. The Phase 19 scenario list covers
+the ones that are properties of a whole run - prompt injection in source
+content, SSRF attempts, budget exhaustion, cross-user access - and Phase 20's
+controls are held to the same rule in `tests/test_auth.py`,
+`tests/test_rate_limit.py`, `tests/test_audit.py`,
+`tests/test_client_address.py` and `tests/test_security_hardening.py`. A control
+without a test is not considered implemented.
+
+**Dependency scanning** runs in CI on both ecosystems: `pip-audit` against the
+resolved Python environment and `npm audit` against the lockfile (`make audit`
+runs both locally). Container image scanning arrives with the images, in Phase
+23; scanning an image that does not exist is a job that always passes. Neither
+scanner is a guarantee - a database contains what someone has reported - so what
+CI answers is "known vulnerable dependencies", not "no vulnerable dependencies",
+and the job reports rather than blocks, because an advisory published overnight
+is not a reason an unrelated change cannot merge.
+
+One finding is open and accepted: `nltk` (PYSEC-2026-3740, a path-sandbox bypass
+in its model-artifact load and save helpers) has no patched release. It arrives
+transitively through `llama-index-core`, and nothing in this codebase imports it
+or calls the affected APIs - chunking uses the sentence splitter, not the
+transition parser or the perceptron tagger - so the vulnerable code paths are
+unreachable here. Recorded rather than suppressed, and to be removed when a fix
+ships.

@@ -16,7 +16,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.auth.principal import DEV_PRINCIPAL, DEVELOPMENT_ENVIRONMENTS, resolve_principal
+from app.auth.principal import (
+    DEV_PRINCIPAL,
+    DEVELOPMENT_ENVIRONMENTS,
+    development_identity_allowed,
+    resolve_development_principal,
+)
 from app.core.config import Settings
 from app.core.errors import Unauthenticated
 
@@ -34,10 +39,11 @@ def test_the_development_identity_is_refused_outside_development(environment: st
     """
     settings = Settings(app_env=environment)  # type: ignore[arg-type]
 
+    assert not development_identity_allowed(settings)
     with pytest.raises(Unauthenticated) as raised:
-        resolve_principal(settings, None)
+        resolve_development_principal(settings, None)
 
-    assert raised.value.code == "authentication_not_configured"
+    assert raised.value.code == "unauthenticated"
 
 
 @pytest.mark.parametrize("environment", ["staging", "production"])
@@ -46,7 +52,7 @@ def test_the_impersonation_header_is_refused_outside_development(environment: st
     settings = Settings(app_env=environment)  # type: ignore[arg-type]
 
     with pytest.raises(Unauthenticated):
-        resolve_principal(settings, "00000000-0000-4000-8000-000000000042")
+        resolve_development_principal(settings, "00000000-0000-4000-8000-000000000042")
 
 
 @pytest.mark.parametrize("environment", sorted(DEVELOPMENT_ENVIRONMENTS))
@@ -54,7 +60,7 @@ def test_development_environments_still_resolve_a_principal(environment: str):
     """The gate must not break the development workflow it is protecting."""
     settings = Settings(app_env=environment)  # type: ignore[arg-type]
 
-    assert resolve_principal(settings, None) == DEV_PRINCIPAL
+    assert resolve_development_principal(settings, None) == DEV_PRINCIPAL
 
 
 def test_the_gate_is_an_allowlist_so_a_new_environment_is_closed():
@@ -73,7 +79,40 @@ def test_the_gate_is_an_allowlist_so_a_new_environment_is_closed():
     assert declared - DEVELOPMENT_ENVIRONMENTS, "there must be a closed environment to test"
     for environment in declared - DEVELOPMENT_ENVIRONMENTS:
         with pytest.raises(Unauthenticated):
-            resolve_principal(Settings(app_env=environment), None)  # type: ignore[arg-type]
+            resolve_development_principal(  # type: ignore[arg-type]
+                Settings(app_env=environment), None
+            )
+
+
+def test_the_dev_identity_flag_can_only_close_the_gate():
+    """``DEV_IDENTITY_ENABLED`` narrows the allowlist and cannot widen it.
+
+    It exists so the tests that exercise real sign-in can switch the
+    affordance off without pretending to be another environment. A flag that
+    could also switch it *on* would be a second way into the development
+    identity, which is the whole class of finding this file records.
+    """
+    assert development_identity_allowed(Settings(app_env="local"))
+    assert not development_identity_allowed(Settings(app_env="local", dev_identity_enabled=False))
+    for environment in ("staging", "production"):
+        settings = Settings(app_env=environment, dev_identity_enabled=True)  # type: ignore[arg-type]
+        assert not development_identity_allowed(settings)
+
+
+def test_the_cookie_is_secure_wherever_the_dev_identity_is_refused():
+    """Two gates, one list. ``Settings`` restates the development environments
+    rather than importing ``app.auth.principal`` - it is a leaf, and importing
+    back into it would invert the dependency. This is the test that keeps the
+    restatement honest."""
+    from typing import get_args
+
+    from app.core.config import Environment
+
+    for environment in get_args(Environment):
+        settings = Settings(app_env=environment)
+        insecure_cookie = not settings.session_cookie_is_secure
+        development = environment in DEVELOPMENT_ENVIRONMENTS
+        assert insecure_cookie == development, environment
 
 
 # --- CORS ------------------------------------------------------------------

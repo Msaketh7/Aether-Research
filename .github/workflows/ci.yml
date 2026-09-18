@@ -1,10 +1,11 @@
 name: CI
 
 # Runs on every pull request and on main. Scope grows with the build: today it
-# covers the frontend, the backend and the cross-language contract between
-# them. Integration tests against real Postgres and Redis, the evaluation gate
-# and container scanning are added by the phases that introduce them
-# (docs/TDD.md section 20).
+# covers the frontend, the backend, the cross-language contract between them,
+# and dependency scanning on both sides. The evaluation gate and container
+# image scanning are added by the phases that introduce them - images do not
+# exist until Phase 23, and scanning one that has not been built is a job that
+# always passes (docs/TDD.md section 20).
 
 on:
   push:
@@ -129,6 +130,47 @@ jobs:
       # two cores, and oversubscribing only adds contention.
       - name: Tests
         run: uv run pytest -n 2
+
+  # Known-vulnerable dependencies, both ecosystems. Separate from the build
+  # jobs on purpose: an advisory published overnight is not a reason the
+  # frontend tests should go red, and the two questions are answered by
+  # different people. `continue-on-error` is deliberate for the same reason -
+  # the finding is reported in the job summary and does not block a merge that
+  # has nothing to do with it. Phase 23 adds image scanning, once there are
+  # images.
+  dependencies:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: npm ci
+
+      # Capped at high: the transitive dev graph of a Next.js toolchain
+      # produces a steady trickle of low and moderate advisories that never
+      # reach a production bundle, and a gate that fires every week is one
+      # people learn to ignore.
+      - name: npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      # The resolved environment, not the declared ranges, so what is scanned
+      # is what would actually be installed.
+      - name: pip-audit
+        run: uv run --with pip-audit pip-audit
+        working-directory: apps/api
+        continue-on-error: true
 
   e2e:
     name: End-to-end smoke tests

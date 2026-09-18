@@ -345,8 +345,11 @@ The product ships **all three** modes; it is not one mode.
 
 Users can register, log in, log out, and manage sessions.
 
-- Stack: **Auth.js + PostgreSQL**: chosen deliberately so the team owns and
-  understands the login system rather than renting it.
+- Stack: **PostgreSQL, owned rather than rented**, so the login system is one
+  the team understands. Built in Phase 20 as Argon2id passwords and opaque
+  server-side sessions in an `HttpOnly` cookie - not the Auth.js integration
+  this originally named, because every client talks to the API directly and the
+  session belongs beside the ownership checks (ADR 0021).
 - Session management: a session list and a "sign out this device" control in
   `/settings`.
 - Every research object is owned by a user; the system checks ownership on every

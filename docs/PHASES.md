@@ -33,8 +33,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 17  | Observability              | Done     |
 | 18  | Evaluation framework       | Done     |
 | 19  | Testing                    | Done     |
-| 20  | Security                   | **Next** |
-| 21  | Load testing               | Planned  |
+| 20  | Security                   | Done     |
+| 21  | Load testing               | **Next** |
 | 22  | Optimization               | Planned  |
 | 23  | Infrastructure             | Planned  |
 | 24  | CI/CD                      | Planned  |
@@ -1333,17 +1333,121 @@ written by the synthesizer, not assembled from rows as Evidence and References
 are, so what the tests assert is that the writer is _given_ both sides inside
 the delimited block.
 
-## Phase 20 — Security · **Next**
+## Phase 20 — Security · **Done**
 
 Authentication, authorisation, per-user research access, rate limiting, request
 validation, SSRF prevention, prompt injection defences, content sanitisation,
 secret management, security headers, audit logs. Never expose API secrets to
 Next.js client code. Dependency scanning; container image scanning if practical.
 
-_In place:_ authorisation, request validation, secret handling, security headers
-(Phases 2–3). Authentication itself is this phase.
+_Already in place before this phase:_ authorisation and per-user access (Phase
+2), request validation (Phase 2), SSRF prevention (Phase 6), prompt-injection
+defences and content sanitisation (Phases 6 and 10, ADRs 0011 and 0015), secret
+handling and security headers (Phases 2–3).
 
-## Phase 21 — Load testing · Planned
+_Landed:_ the three controls the threat model named and the code did not have -
+**authentication**, **rate limiting** and an **audit log** - plus dependency
+scanning in CI. ADR 0021 records the decisions.
+
+**The session is a row; the cookie is a pointer to it.** Argon2id passwords at
+RFC 9106's low-memory profile, a 256-bit CSPRNG token stored as a SHA-256, and
+an `HttpOnly` cookie. Not a JWT, and the reason is FR-1: revoking a device has
+to take effect on that device's next request, and a signed token either cannot
+be revoked or is checked against a list on every request - at which point it is
+a session with extra cryptography. Register, sign in, sign out, list sessions,
+revoke one, revoke every other device; `/settings` became real at the same time,
+since it was waiting for accounts. Every hash runs in a thread: one is ~130 ms
+of deliberate CPU, and on the event loop that is 130 ms of stall for every other
+request in the process. A wrong password and an unregistered address return the
+same status, the same code, the same message and the same amount of time.
+
+**The development identity survives, narrowed twice.** `X-Aether-User` is gated
+by the `local`/`test` allowlist as before, and now also by
+`DEV_IDENTITY_ENABLED`, which can close that gate further but never open it -
+so the tests that exercise real sign-in switch it off without pretending to be
+another environment, which would also swap the queue, the cache, the storage
+backend and the rate-limit backend. One asymmetry is deliberate: a request
+carrying a cookie that does _not_ resolve is refused even in development, rather
+than falling through to the shared identity, which would make a revoked session
+look like a working one.
+
+**Rate limiting is a token bucket, and it is attached to the router.** A fixed
+window of 60 a minute allows 60 at 00:59 and 60 more at 01:00; a bucket
+separates burst from sustained rate. Three classes - reading, starting work, and
+attempting a credential - so heavy reading cannot spend the allowance that
+bounds brute force. Declared once on the whole `/api/v1` router, because a route
+added later must be limited before anybody remembers to decorate it. The
+credential endpoints draw on two buckets, one keyed by the client address and
+one by the address being attempted: an address-only limit bounds one attacker
+trying many accounts and misses many clients trying one account. Both are spent
+before any password is verified. Evaluated in Redis in one Lua script, so refill
+and spend cannot interleave across replicas. It **fails open** - a backend it
+cannot reach allows the request and logs an error - which is a trade the threat
+model records rather than a bug.
+
+**The client address is resolved through _declared_ proxy hops.**
+`X-Forwarded-For` is ignored entirely unless a deployment says how many trusted
+hops append to it. A caller who can choose their own rate-limit bucket has no
+limit, and one who can forge the address in the audit log has erased it.
+
+**The audit log is append-only and outside the request's transaction.** Every
+authentication event and every research mutation, with the actor, outcome,
+address, user agent and the request id that joins the row to the logs of the
+request that produced it. Reads are not audited - every request is already in
+the access log. Its own transaction, because the most valuable rows are written
+on paths that end in an exception; a failed write is logged and swallowed rather
+than failing the request, for the same reason the limiter fails open.
+
+Four defects, each found by running it:
+
+- **A foreign key silently discarded the record of every sign-up.** The audit
+  row was written in its own transaction while registration's user INSERT was
+  still uncommitted in the request's, so `fk_audit_log_user_id_users` refused
+  it - and the swallow-and-log policy meant the refusal appeared only as a log
+  line. The key was wrong in the first place: this table records what happened,
+  and what happened stays true after the row it names is gone. Both `user_id`
+  and `resource_id` are now identifiers rather than references, which also means
+  deleting an account no longer has to choose between cascading the trail away
+  and nulling the actor.
+- **Signing out did not sign anything out.** The account menu linked to
+  `/login`. `useLogout` existed and nothing called it, so the server session
+  stayed live and one person's cached research stayed in the browser for
+  whoever used the machine next. The cache is now cleared on `onSettled`, not
+  `onSuccess`: a sign-out that fails at the network still has to forget.
+- **`Result` has no `rowcount`.** Four revocation paths returned "how many
+  sessions did I revoke" through an attribute mypy could not see on the
+  declared type - it lives on the DBAPI cursor result. One annotated helper
+  rather than four casts.
+- **A blank cookie setting stopped the process from starting.** `.env.example`
+  ships every optional key present and blank, so `make env` produced
+  `SESSION_COOKIE_SECURE=` - which pydantic cannot read as a boolean, so a
+  process started from the shipped example refused to boot. Exactly Phase 13's
+  blank-credential finding, and caught by the test that phase added for it.
+  `SESSION_COOKIE_DOMAIN=` was the quieter half of the same bug: it parses, and
+  an empty domain would have been emitted as a bare `Domain=` on every
+  `Set-Cookie`. Both now resolve as "not configured".
+
+**Dependency scanning** runs on both ecosystems in CI and as `make audit`:
+`pip-audit` against the resolved Python environment, `npm audit` against the
+lockfile. Reported rather than blocking - an advisory published overnight is not
+a reason an unrelated change cannot merge. One finding is open and accepted and
+named in the threat model: `nltk` (PYSEC-2026-3740) has no patched release,
+arrives transitively through `llama-index-core`, and nothing here imports it.
+Container image scanning waits for Phase 23, because there are no images yet and
+scanning one that does not exist is a job that always passes.
+
+On the frontend: a registration page, sign-out wired to the endpoint, and a
+`RequireSession` guard that sends a signed-out visitor to `/login`. The guard is
+a redirect, not a boundary - the session cookie is scoped to the API, which in a
+real deployment is a different host, so Next.js middleware cannot read it. The
+boundary is the API, which refuses every request without a session.
+
+68 new API tests, 1293 total; 6 new frontend unit tests, 106 total; and two new
+Playwright journeys, 21 total - one of which is sign-out, because that was the
+half a unit test would have let through. Everything is green; nothing is skipped
+except the pgvector and Redis tests that skip everywhere on this machine.
+
+## Phase 21 — Load testing · **Next**
 
 Locust or k6 scenarios at 10, 25, 50 and 100 concurrent research jobs. Measure
 throughput, queue depth, completion rate, P50/P95/P99, database and Redis
@@ -1418,7 +1522,7 @@ screenshots, and refreshing every section once the system is complete.
 
 A new user must be able to:
 
-1. Register / log in — _Phase 20_
+1. Register / log in — **done**
 2. Create a research request — **done**
 3. Select Quick or Deep Research — **done**
 4. Submit a complex research question — **done**

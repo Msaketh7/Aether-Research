@@ -17,17 +17,19 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
+    AuditTrailDep,
     BrokerDep,
     CurrentUser,
     PageParamsDep,
+    RateLimit,
     ResearchServiceDep,
     SettingsDep,
 )
-from app.core.enums import ClaimStatus, RunStatus, SourceType
+from app.core.enums import AuditAction, ClaimStatus, RunStatus, SourceType
 from app.core.logging import get_logger
 from app.core.pagination import Page
 from app.evidence.schemas import EvidenceResponse
@@ -42,6 +44,7 @@ from app.research.schemas import (
     ResearchRun,
     ResearchRunSummary,
 )
+from app.security.ratelimit import WRITE
 from app.sources.schemas import SourcesResponse
 
 logger = get_logger(__name__)
@@ -57,14 +60,26 @@ router = APIRouter(prefix="/research", tags=["research"])
     response_model=CreateResearchResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Queue a research run",
+    # The tighter bucket: this one call commits a worker, a budget and every
+    # model call a run makes, which is not the same as a page view.
+    dependencies=[Depends(RateLimit(WRITE))],
 )
 async def create_research(
     payload: CreateResearchRequest,
     user: CurrentUser,
     service: ResearchServiceDep,
+    trail: AuditTrailDep,
 ) -> CreateResearchResponse:
     """202: the run is queued. A worker executes it (ADR 0001)."""
-    return await service.create(user.id, payload)
+    created = await service.create(user.id, payload)
+    await trail.record(
+        AuditAction.RUN_CREATED,
+        user_id=user.id,
+        resource_type="research_run",
+        resource_id=created.run_id,
+        mode=str(payload.mode),
+    )
+    return created
 
 
 @router.get("", response_model=Page[ResearchRunSummary], summary="List the caller's runs")
@@ -143,9 +158,16 @@ async def get_report(
 
 @router.post("/{run_id}/cancel", response_model=ResearchRun, summary="Cancel a run")
 async def cancel_research(
-    run_id: UUID, user: CurrentUser, service: ResearchServiceDep
+    run_id: UUID, user: CurrentUser, service: ResearchServiceDep, trail: AuditTrailDep
 ) -> ResearchRun:
-    return await service.cancel(user.id, run_id)
+    run = await service.cancel(user.id, run_id)
+    await trail.record(
+        AuditAction.RUN_CANCELLED,
+        user_id=user.id,
+        resource_type="research_run",
+        resource_id=run_id,
+    )
+    return run
 
 
 @router.post(
@@ -153,14 +175,24 @@ async def cancel_research(
     response_model=CreateResearchResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Queue a follow-up run",
+    dependencies=[Depends(RateLimit(WRITE))],
 )
 async def follow_up(
     run_id: UUID,
     payload: FollowUpRequest,
     user: CurrentUser,
     service: ResearchServiceDep,
+    trail: AuditTrailDep,
 ) -> CreateResearchResponse:
-    return await service.follow_up(user.id, run_id, payload)
+    created = await service.follow_up(user.id, run_id, payload)
+    await trail.record(
+        AuditAction.RUN_FOLLOWUP,
+        user_id=user.id,
+        resource_type="research_run",
+        resource_id=created.run_id,
+        parent_run_id=str(run_id),
+    )
+    return created
 
 
 # --- progress stream ------------------------------------------------------

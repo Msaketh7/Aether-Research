@@ -29,3 +29,8 @@ export async function GET() {
   ];
   return json(sessions);
 }
+
+/** Sign out every device but this one. Mirrors `DELETE /auth/sessions`. */
+export async function DELETE() {
+  return json({ revoked: 1 });
+}

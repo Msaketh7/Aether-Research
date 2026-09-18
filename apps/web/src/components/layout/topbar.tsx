@@ -2,6 +2,7 @@
 
 import { FlaskConical, LogOut, Plus, User as UserIcon } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -11,12 +12,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useCurrentUser } from '@/lib/api/queries';
+import { useCurrentUser, useLogout } from '@/lib/api/queries';
 import { APP_NAME } from '@/lib/api/config';
 import { ThemeToggle } from './theme-toggle';
 
 export function Topbar() {
   const { data: user } = useCurrentUser();
+  const router = useRouter();
+  const logout = useLogout();
+
+  // Sign-out is a request, not a navigation. Linking to /login used to leave
+  // the session alive on the server and the cached research in the browser -
+  // the next person at this machine would have found both (Phase 20).
+  const signOut = () => {
+    logout.mutate(undefined, { onSettled: () => router.push('/login') });
+  };
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 sm:px-6">
@@ -48,11 +58,9 @@ export function Topbar() {
           <DropdownMenuItem asChild>
             <Link href="/settings">Settings</Link>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/login">
-              <LogOut aria-hidden />
-              Sign out
-            </Link>
+          <DropdownMenuItem onSelect={signOut} data-testid="sign-out">
+            <LogOut aria-hidden />
+            Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -55,6 +55,26 @@ def test_the_shipped_env_example_parses(monkeypatch):
     assert settings.max_estimated_cost_usd == 2.00
 
 
+def test_a_blank_optional_setting_means_unset_not_empty(monkeypatch):
+    """The blank-key trap again, on two settings where it fails differently.
+
+    `make env` copies the example, in which every optional key is present and
+    blank. `SESSION_COOKIE_SECURE=` cannot be read as a boolean at all, so the
+    process refuses to start - which is how this was found, by the test above.
+    `SESSION_COOKIE_DOMAIN=` is the quieter half: it parses, and an empty domain
+    would be emitted as a bare `Domain=` on every `Set-Cookie`.
+    """
+    load_env_example(monkeypatch)
+
+    settings = Settings()
+
+    assert settings.session_cookie_secure is None
+    assert settings.session_cookie_domain is None
+    # `local` is served over plain HTTP, so the resolution is off here - and on
+    # in every environment where the development identity is refused.
+    assert settings.session_cookie_is_secure is False
+
+
 def test_a_process_started_from_the_shipped_example_builds_its_providers(monkeypatch):
     """`make env` copies .env.example, where every key is present and blank. Read
     as a value, a blank key is a `SecretStr("")` rather than an absent one - so a

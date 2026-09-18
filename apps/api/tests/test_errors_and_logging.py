@@ -10,7 +10,7 @@ import json
 import logging
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.logging import JsonFormatter, redact, request_id_var
 from tests.conftest import API
@@ -56,17 +56,35 @@ async def test_validation_details_are_keyed_by_the_field_the_client_sent(client:
     assert not any(m.startswith("Value error") for ms in details.values() for m in ms)
 
 
-async def test_a_not_implemented_capability_says_so(client: AsyncClient):
+async def test_a_not_implemented_capability_says_so(settings):
     """501 rather than an empty 200: 'not built yet' must be distinguishable.
 
-    Asserted against a capability that genuinely has not landed. This used to
-    point at `/evaluations`, which Phase 18 implemented - and the test failing
-    was the correct signal that it had.
+    This used to point at a real unbuilt endpoint - first `/evaluations`, then
+    `/settings` - and each time the test failed was the correct signal that the
+    phase implementing it had landed. Phase 20 was the last of them, so the
+    versioned surface now has nothing unbuilt on it and the assertion is made
+    against the handler instead. The contract is the same one: the taxonomy
+    still carries `NotImplementedYet`, and it still has to leave in the
+    project's envelope rather than as a framework default.
     """
-    response = await client.get(f"{API}/settings")
+    from fastapi import FastAPI
+
+    from app.api.errors import register_exception_handlers
+    from app.core.errors import NotImplementedYet
+
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/not-built")
+    async def _not_built() -> None:
+        raise NotImplementedYet("Arrives in a later phase.", code="example_not_implemented")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+        response = await http.get("/not-built")
 
     assert response.status_code == 501
-    assert response.json()["error"]["code"] == "settings_not_implemented"
+    assert response.json()["error"]["code"] == "example_not_implemented"
 
 
 async def test_unexpected_exceptions_do_not_leak_internals(

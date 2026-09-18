@@ -26,3 +26,4 @@ accepted; a changed mind means a new ADR that supersedes the old one.
 | [0018](0018-durable-event-stream.md)       | Progress events are numbered and stored in Postgres, fanned out by Redis          | Accepted |
 | [0019](0019-response-caching.md)           | What may be cached, keyed by content, and what may never be                       | Accepted |
 | [0020](0020-the-ledger-and-the-gate.md)    | A node execution is the ledger's unit; a run's ceiling is enforced at the gateway | Accepted |
+| [0021](0021-sessions-not-tokens.md)        | Opaque server-side sessions in a cookie; a rate limit that is a bucket            | Accepted |

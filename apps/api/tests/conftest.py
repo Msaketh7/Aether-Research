@@ -161,6 +161,63 @@ async def client(settings: Settings) -> AsyncIterator[AsyncClient]:
 
 
 @pytest.fixture
+def strict_settings(settings: Settings) -> Settings:
+    """Test configuration with the development identity switched off.
+
+    Not a different ``app_env``: that also selects the queue, the cache, the
+    storage backend and the rate-limit backend, so pretending to be `staging`
+    to test sign-in would mean needing Redis and S3 to test sign-in. The flag
+    can only ever *close* the development gate - the environment allowlist is
+    checked first - so this is the narrow version of "act like a deployment".
+    """
+    return settings.model_copy(update={"dev_identity_enabled": False})
+
+
+@pytest.fixture
+async def strict_client(strict_settings: Settings) -> AsyncIterator[AsyncClient]:
+    """A client with no development identity: it is signed out until it signs in.
+
+    Cookies persist on the client, which is what makes a sign-in followed by a
+    request behave the way a browser does.
+    """
+    app = create_app(strict_settings)
+    transport = ASGITransport(app=app)
+    async with (
+        AsyncClient(transport=transport, base_url=BASE_URL) as http,
+        app.router.lifespan_context(app),
+    ):
+        yield http
+
+
+#: A password that passes the default policy. Long, and not derived from any
+#: address the tests register.
+TEST_PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - a test fixture, not a credential
+
+
+async def register_account(
+    client: AsyncClient,
+    *,
+    email: str = "ada@example.com",
+    password: str = TEST_PASSWORD,
+    name: str = "Ada",
+) -> dict[str, object]:
+    """Create an account and leave the client holding its session cookie."""
+    response = await client.post(
+        f"{API}/auth/register", json={"email": email, "password": password, "name": name}
+    )
+    assert response.status_code == 201, response.text
+    user: dict[str, object] = response.json()["user"]
+    return user
+
+
+async def sign_in(
+    client: AsyncClient, *, email: str = "ada@example.com", password: str = TEST_PASSWORD
+) -> None:
+    response = await client.post(f"{API}/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200, response.text
+
+
+@pytest.fixture
 async def tolerant_client(settings: Settings) -> AsyncIterator[AsyncClient]:
     """A client that returns the 500 response instead of re-raising.
 

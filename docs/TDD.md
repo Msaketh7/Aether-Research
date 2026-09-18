@@ -307,8 +307,10 @@ it. Hands back a ticket for long jobs._
   `evaluations`, `sse`, `health`.
 - Request validation via Pydantic models shared through `packages/shared-types`.
 - Every research endpoint enforces ownership (`research.user_id == session.user`).
-- Rate-limiting middleware (Redis token bucket) keyed by user + route + a cost
-  weight.
+- Rate limiting (Redis token bucket) keyed by identity + route class, attached
+  once to the whole `/api/v1` router so a route added later is limited before
+  anybody remembers to decorate it. Declared as a dependency rather than as
+  middleware, because the route class is only known after routing (Phase 20).
 - Returns `202 Accepted` + `job_id` for research creation; never blocks on the
   workflow.
 
@@ -317,10 +319,22 @@ it. Hands back a ticket for long jobs._
 _Plain terms: the part that knows who you are and makes sure you only see your
 own research._
 
-- Auth.js on the frontend; the API validates the session and loads the user.
-- Server-side session store in Postgres; session list + revoke.
-- Authorization helper `require_owner(resource)` used by every research route.
+- Argon2id passwords; server-side session store in Postgres; session list +
+  revoke. The session is a row and the cookie is an opaque pointer to it, so a
+  revoked device stops working on its next request (ADR 0021).
+- Authorization scoped by `user_id` on every research read and write.
 - Roles: `user`, `admin` (admin only for eval-dataset management + ops views).
+
+_Built in Phase 20._ The earlier plan named **Auth.js**, written when the
+frontend was expected to own the session and the API to validate it. What was
+built is the server-side session store, the hashed tokens and the revocation
+list that plan describes - in the API, beside the authorization checks that were
+already there, because every client talks to the API directly. ADR 0021 records
+why, and why the token is not a JWT.
+
+Supporting controls live in `apps/api/app/security`: token-bucket rate limiting
+per identity and route class, the client address resolved through declared proxy
+hops, and the append-only `audit_log`.
 
 ### 3.4 Research API (`apps/api/app/research`)
 
@@ -695,7 +709,7 @@ gen_random_uuid()`, `created_at timestamptz not null default now()`, and where
 | Column        | Type          | Notes                          |
 | ------------- | ------------- | ------------------------------ |
 | email         | `citext`      | unique, not null               |
-| password_hash | `text`        | Auth.js credential flow        |
+| password_hash | `text`        | Argon2id; null = no password   |
 | name          | `text`        |                                |
 | role          | `text`        | `user` \| `admin`              |
 | settings      | `jsonb`       | provider/model prefs, UI prefs |
@@ -1477,7 +1491,8 @@ tools, no arbitrary code execution.
 
 ### 15.6 AuthN / AuthZ
 
-- Auth.js sessions; every research resource checked against `user_id`.
+- Opaque server-side sessions in an `HttpOnly` cookie, Argon2id passwords;
+  every research resource checked against `user_id` (ADR 0021).
 - Rate limiting per user + route + cost weight.
 
 ---
@@ -1589,28 +1604,31 @@ rubric for correctness / faithfulness, sampled and spot-audited by a human.
 
 > **In plain terms:** the list of requests the front counter accepts.
 
-| Method | Path                                            | Purpose                          |
-| ------ | ----------------------------------------------- | -------------------------------- |
-| `POST` | `/auth/register`                                | create account                   |
-| `POST` | `/auth/login`                                   | start session                    |
-| `POST` | `/auth/logout`                                  | end session                      |
-| `GET`  | `/auth/sessions` / `DELETE /auth/sessions/{id}` | list / revoke sessions           |
-| `POST` | `/research`                                     | create run → `202 { run_id }`    |
-| `GET`  | `/research`                                     | list the current user's runs     |
-| `GET`  | `/research/{id}`                                | run status + summary             |
-| `GET`  | `/research/{id}/events`                         | SSE progress stream              |
-| `GET`  | `/research/{id}/sources`                        | sources + duplicate clusters     |
-| `GET`  | `/research/{id}/evidence`                       | claims, evidence, contradictions |
-| `GET`  | `/research/{id}/activity`                       | the agent / tool / LLM trace     |
-| `GET`  | `/research/{id}/report`                         | report + sections + citations    |
-| `POST` | `/research/{id}/followup`                       | conversational child run         |
-| `POST` | `/research/{id}/cancel`                         | cooperative cancel               |
-| `POST` | `/files`                                        | upload a document (Section 3.5)  |
-| `GET`  | `/files` / `/files/{id}`                        | the caller's uploads             |
-| `POST` | `/feedback`                                     | rate a report                    |
-| `GET`  | `/evaluations`                                  | dashboard data                   |
-| `POST` | `/evaluations/run`                              | (admin) trigger a benchmark      |
-| `GET`  | `/health` / `/health/ready`                     | liveness / readiness             |
+| Method   | Path                                            | Purpose                          |
+| -------- | ----------------------------------------------- | -------------------------------- |
+| `POST`   | `/auth/register`                                | create account                   |
+| `POST`   | `/auth/login`                                   | start session                    |
+| `POST`   | `/auth/logout`                                  | end session                      |
+| `GET`    | `/auth/me`                                      | the authenticated principal      |
+| `GET`    | `/auth/sessions` / `DELETE /auth/sessions/{id}` | list / revoke sessions           |
+| `DELETE` | `/auth/sessions`                                | sign out every other device      |
+| `GET`    | `/settings` / `PATCH /settings`                 | user preferences                 |
+| `POST`   | `/research`                                     | create run → `202 { run_id }`    |
+| `GET`    | `/research`                                     | list the current user's runs     |
+| `GET`    | `/research/{id}`                                | run status + summary             |
+| `GET`    | `/research/{id}/events`                         | SSE progress stream              |
+| `GET`    | `/research/{id}/sources`                        | sources + duplicate clusters     |
+| `GET`    | `/research/{id}/evidence`                       | claims, evidence, contradictions |
+| `GET`    | `/research/{id}/activity`                       | the agent / tool / LLM trace     |
+| `GET`    | `/research/{id}/report`                         | report + sections + citations    |
+| `POST`   | `/research/{id}/followup`                       | conversational child run         |
+| `POST`   | `/research/{id}/cancel`                         | cooperative cancel               |
+| `POST`   | `/files`                                        | upload a document (Section 3.5)  |
+| `GET`    | `/files` / `/files/{id}`                        | the caller's uploads             |
+| `POST`   | `/feedback`                                     | rate a report                    |
+| `GET`    | `/evaluations`                                  | dashboard data                   |
+| `POST`   | `/evaluations/run`                              | (admin) trigger a benchmark      |
+| `GET`    | `/health` / `/health/ready`                     | liveness / readiness             |
 
 All list endpoints are cursor-paginated and scoped to the authenticated user.
 
@@ -1742,7 +1760,7 @@ aether-research/
 | `0001-framework-split.md`            | LlamaIndex = retrieval, LangGraph = orchestration, LangChain = model/tool layer; no overlap    |
 | `0002-async-execution.md`            | HTTP returns `202`; research runs on a worker via a Redis queue                                |
 | `0003-postgres-pgvector.md`          | One Postgres for relational + vectors in v1; revisit a dedicated vector DB at scale            |
-| `0004-auth-authjs-postgres.md`       | Auth.js + Postgres instead of a hosted auth product, to own the architecture                   |
+| `0021-sessions-not-tokens.md`        | Opaque server-side sessions in a cookie rather than JWTs; a rate limit that is a bucket        |
 | `0005-llm-gateway.md`                | All model calls go through one gateway (rate limit, retry, fallback, budget, semaphore, cache) |
 | `0006-checkpointing.md`              | LangGraph Postgres checkpointer for durable, resumable runs                                    |
 | `0007-modular-monolith.md`           | Two deploy units (API + Worker); split into ingestion/eval workers only at scale               |

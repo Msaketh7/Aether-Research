@@ -1,6 +1,7 @@
 'use client';
 
 import { FlaskConical, LoaderCircle } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -15,9 +16,10 @@ import { useLogin } from '@/lib/api/queries';
 /**
  * Sign-in (FR-1).
  *
- * The form is real: it posts to the API, renders field-level validation from
- * the `details` map in the error envelope, and handles the failure paths. Only
- * the credential check behind it is mocked until Phase 2.
+ * The form posts to the API, renders field-level validation from the `details`
+ * map in the error envelope, and handles the failure paths. Against the live
+ * API (Phase 20) the credential check is real: an Argon2id verification and an
+ * `HttpOnly` session cookie. In mock mode any well-formed pair is accepted.
  */
 export default function LoginPage() {
   const router = useRouter();
@@ -101,10 +103,17 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          No account yet?{' '}
+          <Link href="/register" className="underline underline-offset-4">
+            Create one
+          </Link>
+        </p>
+
         {API_MODE === 'mock' ? (
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            Demo build: credentials are pre-filled and any valid-looking pair is accepted. Real
-            authentication arrives in Phase 2.
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Demo build: credentials are pre-filled and any valid-looking pair is accepted. The live
+            API checks them for real.
           </p>
         ) : null}
       </div>

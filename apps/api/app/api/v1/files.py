@@ -24,13 +24,22 @@ from __future__ import annotations
 import email.message
 from uuid import UUID
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
-from app.api.deps import CurrentUser, PageParamsDep, SettingsDep, UploadServiceDep
+from app.api.deps import (
+    AuditTrailDep,
+    CurrentUser,
+    PageParamsDep,
+    RateLimit,
+    SettingsDep,
+    UploadServiceDep,
+)
+from app.core.enums import AuditAction
 from app.core.pagination import Page
 from app.retrieval.errors import DocumentTooLarge
 from app.retrieval.formats import MEDIA_TYPES
 from app.retrieval.schemas import UploadedFile
+from app.security.ratelimit import WRITE
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -59,6 +68,9 @@ _REQUEST_BODY = {
         }
     },
     openapi_extra={"requestBody": _REQUEST_BODY},
+    # An upload is stored, parsed in a child process, chunked and embedded.
+    # The tighter bucket, like the endpoints that start a run.
+    dependencies=[Depends(RateLimit(WRITE))],
 )
 async def upload_file(
     request: Request,
@@ -66,6 +78,7 @@ async def upload_file(
     user: CurrentUser,
     service: UploadServiceDep,
     settings: SettingsDep,
+    trail: AuditTrailDep,
 ) -> UploadedFile:
     """201 for a new upload; 200 with the existing record when the same bytes come again."""
     data = await read_bounded_body(request, limit=settings.upload_limit_bytes)
@@ -77,6 +90,16 @@ async def upload_file(
     )
     if not created:
         response.status_code = status.HTTP_200_OK
+    # Recorded whether or not the bytes were new: the interesting fact is that
+    # this account attached this document, not whether it saved a copy.
+    await trail.record(
+        AuditAction.FILE_UPLOADED,
+        user_id=user.id,
+        resource_type="upload",
+        resource_id=uploaded.id,
+        bytes=len(data),
+        deduplicated=not created,
+    )
     return uploaded
 
 

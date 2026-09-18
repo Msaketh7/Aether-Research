@@ -30,6 +30,7 @@ from app.observability.middleware import (
 )
 from app.observability.tracing import configure_tracing
 from app.research.eventbus import build_event_broker
+from app.security.ratelimit import build_rate_limiter
 from app.sources import build_toolbelt
 from app.storage import build_object_storage
 from app.workers.queue import InMemoryJobQueue, JobQueue, RedisJobQueue, build_redis
@@ -40,15 +41,19 @@ DESCRIPTION = """
 Autonomous multi-agent research: decomposition, parallel retrieval, evidence
 extraction, contradiction detection and citation-validated reports.
 
-**This build is Phase 15 (caching).** A created run is queued here and executed
-by a separate worker process, which ingests the documents it was created with,
-runs the research graph, and records its claims, evidence, contradictions and
-report. The worker streams its progress as it goes: `/events` relays what it
-publishes over Redis, and every event is persisted, so a reconnect with
-`Last-Event-ID` replays exactly. Searches, fetched pages and embeddings are
-cached by content hash, and identical work in flight is done once. Endpoints
-for capabilities that are not built return `not_implemented` rather than
-fabricated content.
+**This build is Phase 20 (security).** Callers authenticate with an account:
+Argon2id passwords, opaque server-side sessions in Postgres, and an `HttpOnly`
+session cookie that can be revoked per device. Every request draws on a token
+bucket keyed by user and route class, and every authentication event and
+research mutation is written to an audit log.
+
+A created run is queued here and executed by a separate worker process, which
+ingests the documents it was created with, runs the research graph, and records
+its claims, evidence, contradictions and report. The worker streams its
+progress as it goes: `/events` relays what it publishes over Redis, and every
+event is persisted, so a reconnect with `Last-Event-ID` replays exactly.
+Searches, fetched pages and embeddings are cached by content hash, and
+identical work in flight is done once.
 """.strip()
 
 
@@ -89,6 +94,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # reaches whichever replica is holding the stream, and a reconnect
     # replays from rows rather than from this process's memory (ADR 0006).
     app.state.broker = build_event_broker(settings, database=app.state.database)
+    # One limiter per process, owning its own Redis connection. The buckets
+    # themselves are shared across replicas, which is the only way a limit
+    # means what it says (Phase 20).
+    app.state.rate_limiter = build_rate_limiter(settings)
 
     logger.info(
         "api starting",
@@ -104,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Ordered shutdown: stop accepting work, then release connections.
         await app.state.queue.close()
         await app.state.broker.close()
+        await app.state.rate_limiter.close()
         await app.state.gateway.close()
         await app.state.toolbelt.close()
         await app.state.cache.close()
