@@ -27,6 +27,7 @@ appears in the report as *not run*, with the reason.
 
 from __future__ import annotations
 
+from app.loadtest.breakdown import Breakdown, NodeCost, breakdown_of
 from app.loadtest.measure import Latency, Sample, Sampler, Timeline, percentile, summarise
 from app.loadtest.profiles import DEFAULT_PROFILES, LoadProfile, profile_named
 from app.loadtest.report import render_markdown
@@ -34,14 +35,17 @@ from app.loadtest.results import LoadResult, LoadSuite, RunOutcome
 
 __all__ = [
     "DEFAULT_PROFILES",
+    "Breakdown",
     "Latency",
     "LoadProfile",
     "LoadResult",
     "LoadSuite",
+    "NodeCost",
     "RunOutcome",
     "Sample",
     "Sampler",
     "Timeline",
+    "breakdown_of",
     "percentile",
     "profile_named",
     "render_markdown",

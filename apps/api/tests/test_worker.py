@@ -26,6 +26,7 @@ from app.agents.schemas import GraphNode, NodeUsage
 from app.core.enums import ResearchMode, RunStatus
 from app.db.models.evidence import ClaimRow
 from app.db.models.report import ReportRow
+from app.db.repositories.worker import SqlAlchemyRunLifecycle
 from app.research.repository import utcnow
 from app.workers.progress import DISCOVERY_CEILING, NODE_STATUS, progress_for
 from tests.support.graph import Script, ScriptedNodes
@@ -404,6 +405,93 @@ async def test_the_sweep_redispatches_what_the_queue_lost(database, artifact_sto
     assert dispatched == 3
     assert set(harness.queue.jobs) == {forgotten.id, due.id, abandoned.id}
     assert fresh.id not in harness.queue.jobs
+
+
+async def test_the_sweep_does_not_re_dispatch_a_backlog_it_already_dispatched(
+    database, artifact_store, worker_config
+):
+    """The defect Phase 21's load test measured: 4,662 queue entries for 100 jobs.
+
+    A run that is still ``queued`` because every worker slot is busy answers
+    "I should be on the queue" on every sweep, and neither the sweep nor the
+    queue deduplicates - so the backlog was re-enqueued in full, every sweep,
+    for as long as it lasted. Nothing ran twice, because claiming is a
+    conditional update; what broke was ``queue_depth``, which is the gauge on
+    the dashboard and the obvious input to an autoscaler.
+
+    Driven through ``lifecycle.due`` rather than the loop, because that is
+    where the rule lives and the loop would only add its sweep interval.
+    """
+    settings = worker_settings(worker_config, worker_queued_grace_seconds=5.0)
+    lifecycle = SqlAlchemyRunLifecycle(database)
+    backlog = {(await seed_run(database, settings, created_at=ago(60))).id for _ in range(3)}
+
+    first = await lifecycle.due(lease_seconds=60, queued_grace_seconds=5.0, limit=100)
+    second = await lifecycle.due(lease_seconds=60, queued_grace_seconds=5.0, limit=100)
+
+    assert set(first) == backlog
+    assert second == []
+
+
+async def test_a_dispatch_old_enough_to_be_presumed_lost_is_repeated(
+    database, artifact_store, worker_config
+):
+    """The sweep is a repair mechanism, and it must still repair.
+
+    Suppressing a re-dispatch forever would turn one lost queue message into a
+    run that waits for a person to notice.
+    """
+    lifecycle = SqlAlchemyRunLifecycle(database)
+    run = await seed_run(database, worker_config, created_at=ago(60))
+    await set_row(database, run.id, last_queued_at=ago(60))
+
+    due = await lifecycle.due(lease_seconds=60, queued_grace_seconds=5.0, limit=100)
+
+    assert due == [run.id]
+
+
+async def test_a_run_handed_back_since_its_dispatch_goes_out_again_at_once(
+    database, artifact_store, worker_config
+):
+    """ "Something has happened to it since" is what keeps a retry from waiting.
+
+    A worker that pauses a run writes ``updated_at``, which is the whole of the
+    rule: the dispatch that led to that attempt is spent, so the next one does
+    not queue behind a grace period the user would feel as a stall. The grace
+    here is five minutes, so a rule that waited for it would fail this.
+    """
+    lifecycle = SqlAlchemyRunLifecycle(database)
+    run = await seed_run(database, worker_config, created_at=ago(600))
+
+    assert await lifecycle.due(lease_seconds=60, queued_grace_seconds=300.0, limit=100) == [run.id]
+
+    # A worker took it, failed, and handed it back for a retry that is due.
+    await lifecycle.claim(run.id, worker_id="worker-1", lease_seconds=60)
+    await lifecycle.release(run.id, worker_id="worker-1", retry_in_seconds=0)
+
+    assert await lifecycle.due(lease_seconds=60, queued_grace_seconds=300.0, limit=100) == [run.id]
+
+
+async def test_dispatching_a_run_does_not_count_as_changing_it(
+    database, artifact_store, worker_config
+):
+    """``updated_at`` must not move when the sweep stamps a row.
+
+    ``UpdatedAtMixin`` declares an application-side ``onupdate`` and SQLAlchemy
+    applies it to a Core UPDATE too, so the stamp pins the column to itself. If
+    that pin is ever dropped, ``last_queued_at`` and ``updated_at`` become equal
+    and the rule above is satisfied on the very next sweep - the suppression
+    would silently become a no-op while every other test still passed.
+    """
+    lifecycle = SqlAlchemyRunLifecycle(database)
+    run = await seed_run(database, worker_config, created_at=ago(60))
+    before = (await read_row(database, run.id)).updated_at
+
+    await lifecycle.due(lease_seconds=60, queued_grace_seconds=5.0, limit=100)
+
+    row = await read_row(database, run.id)
+    assert row.updated_at == before
+    assert row.last_queued_at is not None and row.last_queued_at > before
 
 
 async def test_a_run_whose_worker_died_is_claimed_by_the_next_one(

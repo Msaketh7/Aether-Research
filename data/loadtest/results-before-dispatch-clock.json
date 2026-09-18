@@ -1,0 +1,423 @@
+{
+  "conditions": {
+    "measured": "2026-09-18T21:15:45+00:00",
+    "machine": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel, Windows",
+    "python": "3.13.5",
+    "what is real": "Postgres, the job queue, the lease, the LangGraph graph, all nine agents, the toolbelt with its SSRF guard, ingestion, retrieval, the evidence projection and report assembly.",
+    "what is scripted": "The model provider (behind the real gateway, answering at 0.5s per call) and the socket (behind the real guarded client).",
+    "queue": "In-memory adapter (`APP_ENV=test`). Redis is not installed here.",
+    "retrieval": "Lexical arm only - no pgvector on this machine.",
+    "caveat": "These are this machine's numbers, and its CPU runs at about a third of nominal. Read them as ratios between profiles, not as a capacity figure for a deployment."
+  },
+  "skipped": {},
+  "results": [
+    {
+      "profile": {
+        "name": "offered-10",
+        "offered_jobs": 10,
+        "capacity": 4,
+        "workers": 1,
+        "worker_concurrency": 4,
+        "model_latency_seconds": 0.5,
+        "arrival_seconds": 0.0,
+        "mode": "deep"
+      },
+      "started_at": "2026-09-18T21:10:28.502101+00:00",
+      "wall_seconds": 26.806,
+      "offered": 10,
+      "completed": 10,
+      "completion_rate": 1.0,
+      "by_status": {
+        "completed": 10
+      },
+      "throughput_runs_per_minute": 22.383,
+      "latency_seconds": {
+        "total": {
+          "count": 10,
+          "min": 14.459,
+          "p50": 20.888,
+          "p95": 26.287,
+          "p99": 26.529,
+          "max": 26.59,
+          "mean": 19.513
+        },
+        "queue_wait": {
+          "count": 10,
+          "min": 0.429,
+          "p50": 14.548,
+          "p95": 20.915,
+          "p99": 21.149,
+          "max": 21.207,
+          "mean": 10.217
+        },
+        "execution": {
+          "count": 10,
+          "min": 5.361,
+          "p50": 6.601,
+          "p95": 14.17,
+          "p99": 14.195,
+          "max": 14.201,
+          "mean": 9.296
+        }
+      },
+      "timeline": {
+        "samples": 102,
+        "interval_seconds": 0.25,
+        "saturated_fraction": 0.775,
+        "levels": {
+          "queue_depth": {
+            "max": 10.0,
+            "mean": 3.716,
+            "last": 0.0
+          },
+          "running": {
+            "max": 4.0,
+            "mean": 3.5,
+            "last": 0.0
+          },
+          "db_in_use": {
+            "max": 5.0,
+            "mean": 0.961,
+            "last": 0.0
+          },
+          "db_idle": {
+            "max": 5.0,
+            "mean": 4.0,
+            "last": 5.0
+          },
+          "db_overflow": {
+            "max": 0.0,
+            "mean": 0.0,
+            "last": 0.0
+          },
+          "llm_in_flight": {
+            "max": 4.0,
+            "mean": 1.549,
+            "last": 0.0
+          }
+        }
+      },
+      "llm_throttling": {
+        "limit": 8,
+        "acquisitions": 80,
+        "waited": 0,
+        "waited_fraction": 0.0,
+        "mean_wait_seconds": 0.0,
+        "max_wait_seconds": 0.0,
+        "max_in_flight": 4,
+        "utilisation": 0.5
+      },
+      "not_measured": {
+        "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
+        "provider_behaviour": "The model is scripted at a declared latency, so nothing here measures a real provider's throttling or tail latency.",
+        "embedding_and_dense_retrieval": "No pgvector locally: ingestion stores chunks with vectors pending and retrieval runs its lexical arm only."
+      }
+    },
+    {
+      "profile": {
+        "name": "offered-25",
+        "offered_jobs": 25,
+        "capacity": 4,
+        "workers": 1,
+        "worker_concurrency": 4,
+        "model_latency_seconds": 0.5,
+        "arrival_seconds": 0.0,
+        "mode": "deep"
+      },
+      "started_at": "2026-09-18T21:10:58.388420+00:00",
+      "wall_seconds": 44.55,
+      "offered": 25,
+      "completed": 25,
+      "completion_rate": 1.0,
+      "by_status": {
+        "completed": 25
+      },
+      "throughput_runs_per_minute": 33.67,
+      "latency_seconds": {
+        "total": {
+          "count": 25,
+          "min": 8.528,
+          "p50": 25.324,
+          "p95": 39.505,
+          "p99": 43.291,
+          "max": 44.485,
+          "mean": 24.207
+        },
+        "queue_wait": {
+          "count": 25,
+          "min": 0.684,
+          "p50": 19.148,
+          "p95": 32.813,
+          "p99": 37.734,
+          "max": 39.287,
+          "mean": 17.779
+        },
+        "execution": {
+          "count": 25,
+          "min": 5.199,
+          "p50": 6.176,
+          "p95": 7.742,
+          "p99": 7.865,
+          "max": 7.904,
+          "mean": 6.428
+        }
+      },
+      "timeline": {
+        "samples": 173,
+        "interval_seconds": 0.25,
+        "saturated_fraction": 0.884,
+        "levels": {
+          "queue_depth": {
+            "max": 25.0,
+            "mean": 12.249,
+            "last": 0.0
+          },
+          "running": {
+            "max": 4.0,
+            "mean": 3.647,
+            "last": 1.0
+          },
+          "db_in_use": {
+            "max": 5.0,
+            "mean": 1.116,
+            "last": 1.0
+          },
+          "db_idle": {
+            "max": 6.0,
+            "mean": 4.607,
+            "last": 5.0
+          },
+          "db_overflow": {
+            "max": 0.0,
+            "mean": 0.0,
+            "last": 0.0
+          },
+          "llm_in_flight": {
+            "max": 4.0,
+            "mean": 2.289,
+            "last": 0.0
+          }
+        }
+      },
+      "llm_throttling": {
+        "limit": 8,
+        "acquisitions": 200,
+        "waited": 0,
+        "waited_fraction": 0.0,
+        "mean_wait_seconds": 0.0,
+        "max_wait_seconds": 0.0,
+        "max_in_flight": 4,
+        "utilisation": 0.5
+      },
+      "not_measured": {
+        "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
+        "provider_behaviour": "The model is scripted at a declared latency, so nothing here measures a real provider's throttling or tail latency.",
+        "embedding_and_dense_retrieval": "No pgvector locally: ingestion stores chunks with vectors pending and retrieval runs its lexical arm only."
+      }
+    },
+    {
+      "profile": {
+        "name": "offered-50",
+        "offered_jobs": 50,
+        "capacity": 4,
+        "workers": 1,
+        "worker_concurrency": 4,
+        "model_latency_seconds": 0.5,
+        "arrival_seconds": 0.0,
+        "mode": "deep"
+      },
+      "started_at": "2026-09-18T21:11:46.073639+00:00",
+      "wall_seconds": 80.531,
+      "offered": 50,
+      "completed": 50,
+      "completion_rate": 1.0,
+      "by_status": {
+        "completed": 50
+      },
+      "throughput_runs_per_minute": 37.253,
+      "latency_seconds": {
+        "total": {
+          "count": 50,
+          "min": 7.838,
+          "p50": 44.418,
+          "p95": 75.899,
+          "p99": 80.246,
+          "max": 80.265,
+          "mean": 43.336
+        },
+        "queue_wait": {
+          "count": 50,
+          "min": 1.168,
+          "p50": 38.531,
+          "p95": 69.85,
+          "p99": 73.672,
+          "max": 73.785,
+          "mean": 37.161
+        },
+        "execution": {
+          "count": 50,
+          "min": 5.298,
+          "p50": 6.142,
+          "p95": 7.085,
+          "p99": 7.161,
+          "max": 7.186,
+          "mean": 6.175
+        }
+      },
+      "timeline": {
+        "samples": 312,
+        "interval_seconds": 0.25,
+        "saturated_fraction": 0.99,
+        "levels": {
+          "queue_depth": {
+            "max": 665.0,
+            "mean": 305.522,
+            "last": 369.0
+          },
+          "running": {
+            "max": 4.0,
+            "mean": 3.978,
+            "last": 4.0
+          },
+          "db_in_use": {
+            "max": 5.0,
+            "mean": 1.253,
+            "last": 2.0
+          },
+          "db_idle": {
+            "max": 6.0,
+            "mean": 4.747,
+            "last": 4.0
+          },
+          "db_overflow": {
+            "max": 0.0,
+            "mean": 0.0,
+            "last": 0.0
+          },
+          "llm_in_flight": {
+            "max": 4.0,
+            "mean": 2.516,
+            "last": 0.0
+          }
+        }
+      },
+      "llm_throttling": {
+        "limit": 8,
+        "acquisitions": 400,
+        "waited": 0,
+        "waited_fraction": 0.0,
+        "mean_wait_seconds": 0.0,
+        "max_wait_seconds": 0.0,
+        "max_in_flight": 4,
+        "utilisation": 0.5
+      },
+      "not_measured": {
+        "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
+        "provider_behaviour": "The model is scripted at a declared latency, so nothing here measures a real provider's throttling or tail latency.",
+        "embedding_and_dense_retrieval": "No pgvector locally: ingestion stores chunks with vectors pending and retrieval runs its lexical arm only."
+      }
+    },
+    {
+      "profile": {
+        "name": "offered-100",
+        "offered_jobs": 100,
+        "capacity": 4,
+        "workers": 1,
+        "worker_concurrency": 4,
+        "model_latency_seconds": 0.5,
+        "arrival_seconds": 0.0,
+        "mode": "deep"
+      },
+      "started_at": "2026-09-18T21:13:11.225215+00:00",
+      "wall_seconds": 152.875,
+      "offered": 100,
+      "completed": 100,
+      "completion_rate": 1.0,
+      "by_status": {
+        "completed": 100
+      },
+      "throughput_runs_per_minute": 39.248,
+      "latency_seconds": {
+        "total": {
+          "count": 100,
+          "min": 9.373,
+          "p50": 81.703,
+          "p95": 146.298,
+          "p99": 152.647,
+          "max": 152.669,
+          "mean": 81.061
+        },
+        "queue_wait": {
+          "count": 100,
+          "min": 2.663,
+          "p50": 75.844,
+          "p95": 140.629,
+          "p99": 146.242,
+          "max": 146.253,
+          "mean": 75.092
+        },
+        "execution": {
+          "count": 100,
+          "min": 5.497,
+          "p50": 5.813,
+          "p95": 6.783,
+          "p99": 7.352,
+          "max": 7.402,
+          "mean": 5.968
+        }
+      },
+      "timeline": {
+        "samples": 593,
+        "interval_seconds": 0.25,
+        "saturated_fraction": 0.998,
+        "levels": {
+          "queue_depth": {
+            "max": 4662.0,
+            "mean": 2612.669,
+            "last": 4400.0
+          },
+          "running": {
+            "max": 4.0,
+            "mean": 3.993,
+            "last": 4.0
+          },
+          "db_in_use": {
+            "max": 5.0,
+            "mean": 1.125,
+            "last": 3.0
+          },
+          "db_idle": {
+            "max": 6.0,
+            "mean": 4.875,
+            "last": 3.0
+          },
+          "db_overflow": {
+            "max": 0.0,
+            "mean": 0.0,
+            "last": 0.0
+          },
+          "llm_in_flight": {
+            "max": 4.0,
+            "mean": 2.663,
+            "last": 0.0
+          }
+        }
+      },
+      "llm_throttling": {
+        "limit": 8,
+        "acquisitions": 800,
+        "waited": 0,
+        "waited_fraction": 0.0,
+        "mean_wait_seconds": 0.0,
+        "max_wait_seconds": 0.0,
+        "max_in_flight": 4,
+        "utilisation": 0.5
+      },
+      "not_measured": {
+        "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
+        "provider_behaviour": "The model is scripted at a declared latency, so nothing here measures a real provider's throttling or tail latency.",
+        "embedding_and_dense_retrieval": "No pgvector locally: ingestion stores chunks with vectors pending and retrieval runs its lexical arm only."
+      }
+    }
+  ]
+}

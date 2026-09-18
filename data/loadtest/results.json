@@ -1,6 +1,6 @@
 {
   "conditions": {
-    "measured": "2026-09-18T21:15:45+00:00",
+    "measured": "2026-09-18T22:11:39+00:00",
     "machine": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel, Windows",
     "python": "3.13.5",
     "what is real": "Postgres, the job queue, the lease, the LangGraph graph, all nine agents, the toolbelt with its SSRF guard, ingestion, retrieval, the evidence projection and report assembly.",
@@ -22,67 +22,67 @@
         "arrival_seconds": 0.0,
         "mode": "deep"
       },
-      "started_at": "2026-09-18T21:10:28.502101+00:00",
-      "wall_seconds": 26.806,
+      "started_at": "2026-09-18T22:06:20.365089+00:00",
+      "wall_seconds": 27.254,
       "offered": 10,
       "completed": 10,
       "completion_rate": 1.0,
       "by_status": {
         "completed": 10
       },
-      "throughput_runs_per_minute": 22.383,
+      "throughput_runs_per_minute": 22.015,
       "latency_seconds": {
         "total": {
           "count": 10,
-          "min": 14.459,
-          "p50": 20.888,
-          "p95": 26.287,
-          "p99": 26.529,
-          "max": 26.59,
-          "mean": 19.513
+          "min": 15.703,
+          "p50": 21.58,
+          "p95": 27.065,
+          "p99": 27.111,
+          "max": 27.122,
+          "mean": 20.404
         },
         "queue_wait": {
           "count": 10,
-          "min": 0.429,
-          "p50": 14.548,
-          "p95": 20.915,
-          "p99": 21.149,
-          "max": 21.207,
-          "mean": 10.217
+          "min": 0.51,
+          "p50": 16.072,
+          "p95": 21.509,
+          "p99": 21.533,
+          "max": 21.54,
+          "mean": 10.963
         },
         "execution": {
           "count": 10,
-          "min": 5.361,
-          "p50": 6.601,
-          "p95": 14.17,
-          "p99": 14.195,
-          "max": 14.201,
-          "mean": 9.296
+          "min": 5.489,
+          "p50": 5.573,
+          "p95": 15.443,
+          "p99": 15.448,
+          "max": 15.449,
+          "mean": 9.442
         }
       },
       "timeline": {
-        "samples": 102,
+        "samples": 104,
         "interval_seconds": 0.25,
-        "saturated_fraction": 0.775,
+        "saturated_fraction": 0.788,
         "levels": {
           "queue_depth": {
             "max": 10.0,
-            "mean": 3.716,
+            "mean": 3.952,
             "last": 0.0
           },
           "running": {
             "max": 4.0,
-            "mean": 3.5,
-            "last": 0.0
+            "mean": 3.548,
+            "last": 1.0
           },
           "db_in_use": {
-            "max": 5.0,
-            "mean": 0.961,
-            "last": 0.0
+            "max": 6.0,
+            "mean": 0.981,
+            "last": 1.0
           },
           "db_idle": {
-            "max": 5.0,
-            "mean": 4.0,
+            "max": 6.0,
+            "mean": 4.413,
             "last": 5.0
           },
           "db_overflow": {
@@ -92,7 +92,7 @@
           },
           "llm_in_flight": {
             "max": 4.0,
-            "mean": 1.549,
+            "mean": 1.51,
             "last": 0.0
           }
         }
@@ -106,6 +106,129 @@
         "max_wait_seconds": 0.0,
         "max_in_flight": 4,
         "utilisation": 0.5
+      },
+      "database": {
+        "commits": 877,
+        "commits_per_run": 87.7
+      },
+      "breakdown": {
+        "runs": 10,
+        "total_node_seconds": 79.263,
+        "per_run_node_seconds": 7.926,
+        "nodes": [
+          {
+            "agent": "researcher",
+            "executions": 10,
+            "total_seconds": 45.681,
+            "latency_seconds": {
+              "count": 10,
+              "min": 1.381,
+              "p50": 1.6,
+              "p95": 9.443,
+              "p99": 9.468,
+              "max": 9.474,
+              "mean": 4.568
+            }
+          },
+          {
+            "agent": "evidence_extractor",
+            "executions": 10,
+            "total_seconds": 5.881,
+            "latency_seconds": {
+              "count": 10,
+              "min": 0.515,
+              "p50": 0.564,
+              "p95": 0.69,
+              "p99": 0.69,
+              "max": 0.69,
+              "mean": 0.588
+            }
+          },
+          {
+            "agent": "planner",
+            "executions": 10,
+            "total_seconds": 5.838,
+            "latency_seconds": {
+              "count": 10,
+              "min": 0.517,
+              "p50": 0.595,
+              "p95": 0.624,
+              "p99": 0.632,
+              "max": 0.634,
+              "mean": 0.584
+            }
+          },
+          {
+            "agent": "critic",
+            "executions": 20,
+            "total_seconds": 5.658,
+            "latency_seconds": {
+              "count": 20,
+              "min": 0.003,
+              "p50": 0.274,
+              "p95": 0.607,
+              "p99": 0.613,
+              "max": 0.615,
+              "mean": 0.283
+            }
+          },
+          {
+            "agent": "verifier",
+            "executions": 10,
+            "total_seconds": 5.386,
+            "latency_seconds": {
+              "count": 10,
+              "min": 0.51,
+              "p50": 0.528,
+              "p95": 0.589,
+              "p99": 0.595,
+              "max": 0.597,
+              "mean": 0.539
+            }
+          },
+          {
+            "agent": "synthesizer",
+            "executions": 10,
+            "total_seconds": 5.361,
+            "latency_seconds": {
+              "count": 10,
+              "min": 0.509,
+              "p50": 0.534,
+              "p95": 0.564,
+              "p99": 0.571,
+              "max": 0.573,
+              "mean": 0.536
+            }
+          },
+          {
+            "agent": "claim_normalizer",
+            "executions": 10,
+            "total_seconds": 5.28,
+            "latency_seconds": {
+              "count": 10,
+              "min": 0.511,
+              "p50": 0.524,
+              "p95": 0.546,
+              "p99": 0.548,
+              "max": 0.548,
+              "mean": 0.528
+            }
+          },
+          {
+            "agent": "citation_validator",
+            "executions": 10,
+            "total_seconds": 0.178,
+            "latency_seconds": {
+              "count": 10,
+              "min": 0.002,
+              "p50": 0.015,
+              "p95": 0.033,
+              "p99": 0.034,
+              "max": 0.034,
+              "mean": 0.018
+            }
+          }
+        ]
       },
       "not_measured": {
         "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
@@ -124,67 +247,67 @@
         "arrival_seconds": 0.0,
         "mode": "deep"
       },
-      "started_at": "2026-09-18T21:10:58.388420+00:00",
-      "wall_seconds": 44.55,
+      "started_at": "2026-09-18T22:06:50.607632+00:00",
+      "wall_seconds": 41.408,
       "offered": 25,
       "completed": 25,
       "completion_rate": 1.0,
       "by_status": {
         "completed": 25
       },
-      "throughput_runs_per_minute": 33.67,
+      "throughput_runs_per_minute": 36.225,
       "latency_seconds": {
         "total": {
           "count": 25,
-          "min": 8.528,
-          "p50": 25.324,
-          "p95": 39.505,
-          "p99": 43.291,
-          "max": 44.485,
-          "mean": 24.207
+          "min": 7.19,
+          "p50": 25.218,
+          "p95": 37.287,
+          "p99": 40.368,
+          "max": 41.339,
+          "mean": 23.075
         },
         "queue_wait": {
           "count": 25,
-          "min": 0.684,
-          "p50": 19.148,
-          "p95": 32.813,
-          "p99": 37.734,
-          "max": 39.287,
-          "mean": 17.779
+          "min": 0.642,
+          "p50": 19.054,
+          "p95": 31.411,
+          "p99": 35.068,
+          "max": 36.223,
+          "mean": 17.047
         },
         "execution": {
           "count": 25,
-          "min": 5.199,
-          "p50": 6.176,
-          "p95": 7.742,
-          "p99": 7.865,
-          "max": 7.904,
-          "mean": 6.428
+          "min": 5.117,
+          "p50": 5.979,
+          "p95": 6.898,
+          "p99": 7.056,
+          "max": 7.094,
+          "mean": 6.027
         }
       },
       "timeline": {
-        "samples": 173,
+        "samples": 162,
         "interval_seconds": 0.25,
-        "saturated_fraction": 0.884,
+        "saturated_fraction": 0.87,
         "levels": {
           "queue_depth": {
             "max": 25.0,
-            "mean": 12.249,
+            "mean": 10.642,
             "last": 0.0
           },
           "running": {
             "max": 4.0,
-            "mean": 3.647,
+            "mean": 3.654,
             "last": 1.0
           },
           "db_in_use": {
-            "max": 5.0,
-            "mean": 1.116,
+            "max": 4.0,
+            "mean": 0.975,
             "last": 1.0
           },
           "db_idle": {
             "max": 6.0,
-            "mean": 4.607,
+            "mean": 5.025,
             "last": 5.0
           },
           "db_overflow": {
@@ -194,7 +317,7 @@
           },
           "llm_in_flight": {
             "max": 4.0,
-            "mean": 2.289,
+            "mean": 2.451,
             "last": 0.0
           }
         }
@@ -208,6 +331,129 @@
         "max_wait_seconds": 0.0,
         "max_in_flight": 4,
         "utilisation": 0.5
+      },
+      "database": {
+        "commits": 2083,
+        "commits_per_run": 83.3
+      },
+      "breakdown": {
+        "runs": 25,
+        "total_node_seconds": 120.548,
+        "per_run_node_seconds": 4.822,
+        "nodes": [
+          {
+            "agent": "researcher",
+            "executions": 25,
+            "total_seconds": 37.021,
+            "latency_seconds": {
+              "count": 25,
+              "min": 1.254,
+              "p50": 1.443,
+              "p95": 1.872,
+              "p99": 1.979,
+              "max": 1.995,
+              "mean": 1.481
+            }
+          },
+          {
+            "agent": "evidence_extractor",
+            "executions": 25,
+            "total_seconds": 14.579,
+            "latency_seconds": {
+              "count": 25,
+              "min": 0.544,
+              "p50": 0.578,
+              "p95": 0.637,
+              "p99": 0.685,
+              "max": 0.699,
+              "mean": 0.583
+            }
+          },
+          {
+            "agent": "critic",
+            "executions": 50,
+            "total_seconds": 13.92,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.009,
+              "p50": 0.276,
+              "p95": 0.55,
+              "p99": 0.555,
+              "max": 0.556,
+              "mean": 0.278
+            }
+          },
+          {
+            "agent": "planner",
+            "executions": 25,
+            "total_seconds": 13.917,
+            "latency_seconds": {
+              "count": 25,
+              "min": 0.528,
+              "p50": 0.542,
+              "p95": 0.634,
+              "p99": 0.637,
+              "max": 0.638,
+              "mean": 0.557
+            }
+          },
+          {
+            "agent": "synthesizer",
+            "executions": 25,
+            "total_seconds": 13.62,
+            "latency_seconds": {
+              "count": 25,
+              "min": 0.52,
+              "p50": 0.541,
+              "p95": 0.586,
+              "p99": 0.594,
+              "max": 0.595,
+              "mean": 0.545
+            }
+          },
+          {
+            "agent": "verifier",
+            "executions": 25,
+            "total_seconds": 13.484,
+            "latency_seconds": {
+              "count": 25,
+              "min": 0.52,
+              "p50": 0.542,
+              "p95": 0.55,
+              "p99": 0.551,
+              "max": 0.551,
+              "mean": 0.539
+            }
+          },
+          {
+            "agent": "claim_normalizer",
+            "executions": 25,
+            "total_seconds": 13.46,
+            "latency_seconds": {
+              "count": 25,
+              "min": 0.523,
+              "p50": 0.538,
+              "p95": 0.551,
+              "p99": 0.558,
+              "max": 0.56,
+              "mean": 0.538
+            }
+          },
+          {
+            "agent": "citation_validator",
+            "executions": 25,
+            "total_seconds": 0.547,
+            "latency_seconds": {
+              "count": 25,
+              "min": 0.009,
+              "p50": 0.017,
+              "p95": 0.037,
+              "p99": 0.088,
+              "max": 0.103,
+              "mean": 0.022
+            }
+          }
+        ]
       },
       "not_measured": {
         "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
@@ -226,67 +472,67 @@
         "arrival_seconds": 0.0,
         "mode": "deep"
       },
-      "started_at": "2026-09-18T21:11:46.073639+00:00",
-      "wall_seconds": 80.531,
+      "started_at": "2026-09-18T22:07:35.321755+00:00",
+      "wall_seconds": 80.475,
       "offered": 50,
       "completed": 50,
       "completion_rate": 1.0,
       "by_status": {
         "completed": 50
       },
-      "throughput_runs_per_minute": 37.253,
+      "throughput_runs_per_minute": 37.279,
       "latency_seconds": {
         "total": {
           "count": 50,
-          "min": 7.838,
-          "p50": 44.418,
-          "p95": 75.899,
-          "p99": 80.246,
-          "max": 80.265,
-          "mean": 43.336
+          "min": 8.601,
+          "p50": 45.216,
+          "p95": 77.049,
+          "p99": 80.378,
+          "max": 80.382,
+          "mean": 43.951
         },
         "queue_wait": {
           "count": 50,
-          "min": 1.168,
-          "p50": 38.531,
-          "p95": 69.85,
-          "p99": 73.672,
-          "max": 73.785,
-          "mean": 37.161
+          "min": 1.23,
+          "p50": 39.542,
+          "p95": 70.831,
+          "p99": 74.263,
+          "max": 74.381,
+          "mean": 37.743
         },
         "execution": {
           "count": 50,
-          "min": 5.298,
-          "p50": 6.142,
-          "p95": 7.085,
-          "p99": 7.161,
-          "max": 7.186,
-          "mean": 6.175
+          "min": 5.54,
+          "p50": 6.07,
+          "p95": 7.292,
+          "p99": 7.984,
+          "max": 8.076,
+          "mean": 6.208
         }
       },
       "timeline": {
-        "samples": 312,
+        "samples": 313,
         "interval_seconds": 0.25,
-        "saturated_fraction": 0.99,
+        "saturated_fraction": 0.962,
         "levels": {
           "queue_depth": {
-            "max": 665.0,
-            "mean": 305.522,
-            "last": 369.0
+            "max": 60.0,
+            "mean": 42.732,
+            "last": 0.0
           },
           "running": {
             "max": 4.0,
-            "mean": 3.978,
-            "last": 4.0
+            "mean": 3.92,
+            "last": 2.0
           },
           "db_in_use": {
             "max": 5.0,
-            "mean": 1.253,
+            "mean": 1.22,
             "last": 2.0
           },
           "db_idle": {
             "max": 6.0,
-            "mean": 4.747,
+            "mean": 4.78,
             "last": 4.0
           },
           "db_overflow": {
@@ -296,7 +542,7 @@
           },
           "llm_in_flight": {
             "max": 4.0,
-            "mean": 2.516,
+            "mean": 2.53,
             "last": 0.0
           }
         }
@@ -310,6 +556,129 @@
         "max_wait_seconds": 0.0,
         "max_in_flight": 4,
         "utilisation": 0.5
+      },
+      "database": {
+        "commits": 4193,
+        "commits_per_run": 83.9
+      },
+      "breakdown": {
+        "runs": 50,
+        "total_node_seconds": 242.991,
+        "per_run_node_seconds": 4.86,
+        "nodes": [
+          {
+            "agent": "researcher",
+            "executions": 50,
+            "total_seconds": 73.751,
+            "latency_seconds": {
+              "count": 50,
+              "min": 1.257,
+              "p50": 1.431,
+              "p95": 1.803,
+              "p99": 2.182,
+              "max": 2.257,
+              "mean": 1.475
+            }
+          },
+          {
+            "agent": "evidence_extractor",
+            "executions": 50,
+            "total_seconds": 29.649,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.549,
+              "p50": 0.577,
+              "p95": 0.697,
+              "p99": 0.815,
+              "max": 0.848,
+              "mean": 0.593
+            }
+          },
+          {
+            "agent": "critic",
+            "executions": 100,
+            "total_seconds": 28.109,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.009,
+              "p50": 0.281,
+              "p95": 0.558,
+              "p99": 0.583,
+              "max": 0.586,
+              "mean": 0.281
+            }
+          },
+          {
+            "agent": "planner",
+            "executions": 50,
+            "total_seconds": 28.098,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.523,
+              "p50": 0.548,
+              "p95": 0.658,
+              "p99": 0.685,
+              "max": 0.686,
+              "mean": 0.562
+            }
+          },
+          {
+            "agent": "synthesizer",
+            "executions": 50,
+            "total_seconds": 27.449,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.522,
+              "p50": 0.546,
+              "p95": 0.581,
+              "p99": 0.603,
+              "max": 0.621,
+              "mean": 0.549
+            }
+          },
+          {
+            "agent": "claim_normalizer",
+            "executions": 50,
+            "total_seconds": 27.39,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.523,
+              "p50": 0.547,
+              "p95": 0.598,
+              "p99": 0.621,
+              "max": 0.622,
+              "mean": 0.548
+            }
+          },
+          {
+            "agent": "verifier",
+            "executions": 50,
+            "total_seconds": 27.25,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.523,
+              "p50": 0.544,
+              "p95": 0.57,
+              "p99": 0.583,
+              "max": 0.586,
+              "mean": 0.545
+            }
+          },
+          {
+            "agent": "citation_validator",
+            "executions": 50,
+            "total_seconds": 1.295,
+            "latency_seconds": {
+              "count": 50,
+              "min": 0.009,
+              "p50": 0.026,
+              "p95": 0.042,
+              "p99": 0.078,
+              "max": 0.104,
+              "mean": 0.026
+            }
+          }
+        ]
       },
       "not_measured": {
         "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",
@@ -328,68 +697,68 @@
         "arrival_seconds": 0.0,
         "mode": "deep"
       },
-      "started_at": "2026-09-18T21:13:11.225215+00:00",
-      "wall_seconds": 152.875,
+      "started_at": "2026-09-18T22:09:00.418115+00:00",
+      "wall_seconds": 158.388,
       "offered": 100,
       "completed": 100,
       "completion_rate": 1.0,
       "by_status": {
         "completed": 100
       },
-      "throughput_runs_per_minute": 39.248,
+      "throughput_runs_per_minute": 37.882,
       "latency_seconds": {
         "total": {
           "count": 100,
-          "min": 9.373,
-          "p50": 81.703,
-          "p95": 146.298,
-          "p99": 152.647,
-          "max": 152.669,
-          "mean": 81.061
+          "min": 9.335,
+          "p50": 85.504,
+          "p95": 152.049,
+          "p99": 158.349,
+          "max": 158.378,
+          "mean": 83.79
         },
         "queue_wait": {
           "count": 100,
-          "min": 2.663,
-          "p50": 75.844,
-          "p95": 140.629,
-          "p99": 146.242,
-          "max": 146.253,
-          "mean": 75.092
+          "min": 2.478,
+          "p50": 79.867,
+          "p95": 145.643,
+          "p99": 151.994,
+          "max": 151.999,
+          "mean": 77.621
         },
         "execution": {
           "count": 100,
-          "min": 5.497,
-          "p50": 5.813,
-          "p95": 6.783,
-          "p99": 7.352,
-          "max": 7.402,
-          "mean": 5.968
+          "min": 5.335,
+          "p50": 6.145,
+          "p95": 6.917,
+          "p99": 7.152,
+          "max": 7.158,
+          "mean": 6.169
         }
       },
       "timeline": {
-        "samples": 593,
+        "samples": 615,
         "interval_seconds": 0.25,
-        "saturated_fraction": 0.998,
+        "saturated_fraction": 0.985,
         "levels": {
           "queue_depth": {
-            "max": 4662.0,
-            "mean": 2612.669,
-            "last": 4400.0
+            "max": 224.0,
+            "mean": 169.808,
+            "last": 0.0
           },
           "running": {
             "max": 4.0,
-            "mean": 3.993,
-            "last": 4.0
+            "mean": 3.969,
+            "last": 2.0
           },
           "db_in_use": {
             "max": 5.0,
-            "mean": 1.125,
-            "last": 3.0
+            "mean": 1.254,
+            "last": 2.0
           },
           "db_idle": {
             "max": 6.0,
-            "mean": 4.875,
-            "last": 3.0
+            "mean": 4.746,
+            "last": 4.0
           },
           "db_overflow": {
             "max": 0.0,
@@ -398,7 +767,7 @@
           },
           "llm_in_flight": {
             "max": 4.0,
-            "mean": 2.663,
+            "mean": 2.551,
             "last": 0.0
           }
         }
@@ -412,6 +781,129 @@
         "max_wait_seconds": 0.0,
         "max_in_flight": 4,
         "utilisation": 0.5
+      },
+      "database": {
+        "commits": 8400,
+        "commits_per_run": 84.0
+      },
+      "breakdown": {
+        "runs": 100,
+        "total_node_seconds": 483.705,
+        "per_run_node_seconds": 4.837,
+        "nodes": [
+          {
+            "agent": "researcher",
+            "executions": 100,
+            "total_seconds": 143.779,
+            "latency_seconds": {
+              "count": 100,
+              "min": 1.233,
+              "p50": 1.409,
+              "p95": 1.738,
+              "p99": 2.065,
+              "max": 2.076,
+              "mean": 1.438
+            }
+          },
+          {
+            "agent": "evidence_extractor",
+            "executions": 100,
+            "total_seconds": 59.069,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.541,
+              "p50": 0.585,
+              "p95": 0.648,
+              "p99": 0.679,
+              "max": 0.684,
+              "mean": 0.591
+            }
+          },
+          {
+            "agent": "critic",
+            "executions": 200,
+            "total_seconds": 57.346,
+            "latency_seconds": {
+              "count": 200,
+              "min": 0.008,
+              "p50": 0.293,
+              "p95": 0.58,
+              "p99": 0.638,
+              "max": 0.695,
+              "mean": 0.287
+            }
+          },
+          {
+            "agent": "synthesizer",
+            "executions": 100,
+            "total_seconds": 55.797,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.525,
+              "p50": 0.552,
+              "p95": 0.621,
+              "p99": 0.651,
+              "max": 0.657,
+              "mean": 0.558
+            }
+          },
+          {
+            "agent": "planner",
+            "executions": 100,
+            "total_seconds": 55.608,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.52,
+              "p50": 0.545,
+              "p95": 0.632,
+              "p99": 0.715,
+              "max": 0.782,
+              "mean": 0.556
+            }
+          },
+          {
+            "agent": "verifier",
+            "executions": 100,
+            "total_seconds": 54.879,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.523,
+              "p50": 0.546,
+              "p95": 0.588,
+              "p99": 0.617,
+              "max": 0.644,
+              "mean": 0.549
+            }
+          },
+          {
+            "agent": "claim_normalizer",
+            "executions": 100,
+            "total_seconds": 54.846,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.524,
+              "p50": 0.542,
+              "p95": 0.588,
+              "p99": 0.611,
+              "max": 0.658,
+              "mean": 0.548
+            }
+          },
+          {
+            "agent": "citation_validator",
+            "executions": 100,
+            "total_seconds": 2.381,
+            "latency_seconds": {
+              "count": 100,
+              "min": 0.009,
+              "p50": 0.021,
+              "p95": 0.04,
+              "p99": 0.084,
+              "max": 0.092,
+              "mean": 0.024
+            }
+          }
+        ]
       },
       "not_measured": {
         "redis_utilisation": "No Redis on this machine. `APP_ENV=test` selects the in-memory queue adapter, so queue depth is measured and Redis is not.",

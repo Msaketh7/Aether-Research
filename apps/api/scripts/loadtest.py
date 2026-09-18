@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import datetime as dt
 import json
 import platform
@@ -38,7 +39,7 @@ import shutil
 import sys
 import tempfile
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -51,8 +52,18 @@ from app.core.config import Settings
 from app.core.enums import RunStatus
 from app.db.base import Base
 from app.db.models.research import ResearchRunRow
+from app.db.models.trace import AgentRunRow
 from app.db.session import Database
-from app.loadtest import DEFAULT_PROFILES, LoadProfile, LoadResult, LoadSuite, Sample, Sampler
+from app.loadtest import (
+    DEFAULT_PROFILES,
+    Breakdown,
+    LoadProfile,
+    LoadResult,
+    LoadSuite,
+    Sample,
+    Sampler,
+    breakdown_of,
+)
 from app.loadtest.profiles import profile_named
 from app.loadtest.report import render_markdown
 from app.loadtest.results import RunOutcome
@@ -194,6 +205,53 @@ async def reset(database: Database) -> None:
         await session.execute(sa.text(statement))
 
 
+async def transactions(database: Database) -> int | None:
+    """Committed transactions on this database so far, from Postgres itself.
+
+    Two readings and a subtraction give the profile's exact round-trip count -
+    a number cProfile cannot supply, because it counts every resumption of a
+    coroutine as a call and an async context manager therefore reports several
+    times the sessions that were actually opened. Inferring round trips from a
+    CPU profile of asyncio code is how a plausible wrong number gets published.
+
+    ``None`` when the counter cannot be read, which is *not measured*.
+    """
+    try:
+        async with database.session() as session:
+            return int(
+                (
+                    await session.execute(
+                        sa.text(
+                            "SELECT xact_commit FROM pg_stat_database "
+                            "WHERE datname = current_database()"
+                        )
+                    )
+                ).scalar_one()
+            )
+    except Exception:
+        return None
+
+
+async def breakdown_for(database: Database, ids: Sequence[uuid.UUID]) -> Breakdown | None:
+    """Where these runs' time went, from the ledger they wrote (Phase 22).
+
+    No instrument is added for this: Phase 16 already opens an ``agent_runs``
+    row per node execution with its own latency, so profiling starts as a
+    query over what the system recorded while doing its job.
+    """
+    async with database.session() as session:
+        rows = (
+            await session.execute(
+                select(AgentRunRow.agent_name, AgentRunRow.latency_ms).where(
+                    AgentRunRow.run_id.in_(list(ids))
+                )
+            )
+        ).all()
+    if not rows:
+        return None
+    return breakdown_of([(row[0], row[1]) for row in rows], runs=len(ids))
+
+
 async def has_pgvector(database: Database) -> bool:
     """Whether the extension is installed. Answerable before the schema exists."""
     async with database.session() as session:
@@ -246,6 +304,8 @@ async def run_profile(
         )
 
     ids = await offer(database, settings, queue, profile)
+    # After the rows are seeded, so the count is the work the *runs* did.
+    commits_before = await transactions(database)
     started_at = dt.datetime.now(dt.UTC)
     loop = asyncio.get_running_loop()
     began = loop.time()
@@ -278,6 +338,7 @@ async def run_profile(
 
     wall_seconds = loop.time() - began
     saturation = gateway.saturation
+    commits_after = await transactions(database)
     await built.close()
 
     return LoadResult(
@@ -287,6 +348,12 @@ async def run_profile(
         outcomes=tuple(await outcomes_of(database, ids)),
         timeline=sampler.timeline(capacity=profile.capacity),
         saturation=saturation,
+        breakdown=await breakdown_for(database, ids),
+        commits=(
+            None
+            if commits_before is None or commits_after is None
+            else commits_after - commits_before
+        ),
         not_measured={
             "redis_utilisation": (
                 "No Redis on this machine. `APP_ENV=test` selects the in-memory "
@@ -437,11 +504,38 @@ def parse(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="Where the artefacts are written.")
     parser.add_argument("--database-url", default=None)
     parser.add_argument(
+        "--cprofile",
+        default=None,
+        help="Write a cProfile of the whole run here (Phase 22).",
+    )
+    parser.add_argument(
         "--no-migrate",
         action="store_true",
         help="Assume the schema is already there. The default migrates it.",
     )
     return parser.parse_args(list(argv))
+
+
+@contextlib.contextmanager
+def profiled(path: Path) -> Iterator[None]:
+    """A cProfile around the whole run, written to ``path``.
+
+    The ledger breakdown says *which node* is expensive; this says which
+    functions inside it are. Deliberately the second instrument rather than the
+    first: a CPU profile of an asyncio worker is thousands of frames of
+    scheduler, and it only becomes readable once you already know what you are
+    looking for.
+    """
+    import cProfile
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        yield
+    finally:
+        profiler.disable()
+        profiler.dump_stats(str(path))
+        print(f"[loadtest] cProfile written to {path}", file=sys.stderr)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -453,7 +547,8 @@ def main(argv: Sequence[str]) -> int:
     Path(args.out).mkdir(parents=True, exist_ok=True)
     # psycopg's async mode refuses Windows' proactor loop, and the graph's
     # checkpointer runs on psycopg. The worker has the same requirement.
-    return asyncio.run(main_async(args), loop_factory=_loop_factory())
+    with profiled(Path(args.cprofile)) if args.cprofile else contextlib.nullcontext():
+        return asyncio.run(main_async(args), loop_factory=_loop_factory())
 
 
 def _loop_factory() -> object:

@@ -117,6 +117,21 @@ class Settings(BaseSettings):
     #: network, so a process can hold several; the ceiling is the database pool
     #: and the gateway's semaphore, which are per process and shared by all of
     #: them. Scale past this with more processes, not a bigger number.
+    #:
+    #: **Phase 22 measured what raising it buys**, at 50 offered jobs with the
+    #: provider held at 0.5 s per call (docs/load-testing.md §9): 4 slots gave
+    #: 33.5 runs/min, 8 gave 50.2, and 16 gave 52.2 - so the return is +50% to
+    #: 8 and +4% beyond it. What appears at 16 is the next two ceilings, in
+    #: order: 12-15% of model calls began queueing behind
+    #: ``llm_max_concurrent_calls`` (8), and the database pool ran into its
+    #: overflow (``db_pool_size`` 10 + 5). Raising this alone past 8 therefore
+    #: moves the bottleneck rather than removing it; raise all three together
+    #: or add a process.
+    #:
+    #: Left at 1 deliberately. That measurement is one laptop with a scripted
+    #: provider, and the deployment model is horizontal (ADR 0008) - one run
+    #: per task makes resource accounting and autoscaling mean something. It is
+    #: a floor to raise knowingly, not a number to tune blind.
     worker_concurrency: int = 1
     #: How long the worker blocks waiting for a job before ticking. The tick is
     #: what runs the reconciliation sweep and notices a shutdown signal, so this
@@ -334,6 +349,12 @@ class Settings(BaseSettings):
 
     #: Fifty parallel researchers become this many concurrent calls and the
     #: rest queue (TDD 6.3). Without it, fan-out becomes a rate-limit wall.
+    #:
+    #: Measured in Phase 22: at ``worker_concurrency`` of 4 and 8 no call ever
+    #: waited here, and at 16 between 12% and 15% did. So this is not the
+    #: binding constraint until a process runs more than eight researches at
+    #: once, and ``llm_slot_wait_seconds`` is how a deployment tells that it
+    #: has become one.
     llm_max_concurrent_calls: int = 8
 
     # --- research tools (Phase 6) -----------------------------------------

@@ -13,6 +13,7 @@ observation.
 
 from __future__ import annotations
 
+from app.loadtest import breakdown as node_breakdown
 from app.loadtest.measure import Latency, Series
 from app.loadtest.results import LoadResult, LoadSuite
 
@@ -90,6 +91,17 @@ def _levels(results: tuple[LoadResult, ...]) -> list[str]:
     )
 
 
+def _commits(results: tuple[LoadResult, ...]) -> list[str]:
+    rows = [
+        (
+            f"| {result.profile.name} | {_cell(result.commits)} | "
+            f"{_cell(result.commits_per_run, 1)} |"
+        )
+        for result in results
+    ]
+    return _table("| profile | commits | commits per run |", rows)
+
+
 def _throttling(results: tuple[LoadResult, ...]) -> list[str]:
     rows = []
     for result in results:
@@ -133,6 +145,15 @@ def render_markdown(suite: LoadSuite, *, title: str = "Load test results") -> st
         ]
         lines += _levels(suite.results)
 
+        lines += ["## Database round trips", ""]
+        lines += [
+            "Transactions Postgres committed while the profile ran, counted by "
+            "Postgres. A CPU profile cannot supply this: it counts every "
+            "resumption of a coroutine as a call.",
+            "",
+        ]
+        lines += _commits(suite.results)
+
         lines += ["## Model-call throttling", ""]
         lines += [
             "The gateway's own concurrency ceiling. A call that queued here was "
@@ -150,6 +171,20 @@ def render_markdown(suite: LoadSuite, *, title: str = "Load test results") -> st
         for result in suite.results:
             lines += [f"### {result.profile.name}", ""]
             lines += _latencies(result)
+
+        if any(result.breakdown is not None for result in suite.results):
+            lines += ["## Where the node time went", ""]
+            lines += [
+                "From the `agent_runs` rows each profile wrote, not from a "
+                "sampler. Ranked by total, because a cheap node that runs eight "
+                "times costs more than an expensive one that runs once.",
+                "",
+            ]
+            for result in suite.results:
+                if result.breakdown is None:
+                    continue
+                lines += [f"### {result.profile.name}", ""]
+                lines += node_breakdown.render(result.breakdown)
 
     not_measured = {
         key: reason for result in suite.results for key, reason in result.not_measured.items()

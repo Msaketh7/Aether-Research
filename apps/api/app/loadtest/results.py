@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.core.enums import RunStatus
+from app.loadtest.breakdown import Breakdown
 from app.loadtest.measure import Latency, Timeline, summarise
 from app.loadtest.profiles import LoadProfile
 from app.models.limiter import Saturation
@@ -87,6 +88,12 @@ class LoadResult:
     #: The gateway's own throttle over this profile, or ``None`` when the
     #: profile did not run against a gateway that reports it.
     saturation: Saturation | None
+    #: Where the node time went, from the ledger this profile wrote
+    #: (Phase 22). ``None`` when the rows could not be read.
+    breakdown: Breakdown | None = None
+    #: Transactions Postgres committed while this profile ran, counted by
+    #: Postgres (Phase 22). ``None`` when the counter could not be read.
+    commits: int | None = None
     #: Why a field that could have been measured was not. Keyed by field.
     not_measured: dict[str, str] = field(default_factory=dict)
 
@@ -117,6 +124,15 @@ class LoadResult:
         steady state inside its own burst would flatter it.
         """
         return self.completed / self.wall_seconds * 60.0 if self.wall_seconds > 0 else 0.0
+
+    @property
+    def commits_per_run(self) -> float | None:
+        """Database round trips one research run costs. The optimisation
+        target Phase 22 chose, because it is the one number that is large,
+        exactly measured, and paid on every run."""
+        if self.commits is None or not self.completed:
+            return None
+        return self.commits / self.completed
 
     @property
     def total_latency(self) -> Latency | None:
@@ -175,6 +191,13 @@ class LoadResult:
                     "utilisation": round(self.saturation.utilisation, 3),
                 }
             ),
+            "database": {
+                "commits": self.commits,
+                "commits_per_run": (
+                    None if self.commits_per_run is None else round(self.commits_per_run, 1)
+                ),
+            },
+            "breakdown": None if self.breakdown is None else self.breakdown.as_dict(),
             "not_measured": dict(self.not_measured),
         }
 

@@ -115,6 +115,13 @@ class ResearchRunRow(Base, TimestampMixin, UpdatedAtMixin):
     heartbeat_at: Mapped[dt.datetime | None]
     #: When a paused run becomes eligible again. NULL means immediately.
     next_attempt_at: Mapped[dt.datetime | None]
+    #: When the reconciliation sweep last put this run on the queue, so that a
+    #: backlog is not re-enqueued on every sweep (Phase 22). NULL means never.
+    #: Written *without* touching ``updated_at``: queueing a run again is not a
+    #: change to the run, and if it counted as one the sweep's own rule -
+    #: "re-dispatch only if something has happened since" - would re-arm itself
+    #: every time it fired.
+    last_queued_at: Mapped[dt.datetime | None]
 
     iteration_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Numeric, never float: money that drifts by a rounding error is a bug that

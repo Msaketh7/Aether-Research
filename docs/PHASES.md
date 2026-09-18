@@ -35,8 +35,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 19  | Testing                    | Done     |
 | 20  | Security                   | Done     |
 | 21  | Load testing               | Done     |
-| 22  | Optimization               | **Next** |
-| 23  | Infrastructure             | Planned  |
+| 22  | Optimization               | Done     |
+| 23  | Infrastructure             | **Next** |
 | 24  | CI/CD                      | Planned  |
 | 25  | Documentation              | Planned  |
 
@@ -1531,7 +1531,7 @@ broken sign-in fails loudly instead of measuring the wrong system.
 32 new API tests, and the four declared loads are asserted against this document
 so that dropping one fails the build.
 
-## Phase 22 — Optimization · **Next**
+## Phase 22 — Optimization · **Done**
 
 Profile first. Then, based on measurements: parallel agent execution, async I/O,
 connection pooling, Redis caching, search-result deduplication, embedding
@@ -1539,7 +1539,93 @@ caching, smaller models for simple tasks, model routing, context trimming,
 source compression, retrieval filtering, bounded concurrency. Document
 before/after metrics. **Do not optimize without measurement.**
 
-## Phase 23 — Infrastructure · Planned
+_Landed:_ one defect fixed with a measured before and after, one capacity
+relationship measured that previously had to be guessed, and two large numbers
+deliberately left alone with the measurement that says why. Most of the list
+above was already built - parallel agents (9), async I/O throughout, connection
+pooling (3), Redis caching (15), search-result deduplication (11), embedding
+caching (15), model routing (5), retrieval filtering (8), bounded concurrency
+(5, 9, 13) - so this phase is what the rule at the end of the list actually
+asks for: measure, then act only where the measurement points.
+
+**Profiling started as a `GROUP BY`, not as a sampler.** Phase 16 already writes
+an `agent_runs` row per node execution with its own `latency_ms`, so "which node
+is expensive" is answerable exactly, over real runs, from rows the system wrote
+while doing its job. `app/loadtest/breakdown.py` reads them back and the load
+report prints them. Over 25 runs: the **researcher is 42% of all node time**,
+and six of the remaining seven nodes cost 0.54 s each - which is the scripted
+provider's 0.5 s plus about 40 ms of bookkeeping. There is nothing in those to
+optimise that is not the provider.
+
+A CPU profile came second, behind a flag (`--cprofile`), and its first lesson
+was about itself: **cProfile counts every resumption of a coroutine as a call**,
+so an async context manager reports several times the sessions actually opened.
+Inferring database round trips from it produced a plausible wrong number.
+Postgres was asked instead - `pg_stat_database.xact_commit`, two readings and a
+subtraction - which gives **about 84 transactions per research run**, exactly.
+
+**The defect Phase 21 found is fixed, and the fix is measured.** The
+reconciliation sweep asked Postgres which runs should be on the queue and
+re-enqueued them, with no memory of having just done so; a run still `queued`
+because every slot was busy answered yes on every sweep. `last_queued_at`
+(migration `0013_dispatch_clock`) gives the question its memory, and the rule is
+one sentence: re-dispatch only if the run has never been dispatched, if
+_something has happened to it since_ (`last_queued_at <= updated_at`), or if
+that dispatch is old enough to be presumed lost. The middle clause is what keeps
+a handed-back run, a due retry and an expired lease from waiting - each of those
+writes `updated_at`, and none of them should queue behind a grace period.
+
+Peak queue depth at 100 offered jobs: **4,662 → 224**, and 665 → 60 at fifty.
+Completion stayed at 100% and throughput was unchanged within this machine's
+±2 runs/min repeat variance. The residual is the repair mechanism doing its job:
+from Postgres alone, "on the queue and not yet reached" and "the queue message
+was lost" are the same observation, so the sweep still retries once per grace
+period. The improvement factor is exactly the ratio of the grace period to the
+sweep interval, which is what it should be.
+
+One trap in that fix, caught by writing the test that fails without it:
+`UpdatedAtMixin` declares an application-side `onupdate`, and **SQLAlchemy
+applies it to a Core UPDATE as well as to an ORM flush** - so the stamp would
+have bumped `updated_at` too, made it equal `last_queued_at`, and satisfied its
+own rule on the very next sweep. The suppression would have been a no-op that
+looked correct and passed every other test. `updated_at` is now pinned to itself
+in that statement, with a test that fails if the pin is dropped.
+
+**The capacity relationship is now measured rather than guessed.** At 50 offered
+jobs with the provider held at 0.5 s per call, two repetitions per point:
+`worker_concurrency` of 4 gives 33.5 runs/min, 8 gives 50.2, 16 gives 52.2. Four
+to eight is +50%; eight to sixteen is +4%, and the reason it stops is in the same
+rows - at sixteen, **12-15% of model calls began waiting for a gateway slot**
+(the first time `llm_max_concurrent_calls` has bound anything in any measurement
+here, and what Phase 21's instrument was built to see) and the database pool went
+into its overflow. So raising `worker_concurrency` past 8 without also raising
+`llm_max_concurrent_calls` and `db_pool_size` moves the bottleneck rather than
+removing it.
+
+The shipped default of 1 was **not changed**. That measurement is one throttled
+laptop with a scripted provider, and the deployment model is horizontal
+(ADR 0008), where one run per task makes resource accounting and autoscaling mean
+something. A default changed on evidence this narrow would be the guesswork this
+phase exists to replace. The relationship is recorded where an operator raising
+the number will read it: beside the setting in `app/core/config.py`.
+
+**Two things were deliberately not optimised**, because "do not optimize without
+measurement" cuts both ways. 84 transactions per run is a lot, and is also under
+4% of a run while the worker's slots are busy 99% of the time; batching the event
+stream or deferring the ledger would buy a few percent and cost a progress stream
+that is durable as it happens and an `/activity` view that shows a step while it
+is still running. And the researcher's 42% has no hot spot inside it - the
+largest identifiable non-database cost is `justext`'s stoplist construction at
+about 46 ms per run, 0.75% of one. The honest conclusion from the profile is that
+this system is not slow in any one place; it is bounded by how many runs a
+process will execute at once, which is a capacity question rather than a code
+one.
+
+7 new API tests, 1332 total. `docs/load-testing.md` sections 7-9 carry the
+numbers, `data/loadtest/results.json` is the current measurement and
+`results-before-dispatch-clock.json` is the one it is compared against.
+
+## Phase 23 — Infrastructure · **Next**
 
 Dockerfiles for web, api and worker. Docker Compose for local development:
 Next.js, FastAPI, PostgreSQL, Redis, MinIO, Prometheus, Grafana. Terraform for

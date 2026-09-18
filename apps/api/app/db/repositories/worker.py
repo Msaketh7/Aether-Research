@@ -54,6 +54,20 @@ def _ahead(seconds: float) -> ColumnElement[dt.datetime]:
     return func.now() + dt.timedelta(seconds=seconds)
 
 
+def _not_already_queued(forgotten: ColumnElement[dt.datetime]) -> ColumnElement[bool]:
+    """Whether this run may be put on the queue again (Phase 22).
+
+    The three disjuncts are, in order: never dispatched; something has happened
+    to it since the last dispatch; that dispatch is old enough to be presumed
+    lost. See ``SqlAlchemyRunLifecycle.due``.
+    """
+    return or_(
+        ResearchRunRow.last_queued_at.is_(None),
+        ResearchRunRow.last_queued_at <= ResearchRunRow.updated_at,
+        ResearchRunRow.last_queued_at <= forgotten,
+    )
+
+
 class SqlAlchemyRunLifecycle:
     """Claims, heartbeats, releases and finishes runs for one worker process."""
 
@@ -186,9 +200,36 @@ class SqlAlchemyRunLifecycle:
     async def due(
         self, *, lease_seconds: float, queued_grace_seconds: float, limit: int
     ) -> list[uuid.UUID]:
+        """The runs that should be on the queue and are not, stamped as dispatched.
+
+        A write, not a read, and that is the point. Phase 21's load test
+        measured the read version putting **4,662 entries on the queue for 100
+        offered jobs**: a run that is still ``queued`` because every worker slot
+        is busy answers "yes, I should be on the queue" on every sweep, and
+        neither the sweep nor the queue deduplicates. Nothing ran twice - the
+        claim is a conditional update and the duplicate delivery is dropped -
+        but ``queue_depth`` is the gauge on the dashboard and the obvious input
+        to an autoscaler, and under Redis the list grew without bound for as
+        long as the backlog lasted.
+
+        So the sweep now remembers. A run is due when it is in a state that
+        belongs on the queue **and** one of three things is true:
+
+        * it has never been dispatched by a sweep (``last_queued_at IS NULL``);
+        * **something has happened to it since** the last dispatch
+          (``last_queued_at <= updated_at``) - which is what a worker handing it
+          back, a retry coming due and an expired lease all look like, so none
+          of those waits;
+        * the last dispatch is older than the grace period, so it was evidently
+          lost, which is the case this repair mechanism exists for.
+
+        Stamping and selecting in one statement, with ``SKIP LOCKED`` on the
+        rows being chosen, so two workers sweeping at the same instant do not
+        both dispatch the same run - the older read-then-enqueue could.
+        """
         expired = _ago(lease_seconds)
         forgotten = _ago(queued_grace_seconds)
-        statement = (
+        selected = (
             select(ResearchRunRow.id)
             .where(
                 or_(
@@ -215,12 +256,27 @@ class SqlAlchemyRunLifecycle:
                             ResearchRunRow.heartbeat_at <= expired,
                         ),
                     ),
-                )
+                ),
+                _not_already_queued(forgotten),
             )
             # Oldest first: a run that has been waiting longest is the one a
             # user has been watching longest.
             .order_by(ResearchRunRow.created_at)
             .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        statement = (
+            update(ResearchRunRow)
+            .where(ResearchRunRow.id.in_(selected.scalar_subquery()))
+            # `updated_at` is pinned to itself, not left out. `UpdatedAtMixin`
+            # declares an application-side `onupdate`, and SQLAlchemy applies
+            # that to a Core UPDATE as well as to an ORM flush - so omitting it
+            # would stamp `updated_at` too, make it equal `last_queued_at`, and
+            # satisfy the very rule below on the next sweep. The fix would have
+            # been a no-op that looked correct. Queueing a run again is not a
+            # change to the run.
+            .values(last_queued_at=func.now(), updated_at=ResearchRunRow.updated_at)
+            .returning(ResearchRunRow.id)
         )
         async with self._database.session() as session:
             return list((await session.execute(statement)).scalars())

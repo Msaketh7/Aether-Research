@@ -60,61 +60,67 @@ one bends, and which resource ran out first.
 ## 3. Pipeline: throughput and completion
 
 Four loads, one worker with four execution slots, each profile starting from an
-empty database.
+empty database. These are the numbers in
+[`data/loadtest/results.json`](../data/loadtest/results.json).
 
 | Profile     | Offered | Capacity | Wall (s) | Completed | Completion rate | Runs/min  |
 | ----------- | ------- | -------- | -------- | --------- | --------------- | --------- |
-| offered-10  | 10      | 4        | 26.8     | 10        | 100.0%          | 22.38     |
-| offered-25  | 25      | 4        | 44.6     | 25        | 100.0%          | 33.67     |
-| offered-50  | 50      | 4        | 80.5     | 50        | 100.0%          | 37.25     |
-| offered-100 | 100     | 4        | 152.9    | 100       | 100.0%          | **39.25** |
+| offered-10  | 10      | 4        | 27.3     | 10        | 100.0%          | 22.02     |
+| offered-25  | 25      | 4        | 41.4     | 25        | 100.0%          | 36.23     |
+| offered-50  | 50      | 4        | 80.5     | 50        | 100.0%          | 37.28     |
+| offered-100 | 100     | 4        | 158.4    | 100       | 100.0%          | **37.88** |
 
-**Nothing was lost and nothing failed**, at any load. 185 research runs, 185
-completions, each with its sources ingested, its claims extracted and verified,
-its report assembled and its citations validated.
+**Nothing was lost and nothing failed**, at any load, across both the Phase 21
+and Phase 22 sweeps - 370 research runs in total, each with its sources
+ingested, its claims extracted and verified, its report assembled and its
+citations validated.
 
-Throughput _rises_ with offered load and flattens at about 39 runs/min. That is
+Throughput _rises_ with offered load and flattens at about 37 runs/min. That is
 not a scaling gain: the four slots are the same four slots. It is the ramp
 disappearing into the average - in a 27-second profile, the tail in which fewer
-than four slots are busy is a large fraction of the run; in a 153-second one it
-is not. The asymptote, about 39 runs/min, is this machine's real capacity at
-four slots.
+than four slots are busy is a large fraction of the run; in a 158-second one it
+is not. The asymptote is this machine's real capacity at four slots.
+
+**Repeat-to-repeat variance on this machine is about 2 runs/min**, measured
+directly in section 9 by running identical profiles twice. Any comparison in
+this document smaller than that is noise, and is called noise.
 
 ## 4. Pipeline: latency
 
 | Profile     | Stage         | P50 (s)  | P95 (s)  | P99 (s) | max (s) |
 | ----------- | ------------- | -------- | -------- | ------- | ------- |
-| offered-10  | total         | 20.89    | 26.29    | 26.53   | 26.59   |
-|             | queue wait    | 14.55    | 20.91    | 21.15   | 21.21   |
-|             | execution     | 6.60     | 14.17    | 14.20   | 14.20   |
-| offered-25  | total         | 25.32    | 39.51    | 43.29   | 44.49   |
-|             | queue wait    | 19.15    | 32.81    | 37.73   | 39.29   |
-|             | execution     | 6.18     | 7.74     | 7.87    | 7.90    |
-| offered-50  | total         | 44.42    | 75.90    | 80.25   | 80.27   |
-|             | queue wait    | 38.53    | 69.85    | 73.67   | 73.78   |
-|             | execution     | 6.14     | 7.09     | 7.16    | 7.19    |
-| offered-100 | total         | 81.70    | 146.30   | 152.65  | 152.67  |
-|             | queue wait    | 75.84    | 140.63   | 146.24  | 146.25  |
-|             | **execution** | **6.11** | **7.06** | 7.14    | 7.15    |
+| offered-10  | total         | 21.58    | 27.07    | 27.11   | 27.12   |
+|             | queue wait    | 16.07    | 21.51    | 21.53   | 21.54   |
+|             | execution     | 5.57     | 15.44    | 15.45   | 15.45   |
+| offered-25  | total         | 25.22    | 37.29    | 40.37   | 41.34   |
+|             | queue wait    | 19.05    | 31.41    | 35.07   | 36.22   |
+|             | execution     | 5.98     | 6.90     | 7.06    | 7.09    |
+| offered-50  | total         | 45.22    | 77.05    | 80.38   | 80.38   |
+|             | queue wait    | 39.54    | 70.83    | 74.26   | 74.38   |
+|             | execution     | 6.07     | 7.29     | 7.98    | 8.08    |
+| offered-100 | total         | 85.50    | 152.05   | 158.35  | 158.38  |
+|             | queue wait    | 79.87    | 145.64   | 151.99  | 152.00  |
+|             | **execution** | **6.15** | **6.92** | 7.15    | 7.16    |
 
 **This is the most important table in the document, and the column to read is
-`execution`.** It does not move. A research run takes about 6.1 seconds at the
-median whether ten jobs are outstanding or a hundred; its P95 is 7.1 s at a
-hundred, _lower_ than at ten. The run itself does not get slower as the system
+`execution`.** It does not move. A research run takes about 6 seconds at the
+median whether ten jobs are outstanding or a hundred; its P95 at a hundred is
+6.9 s, _lower_ than at ten. The run itself does not get slower as the system
 fills up.
 
 Everything that grows is queue wait, and it grows linearly with the backlog -
-14.5 s, 19.2 s, 38.5 s, 75.8 s. That is a system that is **queueing, not
+16.1 s, 19.1 s, 39.5 s, 79.9 s. That is a system that is **queueing, not
 degrading**, which is the behaviour the architecture was chosen for. A system
 that degraded instead would show execution latency climbing with load, and the
 fix for that is different: it would mean the runs were contending with each
 other rather than waiting for a slot.
 
-The one anomaly is `offered-10`'s execution P95 of 14.2 s against a 6.6 s
+The one anomaly is `offered-10`'s execution P95 of 15.4 s against a 5.6 s
 median. That is the process's remaining cold start - the first runs through pay
 for imports and connections that every later run finds warm. `warm_up()` in the
 driver pays LlamaIndex's four and a half seconds before the first profile is
-timed, but not everything.
+timed, but not everything, and in a ten-run profile one cold run is the 90th
+percentile.
 
 ## 5. Pipeline: what ran out first
 
@@ -123,17 +129,20 @@ this did not see.
 
 | Profile     | Peak queue depth | Peak running | Slots saturated | Peak db in use | Peak db overflow | Peak LLM calls in flight |
 | ----------- | ---------------- | ------------ | --------------- | -------------- | ---------------- | ------------------------ |
-| offered-10  | 10               | 4            | 77%             | 5              | 0                | 4                        |
-| offered-25  | 25               | 4            | 88%             | 5              | 0                | 4                        |
-| offered-50  | **665**          | 4            | 99%             | 5              | 0                | 4                        |
-| offered-100 | **4662**         | 4            | 100%            | 5              | 0                | 4                        |
+| offered-10  | 10               | 4            | 79%             | 6              | 0                | 4                        |
+| offered-25  | 25               | 4            | 87%             | 4              | 0                | 4                        |
+| offered-50  | 60               | 4            | 96%             | 5              | 0                | 4                        |
+| offered-100 | 224              | 4            | 99%             | 5              | 0                | 4                        |
+
+The queue-depth column is after the Phase 22 fix below; before it, the same two
+loads read 665 and 4,662.
 
 Three answers and one defect.
 
 **The worker's execution slots ran out, and nothing else did.** At 100 offered
-jobs the four slots were busy in 100% of samples. That is the ceiling.
+jobs the four slots were busy in 99% of samples. That is the ceiling.
 
-**The database is nowhere near it.** Peak occupancy was 5 connections against a
+**The database is nowhere near it.** Peak occupancy was 6 connections against a
 pool of 10 with 5 of overflow available, and the overflow was never touched at
 any load. Adding database capacity would buy nothing here.
 
@@ -150,40 +159,70 @@ across the four profiles, **zero** waited for a gateway slot; peak in-flight was
 
 Four runs execute at a time and each makes its calls in sequence, so the process
 never asks for more than four of its eight slots. Raising
-`llm_max_concurrent_calls` would change nothing. The lever is worker
-concurrency, or a second worker.
+`llm_max_concurrent_calls` would change nothing _at this worker concurrency_.
+Section 9 measures the concurrency at which it does start to bind, which is
+sixteen. The lever here is worker concurrency, or a second worker.
 
-### The defect: queue depth amplifies under a backlog
+### The defect: queue depth amplified under a backlog (fixed in Phase 22)
 
 **Peak queue depth reached 4,662 entries for 100 offered jobs**, and 665 for 50.
-Ten and twenty-five, which drain inside the grace period, show exactly the
+Ten and twenty-five, which drain inside the grace period, showed exactly the
 number offered.
 
-The cause is the reconciliation sweep in
+The cause was the reconciliation sweep in
 [`app/workers/loop.py`](../apps/api/app/workers/loop.py). Every sweep asks
 Postgres which runs _should_ be on the queue - and a run that is still `queued`
-because the worker is busy answers yes, every single time, for as long as the
-backlog lasts. Neither the sweep nor the queue deduplicates, so each sweep adds
-up to `worker_sweep_batch` entries that are already there.
+because the worker is busy answered yes, every single time, for as long as the
+backlog lasted. Neither the sweep nor the queue deduplicated, so each sweep
+added up to `worker_sweep_batch` entries that were already there.
 
-Nothing is executed twice: claiming a run is a conditional update, and the
-duplicate delivery is dropped. What breaks is the measurement, and it breaks in
-the place where it matters most:
+Nothing was executed twice: claiming a run is a conditional update, and the
+duplicate delivery is dropped. What broke was the measurement, in the place
+where it matters most:
 
 - **`queue_depth` is the metric on the Grafana dashboard**, and it is the
   obvious signal for scaling workers. Reading 4,662 when 100 jobs are
   outstanding is wrong by a factor of 46, and an autoscaler driven by it would
   be driven off a cliff.
-- **Under Redis, the list grows without bound** for as long as the backlog
-  lasts, rather than being merely inaccurate.
-- The worker spends reserve round trips on stale ids. At this scale it costs
-  little - throughput still rose from 50 to 100 - but the work is pure waste.
+- **Under Redis, the list would grow without bound** for as long as the backlog
+  lasted, rather than being merely inaccurate.
+- The worker spent reserve round trips on stale ids.
 
-This is why load testing exists: the sweep is covered by tests, all of which
-pass, and the scenario suite drives it fifteen ways. None of them holds a
+This is why load testing exists. The sweep is covered by tests, all of which
+passed, and the scenario suite drives it fifteen ways - but none of them holds a
 backlog open for longer than the grace period, because none of them offers more
-work than the worker can take. **It is fixed and re-measured in Phase 22**,
-where it is the first measured optimisation.
+work than the worker can take.
+
+**The fix gives the sweep a memory** (Phase 22, migration `0013_dispatch_clock`).
+`research_runs.last_queued_at` records when a sweep last put a run on the queue,
+and a run is re-dispatched only when one of three things is true: it has never
+been dispatched; _something has happened to it since_
+(`last_queued_at <= updated_at`), which is what a handed-back run, a due retry
+and an expired lease all look like, so none of those waits; or that dispatch is
+older than the grace period and was evidently lost, which is the case the repair
+mechanism exists for.
+
+Measured on the same four loads, same machine, nothing else changed:
+
+| Profile     | Offered | Peak queue depth before | after   | Completion rate |
+| ----------- | ------- | ----------------------- | ------- | --------------- |
+| offered-10  | 10      | 10                      | 10      | 100% -> 100%    |
+| offered-25  | 25      | 25                      | 25      | 100% -> 100%    |
+| offered-50  | 50      | 665                     | **60**  | 100% -> 100%    |
+| offered-100 | 100     | 4,662                   | **224** | 100% -> 100%    |
+
+A 21-fold reduction at the largest load, and the residual is not a bug. The
+sweep still re-dispatches a genuinely-waiting run once per grace period, because
+from Postgres alone "on the queue, not yet reached" and "the queue message was
+lost" are the same observation - and giving up the second would turn one lost
+message into a run that waits for a person to notice. The improvement factor is
+exactly the ratio of the grace period to the sweep interval, which is what it
+should be.
+
+Throughput was unchanged within this machine's run-to-run noise (39.2 to 37.9
+runs/min at 100 offered, with about 2 runs/min between repeats of an identical
+profile). The fix was never for throughput; it was so that the number on the
+dashboard is the number of jobs.
 
 ## 6. Surface: the HTTP API under load
 
@@ -250,7 +289,102 @@ readiness check in forty-five is also the shape that makes a replica flap, and
 whether the pool should be larger than 10+5 for an API that authenticates is a
 question for a deployment's sizing, not for this measurement.
 
-## 7. What these numbers do not tell you
+## 7. Where a run's time goes
+
+Profiling started as a `GROUP BY`, not as a sampler: Phase 16 already writes an
+`agent_runs` row per node execution with its own `latency_ms`, so "which node is
+expensive" is answerable exactly, over real runs, from rows the system wrote
+while doing its job. 25 runs, 0.5 s per model call:
+
+| Agent                | Executions | Total (s) | Share     | Mean (s) | P95 (s) |
+| -------------------- | ---------- | --------- | --------- | -------- | ------- |
+| `researcher`         | 25         | 60.0      | **42.0%** | 2.401    | 7.795   |
+| `evidence_extractor` | 25         | 14.4      | 10.1%     | 0.577    | 0.652   |
+| `critic`             | 50         | 14.0      | 9.8%      | 0.280    | 0.554   |
+| `planner`            | 25         | 13.7      | 9.5%      | 0.546    | 0.588   |
+| `synthesizer`        | 25         | 13.5      | 9.4%      | 0.540    | 0.554   |
+| `verifier`           | 25         | 13.5      | 9.4%      | 0.538    | 0.552   |
+| `claim_normalizer`   | 25         | 13.4      | 9.4%      | 0.538    | 0.551   |
+| `citation_validator` | 25         | 0.6       | 0.4%      | 0.023    | 0.040   |
+
+Two things to read carefully before drawing a conclusion from this table.
+
+**Fifty critic executions over 25 runs is not a loop that ran twice.**
+`NODE_AGENT` maps both the contradiction checker and the critic to
+`AgentName.CRITIC`, because the product's vocabulary has nine agents and those
+are one of them. It is two nodes running once each.
+
+**Six of the eight rows cost 0.54 s, which is the scripted provider plus about
+40 ms.** Those nodes are one model call and some bookkeeping; there is nothing
+in them to optimise that is not the provider. The only node doing substantial
+work of its own is the researcher, which searches, selects, fetches, extracts,
+chunks, stores and retrieves - and it is 42% of the total. `citation_validator`
+calls no model at all, and its 23 ms says so.
+
+## 8. What was deliberately not optimised
+
+"Do not optimize without measurement" cuts both ways. Two numbers here are large
+and were left alone, because the measurement says they are not what the system
+is waiting on.
+
+**About 84 database transactions per research run** (83.3 to 87.7 across the
+four profiles), counted by Postgres itself
+(`pg_stat_database.xact_commit`, two readings and a subtraction - a CPU profile
+cannot supply this, because it counts every resumption of a coroutine as a call,
+so an async context manager reports several times the sessions actually opened).
+Eighty-four is a lot. It is also roughly 250 ms of a 6,100 ms run: under 4%,
+while the worker's execution slots are busy 100% of the time. Batching the event
+stream or deferring the ledger would buy a few percent and cost the properties
+those writes exist for - a progress stream that is durable as it happens, and an
+`/activity` view that shows a step while it is still running.
+
+**The researcher at 42% of node time.** It is the node that does the work: two
+model calls of the declared 0.5 s, then a real fetch, extraction, chunking,
+storage and retrieval cycle. A CPU profile of it
+(`make loadtest ARGS="--cprofile run.prof"`) shows the largest identifiable
+non-database cost is `justext`'s stoplist construction inside trafilatura, at
+about 46 ms per run - 0.75% of a run. There is no hot spot; there is a pipeline
+that costs what it costs.
+
+The honest conclusion from the profile is that **this system is not slow in any
+one place.** It is bounded by how many runs a process will execute at once,
+which is a capacity question rather than a code one - so that is what was
+measured next.
+
+## 9. Capacity: what raising worker concurrency actually buys
+
+50 offered jobs, provider held at 0.5 s per call, two repetitions of each point
+so that the noise is visible rather than assumed.
+
+| `worker_concurrency` | Runs/min (rep 1) | (rep 2) | Mean     | Model calls that queued | Peak db in use | Peak db overflow |
+| -------------------- | ---------------- | ------- | -------- | ----------------------- | -------------- | ---------------- |
+| 4                    | 34.37            | 32.58   | 33.5     | 0%                      | 5              | 0                |
+| 8                    | 51.19            | 49.14   | **50.2** | 0%                      | 9              | 0                |
+| 16                   | 52.62            | 51.74   | 52.2     | **12.5% / 15.2%**       | 15             | **5**            |
+
+**Four to eight is +50%. Eight to sixteen is +4%**, and the reason it stops is
+visible in the same row: at sixteen, two other ceilings appear at once. Between
+12% and 15% of model calls began waiting for a gateway slot - the first time in
+any measurement here that `llm_max_concurrent_calls` (8) has bound anything, and
+the reason Phase 21 built the instrument that can see it - and the database pool
+went into its overflow, 15 connections in use against a base of 10.
+
+So the three settings are related, and the relationship is now measured rather
+than guessed: **raising `worker_concurrency` past 8 without also raising
+`llm_max_concurrent_calls` and `db_pool_size` moves the bottleneck instead of
+removing it.**
+
+The shipped default of `worker_concurrency: 1` was **not changed**, and the
+reason is the one in section 2: this is one throttled laptop with a scripted
+provider, and the deployment model is horizontal
+([ADR 0008](ADRs/0008-cloud-deployment.md)), where one run per task makes
+resource accounting and autoscaling mean something. A default changed on the
+strength of a measurement this narrow would be exactly the guesswork this phase
+exists to replace. What the measurement is good for is the relationship, and
+that is recorded where an operator raising the number will read it - beside the
+setting itself in `app/core/config.py`.
+
+## 10. What these numbers do not tell you
 
 Stated plainly, because a load test's credibility is mostly its disclaimers.
 
@@ -270,7 +404,7 @@ Stated plainly, because a load test's credibility is mostly its disclaimers.
   is covered by the scenario suite but has not been load tested.
 - **The absolute numbers are this laptop's.** See §2.
 
-## 8. Reproducing this
+## 11. Reproducing this
 
 ```bash
 make loadtest                          # writes data/loadtest/results.{json,md}

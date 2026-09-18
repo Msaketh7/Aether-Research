@@ -508,7 +508,8 @@ variable, with no code change
 | 19    | Testing: the fifteen end-to-end research scenarios, each driven through the whole vertical slice                  | Done    |
 | 20    | Security: authentication, per-identity rate limiting, an audit log, dependency scanning                           | Done    |
 | 21    | Load testing: 10/25/50/100 concurrent research jobs and a Locust ladder over the API, with measured numbers       | Done    |
-| 22+   | Optimisation, infrastructure, CI/CD, documentation                                                                | Planned |
+| 22    | Optimisation: profiled, one measured defect fixed with before/after, the worker-concurrency curve measured        | Done    |
+| 23+   | Infrastructure, CI/CD, documentation                                                                              | Planned |
 
 In **mock mode** the whole product is explorable: browse research history, start
 a run, watch the agent timeline stream over SSE, inspect sources and duplicate

@@ -20,6 +20,7 @@ import uuid
 import pytest
 
 from app.core.enums import RunStatus
+from app.loadtest.breakdown import breakdown_of
 from app.loadtest.measure import Sample, Sampler, percentile, summarise, timeline_of
 from app.loadtest.profiles import DEFAULT_PROFILES, LoadProfile, profile_named
 from app.loadtest.report import render_markdown
@@ -305,6 +306,38 @@ def test_the_report_names_the_profiles_that_did_not_run():
 def test_a_suite_with_no_results_says_so_rather_than_printing_empty_tables():
     rendered = render_markdown(LoadSuite(results=(), conditions={}))
     assert "No profile produced a measurement." in rendered
+
+
+# --- where the time went ---------------------------------------------------
+
+
+def test_the_breakdown_ranks_by_total_not_by_mean():
+    """A cheap node that runs eight times costs more than one expensive call.
+
+    Ranking by mean would put the single 900 ms call at the top and send an
+    optimisation at the wrong thing.
+    """
+    breakdown = breakdown_of(
+        [("planner", 900)] + [("researcher", 200)] * 8,
+        runs=1,
+    )
+    assert [node.agent for node in breakdown.nodes] == ["researcher", "planner"]
+    assert breakdown.share_of("researcher") == pytest.approx(1.6 / 2.5)
+
+
+def test_an_execution_with_no_latency_still_counts_as_one():
+    """Otherwise a node that keeps dying before its span closes looks cheap."""
+    breakdown = breakdown_of([("critic", None), ("critic", 500)], runs=1)
+    node = breakdown.nodes[0]
+    assert node.executions == 2
+    assert node.latency is not None and node.latency.count == 1
+
+
+def test_a_breakdown_of_nothing_has_no_shares_rather_than_zero_ones():
+    breakdown = breakdown_of([], runs=0)
+    assert breakdown.nodes == ()
+    assert breakdown.share_of("planner") is None
+    assert breakdown.per_run_seconds is None
 
 
 # --- the gateway's throttle ------------------------------------------------
