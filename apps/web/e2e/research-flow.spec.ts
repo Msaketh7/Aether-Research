@@ -132,6 +132,38 @@ test('a failed run explains itself instead of showing an empty report', async ({
   await expect(page.getByText('No report was produced')).toBeVisible();
 });
 
+test('a user can cancel a running research job and the run says so', async ({ page }) => {
+  // Phase 19 names user cancellation as a scenario that must be covered. The
+  // backend half is a worker test; this is the half a user performs - and the
+  // control only exists while the run is live, so it has to be a live run.
+  test.setTimeout(120_000);
+
+  await page.goto('/research/new');
+  await page
+    .getByTestId('question-input')
+    .fill('Compare inference providers on published GPU-hour pricing and committed capacity.');
+  await page.getByTestId('start-research').click();
+
+  await expect(page).toHaveURL(/\/research\/[0-9a-f-]{36}$/);
+  const cancel = page.getByTestId('cancel-run');
+  await expect(cancel).toBeVisible({ timeout: 30_000 });
+  await cancel.click();
+
+  await expect(page.locator('[data-status="cancelled"]').first()).toBeVisible({
+    timeout: 30_000,
+  });
+  // The control goes with the run: there is nothing left to cancel.
+  await expect(cancel).toBeHidden();
+
+  // Cancelling is not a rollback. What the run had already gathered stays, and
+  // the report page explains its absence rather than showing an empty one.
+  await runTab(page, 'Report').click();
+  await expect(page.getByText('No report was produced')).toBeVisible();
+  await expect(
+    page.getByText(/sources and evidence it did gather are still available/i),
+  ).toBeVisible();
+});
+
 test('the activity trace shows agents, tool calls and model calls', async ({ page }) => {
   await page.goto('/dashboard');
   await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();

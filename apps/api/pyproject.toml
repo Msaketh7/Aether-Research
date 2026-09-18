@@ -131,3 +131,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["error"]
 addopts = "-q --strict-markers"
+markers = [
+    # Phase 19. Claimed by `tests/scenarios/catalogue.py`, so that `-m scenario`
+    # runs the fifteen situations the brief requires be survivable, and a
+    # scenario can be selected by name when one of them regresses.
+    "scenario: one of the named end-to-end research scenarios",
+]

@@ -32,8 +32,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 16  | Cost and token governance  | Done     |
 | 17  | Observability              | Done     |
 | 18  | Evaluation framework       | Done     |
-| 19  | Testing                    | **Next** |
-| 20  | Security                   | Planned  |
+| 19  | Testing                    | Done     |
+| 20  | Security                   | **Next** |
 | 21  | Load testing               | Planned  |
 | 22  | Optimization               | Planned  |
 | 23  | Infrastructure             | Planned  |
@@ -1240,7 +1240,7 @@ Found while building and running it:
   typing**, quietly for ruff and loudly for mypy. Every other seam in this
   codebase is a Protocol; this one now is too.
 
-## Phase 19 — Testing · **Next**
+## Phase 19 — Testing · **Done**
 
 pytest, Vitest, Playwright, integration tests, agent workflow tests, retriever
 tests, evaluation tests. Scenarios that must be covered: successful deep
@@ -1250,7 +1250,90 @@ budget exceeded; maximum iterations reached; malicious prompt injection in
 source content; SSRF attempt; user cancellation; research resume after
 interruption.
 
-## Phase 20 — Security · Planned
+_Landed:_ `apps/api/tests/scenarios/`, where each of the fifteen situations has
+at least one end-to-end test over the **whole vertical slice** - queue, worker, lease,
+graph, all nine agents, the toolbelt with its SSRF guard and retry policy,
+ingestion, retrieval, the evidence projection, report assembly, the citation
+check, the event stream, the call ledger and real Postgres. `make
+test-scenarios` runs them; they are part of `make api-test` too. Plus the user's
+half of cancellation as a Playwright journey, which had no test at all.
+
+**Exactly two things are replaced, and they are the two a test may not have.**
+The model, by a provider that answers from a script - behind the _real_ gateway,
+so routing, failover, retries and pricing run and a run's cost is still the sum
+of what the registry says its calls cost. And the socket, by an `httpx2` mock
+transport - behind the _real_ guarded client, so the SSRF guard, the redirect
+policy, the size ceiling, robots and the search vendor's own request shaping and
+response parsing all run. Everything between them is the system.
+
+**Answers are chosen by schema and by prompt, never by call number.** The graph
+runs researchers in parallel, so a script indexed by position answers whichever
+subtask won the race. A rule keyed by the schema a call asked for is
+deterministic however the calls interleave - and where a real model would have
+read its input, the script reads it too: `quoting` finds the passage that
+actually contains the quote rather than guessing at retrieval's ranking.
+
+**The list of scenarios is code, not prose.** `catalogue.py` holds the fifteen,
+every test claims its entry by decorator at import time, and `test_catalogue.py`
+fails the build when the two disagree in either direction. A required scenario
+that quietly lost its test is the failure mode this phase exists to prevent, and
+a document cannot catch it.
+
+Four defects, each of which only a whole-run test could find:
+
+- **A run silently lost sources it had already fetched and parsed.** The
+  filesystem object store checks that a key's resolved path is inside the
+  artifact root, comparing against a root resolved once at construction. A
+  researcher collects pages concurrently, so several uploads land in a run
+  prefix that does not exist yet and each creates it - and on Windows a
+  `resolve()` racing the creation of its own parent returns the
+  extended-length form of the path, which is not "inside" the plain-form root.
+  A measured reproduction refused one upload in seven. Nothing above it ever
+  knew: the collector correctly treats a page it cannot store as one page's
+  problem, so a run just came back with fewer sources than it gathered.
+  `_path_for` now normalises both sides, which is not a relaxation - the
+  resolution still happens and a path that genuinely escapes still fails - and
+  `test_object_storage.py` holds both backends to it.
+- **FR-7 was unreachable.** A claim's id was derived from its normalized key
+  alone, and the contradiction checker looks for a key held by _more than one_
+  claim - so two sources quoting different numbers about one subject collapsed
+  onto a single id, the second silently replacing the first, and no key could
+  ever be held by two claims. Every unit test of the checker passed, on state
+  the normalizer cannot produce. A claim's identity is now what it asserts:
+  key _and_ normalised value. Corroboration is unchanged - two sources agreeing
+  on both halves are still one claim with two spans - and a round that rephrases
+  a claim out of its value corroborates the one it re-found rather than sitting
+  beside it.
+- **Every document ingestion raised at the default log level.**
+  `logging.makeRecord` refuses an `extra` field that shares a name with a
+  `LogRecord` attribute, and three call sites passed `created`, which every
+  record has. `log_level` defaults to `info`, so in any ordinary deployment the
+  ingestion pipeline threw a `KeyError` after doing all its work; the collector
+  catches per-page failures, so a worker would have gathered nothing and every
+  run would have failed at synthesis, several layers from the cause. Uploads
+  would have 500'd. Nothing saw it because the suite pins `log_level` to
+  `warning` and a disabled logger never builds a record - which is the same
+  reason Phase 10's `filename` collision hid. Fixed at all three sites, and
+  `test_errors_and_logging.py` now scans every `extra={...}` literal in `app/`
+  for the whole class. The scenario suite turns the `app` loggers up to INFO,
+  because a suite claiming to run the system a deployment runs has to run its
+  logging too.
+- **The worker harness wrapped a real researcher in a helper meant for a
+  scripted one**, seeding source rows the real collector had already written.
+  Harmless by luck - the helper checks before inserting - and wrong the moment
+  either side changed.
+
+42 new tests, 1225 total. The whole suite is green; nothing here is skipped
+except the pgvector and Redis tests that skip everywhere on this machine.
+
+Two things the suite records rather than changes: `llm_calls.fell_back_from`
+names a model by its _registry key_ while `model` is the vendor's model id, two
+adjacent columns in two vocabularies; and a report's contradictions section is
+written by the synthesizer, not assembled from rows as Evidence and References
+are, so what the tests assert is that the writer is _given_ both sides inside
+the delimited block.
+
+## Phase 20 — Security · **Next**
 
 Authentication, authorisation, per-user research access, rate limiting, request
 validation, SSRF prevention, prompt injection defences, content sanitisation,

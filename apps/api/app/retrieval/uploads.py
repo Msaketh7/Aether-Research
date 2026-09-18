@@ -93,7 +93,7 @@ class UploadService:
                 "upload_id": str(row.id),
                 "format": detected.format.value,
                 "bytes": len(data),
-                "created": created,
+                "was_created": created,
             },
         )
         return UploadedFile.model_validate(row), created

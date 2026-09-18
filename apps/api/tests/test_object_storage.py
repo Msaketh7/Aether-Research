@@ -171,6 +171,41 @@ async def test_content_addressed_uploads_converge_on_one_object(storage: ObjectS
     assert first.etag == second.etag
 
 
+async def test_uploads_into_one_fresh_prefix_at_once_are_all_stored(storage: ObjectStorage):
+    """The defect a Phase 19 scenario found, as the contract it broke.
+
+    A researcher collects pages concurrently, so several uploads land in a run
+    prefix that does not exist yet and each creates it. The filesystem backend
+    resolved the candidate path while a sibling upload was creating that same
+    parent, and Windows handed back the extended-length form of it - so the
+    containment check refused a path directly inside the root. One upload in
+    seven, in a measured reproduction.
+
+    Nothing above ever saw it: the collector treats a page it cannot store as
+    one page's problem and carries on, so a run simply came back with fewer
+    sources than it gathered. Parametrised over both backends because the
+    contract is "an upload that is not refused for a stated reason is stored",
+    and that is not a filesystem-specific promise.
+    """
+    import asyncio
+
+    run_id = uuid4()
+    keys = [
+        run_artifact_key(run_id=run_id, kind=ArtifactKind.PDF, name=f"{index:02d}-doc.pdf")
+        for index in range(8)
+    ]
+
+    results = await asyncio.gather(
+        *(storage.upload(key, f"body {key}".encode()) for key in keys),
+        return_exceptions=True,
+    )
+
+    failed = [result for result in results if isinstance(result, BaseException)]
+    assert not failed, f"concurrent uploads into one new prefix were refused: {failed}"
+    for key in keys:
+        assert await storage.download(key) == f"body {key}".encode()
+
+
 # --- bounds -----------------------------------------------------------------
 
 

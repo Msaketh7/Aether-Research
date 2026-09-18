@@ -283,6 +283,106 @@ def test_a_claim_id_is_derived_from_the_run_and_what_it_asserts():
     assert claim_identity(fake.RESEARCH_ID, key) != claim_identity(fake.USER_ID, key)
 
 
+def test_a_claims_value_is_part_of_what_it_asserts_and_so_part_of_its_id():
+    """The key groups; the value distinguishes.
+
+    Both are needed and they pull in opposite directions. Identity on the key
+    alone makes two sources quoting different numbers one claim, and then no key
+    is ever held by two claims, so the contradiction check has nothing to
+    compare. Identity on the value alone would stop the loop corroborating
+    anything.
+    """
+    key = "provider a | h100 price | 2026"
+    assert claim_identity(fake.RESEARCH_ID, key, "$4.10") != claim_identity(
+        fake.RESEARCH_ID, key, "$6.80"
+    )
+    assert claim_identity(fake.RESEARCH_ID, key, "$4.10") == claim_identity(
+        fake.RESEARCH_ID, key, "4.10"
+    ), "the value is normalised the way the key is, so one figure is one claim"
+
+
+async def test_two_sources_disagreeing_about_one_figure_are_two_claims():
+    """The state the contradiction checker is built to be given.
+
+    Regression for a defect a whole-run test found in Phase 19: with the value
+    left out of a claim's identity these two collapsed onto one id, the second
+    silently replacing the first, and FR-7 was unreachable in a real run while
+    every unit test of the checker passed on state nothing could produce.
+    """
+    key = "provider a | h100 price | 2026"
+    gateway, _, _ = fake.gateway(
+        ClaimsOutput(
+            claims=(
+                ProposedClaim(
+                    text="Provider A charges $4.10 per H100 GPU-hour.",
+                    normalized_key=key,
+                    claim_type=ClaimType.QUANTITATIVE,
+                    object_value="$4.10",
+                    evidence=(1,),
+                    confidence=0.7,
+                ),
+                ProposedClaim(
+                    text="Provider A charges $6.80 per H100 GPU-hour.",
+                    normalized_key=key,
+                    claim_type=ClaimType.QUANTITATIVE,
+                    object_value="$6.80",
+                    evidence=(2,),
+                    confidence=0.6,
+                ),
+            )
+        )
+    )
+    state = fake.state(evidence=[fake.evidence("ev-1"), fake.evidence("ev-2", span_start=200)])
+
+    result = await ClaimNormalizerAgent(gateway).normalize(state)
+
+    assert len(result.value) == 2
+    assert len({claim.id for claim in result.value}) == 2
+    assert {claim.normalized_key for claim in result.value} == {key}, "one key, so they meet"
+    assert {claim.object_value for claim in result.value} == {"$4.10", "$6.80"}
+
+
+async def test_a_round_that_rephrases_a_claim_out_of_its_value_still_corroborates_it():
+    """The cost of putting the value in the identity, paid for here.
+
+    A later round that words the claim without its figure would otherwise derive
+    a value-less id and sit beside the claim it re-found. It corroborates
+    instead - but only because the key holds exactly one claim, and where it
+    holds two this round has not said which of them it found.
+    """
+    first_gateway, _, _ = fake.gateway(
+        ClaimsOutput(
+            claims=(
+                ProposedClaim(
+                    text="Provider A charges $4.10 per H100 GPU-hour.",
+                    normalized_key="provider a | h100 price | 2026",
+                    claim_type=ClaimType.QUANTITATIVE,
+                    object_value="$4.10",
+                    evidence=(1,),
+                    confidence=0.7,
+                ),
+            )
+        )
+    )
+    first = await ClaimNormalizerAgent(first_gateway).normalize(
+        fake.state(evidence=[fake.evidence("ev-1")])
+    )
+
+    # Number 1 of the *unclaimed* catalogue, which by now holds only the new
+    # span: the normalizer is asked to read what no claim cites yet.
+    second_gateway, _, _ = fake.gateway(ClaimsOutput(claims=(proposed_claim(1),)))
+    second = await ClaimNormalizerAgent(second_gateway).normalize(
+        fake.state(
+            evidence=[fake.evidence("ev-1"), fake.evidence("ev-2", span_start=200)],
+            claims=[first.value[0]],
+        )
+    )
+
+    assert second.value[0].id == first.value[0].id
+    assert second.value[0].evidence_ids == (fake.ident("ev-1"), fake.ident("ev-2"))
+    assert second.value[0].object_value == "$4.10", "the figure it already had is kept"
+
+
 # --- verification --------------------------------------------------------------------
 
 

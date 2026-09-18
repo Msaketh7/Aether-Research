@@ -1623,17 +1623,27 @@ All list endpoints are cursor-paginated and scoped to the authenticated user.
 > do the right thing, the full self-grading exam, and an end-to-end test that
 > drives a real browser through the whole product.
 
-| Level                | Targets                                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Unit**             | query parser, source parser, URL validator, citation parser, ranking functions, cost calculator, token budget, state transitions                                    |
-| **Integration**      | API↔DB, API↔Redis, Worker↔LangGraph, Retriever↔pgvector, Search↔evidence DB                                                                                         |
-| **Agent**            | behavioural: "Compare company A and B" then planner creates a competitor task, researcher uses web search, critic verifies evidence, synthesizer produces citations |
-| **RAG**              | retrieval recall/precision on a fixed fixture corpus; reranker improves ordering; metadata filters honoured                                                         |
-| **Evaluation**       | `benchmark.json` run against each release                                                                                                                           |
-| **E2E (Playwright)** | login → new research → submit → live activity → wait for completion → open report → click citation → view source                                                    |
+| Level                | Targets                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit**             | query parser, source parser, URL validator, citation parser, ranking functions, cost calculator, token budget, state transitions                                       |
+| **Integration**      | API↔DB, API↔Redis, Worker↔LangGraph, Retriever↔pgvector, Search↔evidence DB                                                                                            |
+| **Agent**            | behavioural: "Compare company A and B" then planner creates a competitor task, researcher uses web search, critic verifies evidence, synthesizer produces citations    |
+| **Scenario**         | the whole vertical slice, once per named failure mode: queue → worker → graph → nine agents → tools → ingestion → retrieval → projections → report, over real Postgres |
+| **RAG**              | retrieval recall/precision on a fixed fixture corpus; reranker improves ordering; metadata filters honoured                                                            |
+| **Evaluation**       | `benchmark.json` run against each release                                                                                                                              |
+| **E2E (Playwright)** | login → new research → submit → live activity → wait for completion → open report → click citation → view source                                                       |
 
 Fixtures in `data/fixtures/`. External APIs are recorded/replayed (VCR-style) in
 CI; a nightly job runs a small live subset.
+
+The **scenario** level is `apps/api/tests/scenarios/` (Phase 19). It replaces
+exactly two things and runs everything else for real: the model, by a scripted
+provider behind the real gateway, so routing, failover, retries and pricing
+still execute; and the socket, by a mock transport behind the real guarded
+client, so the SSRF guard, the redirect policy, the size ceiling, robots and the
+search vendor's own parsing still execute. The fifteen situations it must cover
+are held as code in `catalogue.py`, and the suite fails when a scenario loses
+its test.
 
 ---
 

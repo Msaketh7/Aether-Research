@@ -178,7 +178,7 @@ class SourceCollector:
                 "chunks": outcome.chunk_count,
                 "embedded": outcome.embedded,
                 "pending": outcome.pending,
-                "created": outcome.created,
+                "was_created": outcome.created,
             },
         )
         return SourceRef(

@@ -44,12 +44,44 @@ logger = get_logger(__name__)
 #: contain '#' - so no real object key can ever collide with a metadata file.
 _SIDECAR_SUFFIX = "#meta.json"
 
+#: Windows' extended-length path forms. ``Path.resolve`` normally hands back a
+#: plain path, but it resolves through ``_getfinalpathname``, which returns
+#: these - and when the path's own parent is being created underneath it by a
+#: concurrent upload, the prefix survives into the result.
+_EXTENDED_PREFIX = "\\\\?\\"
+_EXTENDED_UNC_PREFIX = "\\\\?\\UNC\\"
+_UNC_PREFIX = "\\\\"
+
+
+def _plain(path: Path) -> Path:
+    r"""``path`` without Windows' extended-length prefix.
+
+    Found in Phase 19, by a scenario that collected two pages at once and
+    silently ended up with one. ``_path_for`` compared a freshly resolved
+    candidate against a root resolved at construction; under that race the
+    candidate came back as ``\\?\C:\...`` while the root was ``C:\...``, so the
+    containment check refused a path directly inside the root. One upload in
+    seven was refused that way in a measured reproduction, and the collector -
+    correctly - treats a page it cannot store as one page's problem, so nothing
+    above it ever knew a source had been lost.
+
+    Normalising *both* sides is what makes the comparison meaningful. It is not
+    a relaxation: the resolution still happens, symlinks are still followed, and
+    a path that genuinely escapes the root still fails.
+    """
+    text = str(path)
+    if text.startswith(_EXTENDED_UNC_PREFIX):
+        return Path(_UNC_PREFIX + text[len(_EXTENDED_UNC_PREFIX) :])
+    if text.startswith(_EXTENDED_PREFIX):
+        return Path(text[len(_EXTENDED_PREFIX) :])
+    return path
+
 
 class FilesystemObjectStorage:
     """``ObjectStorage`` over a directory tree."""
 
     def __init__(self, root: Path, *, max_bytes: int) -> None:
-        self._root = root.resolve()
+        self._root = _plain(root.resolve())
         self._max_bytes = max_bytes
 
     # --- operations ------------------------------------------------------
@@ -165,9 +197,12 @@ class FilesystemObjectStorage:
         ``validate_key`` has already rejected traversal, but this re-checks the
         *resolved* path. Two independent barriers, because a containment check
         that trusts an earlier one has historically been the bug.
+
+        Both sides go through ``_plain`` first, or the check refuses paths that
+        are plainly inside the root - see that function for why.
         """
-        candidate = (self._root / key).resolve()
-        if candidate != self._root and self._root not in candidate.parents:
+        candidate = _plain((self._root / key).resolve())
+        if candidate != self._root and not candidate.is_relative_to(self._root):
             raise StorageError(
                 "Refusing to address a path outside the artifact root.",
                 context={"key": key, "resolved": str(candidate)},

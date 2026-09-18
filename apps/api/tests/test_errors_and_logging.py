@@ -193,3 +193,45 @@ def test_an_error_context_cannot_break_the_handler_that_reports_it():
 
     assert safe == {"ctx_filename": "notes.pdf", "declared": "application/pdf"}
     logging.getLogger("app.probe.context").warning("request rejected", extra=safe)
+
+
+def test_no_log_call_in_the_application_names_a_reserved_field():
+    """The same defect as above, from the other direction, and across the codebase.
+
+    ``log_context`` protects the fields a *caller* supplies. It does nothing for
+    the ``extra={...}`` literals written by hand, and three of those named
+    ``created`` - which every ``LogRecord`` already has. The suite pins
+    ``log_level`` to ``warning``, so those calls never built a record and never
+    raised; at the default level they raise every time, and one of them sits in
+    the ingestion pipeline where the failure is swallowed per page. A worker
+    would then gather nothing and every run would fail at synthesis, with the
+    cause several layers away (Phase 19).
+
+    So this reads the source rather than exercising a path: the class of bug is
+    "a literal nobody executed at this level", and only a scan finds all of it.
+    """
+    import ast
+    from pathlib import Path
+
+    from app.core.logging import _RESERVED_ATTRS
+
+    root = Path(__file__).resolve().parents[1] / "app"
+    offenders: list[str] = []
+    for source in root.rglob("*.py"):
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            extra = next((kw.value for kw in node.keywords if kw.arg == "extra"), None)
+            if not isinstance(extra, ast.Dict):
+                continue
+            for key in extra.keys:
+                if isinstance(key, ast.Constant) and key.value in _RESERVED_ATTRS:
+                    offenders.append(
+                        f"{source.relative_to(root.parent)}:{key.lineno} names {key.value!r}"
+                    )
+
+    assert not offenders, (
+        "logging.makeRecord raises KeyError on these, but only when the logger is "
+        "enabled at that level: " + "; ".join(offenders)
+    )

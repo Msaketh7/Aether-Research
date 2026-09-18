@@ -201,7 +201,9 @@ class DocumentIngestor:
                 "language": prepared.language.language,
                 "embedded": embedded,
                 "pending": pending,
-                "created": created,
+                # Not "created": `logging` refuses an extra field that shares a
+                # name with a LogRecord attribute, and every record has one.
+                "was_created": created,
                 "latency_ms": int((time.perf_counter() - started) * 1000),
             },
         )

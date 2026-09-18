@@ -50,6 +50,14 @@ WORKERS ?= 4
 api-test: ## Run the API test suite in parallel (WORKERS=0 for serial)
 	cd $(API) && uv run pytest $(if $(filter 0,$(WORKERS)),,-n $(WORKERS))
 
+# The fifteen situations Phase 19 requires the system to survive, each driven
+# through the whole stack. Part of `api-test`; named separately because it is
+# the suite to run when a change touches the graph, the worker or the tools,
+# and the one to read when asking what this system is claimed to withstand.
+.PHONY: test-scenarios
+test-scenarios: ## Run the end-to-end research scenarios
+	cd $(API) && uv run pytest -m scenario $(if $(filter 0,$(WORKERS)),,-n $(WORKERS))
+
 # Migrations form two branches: `core` (relational) and `vector` (needs
 # pgvector). See apps/api/migrations/versions/0003_document_ingestion.py.
 HEAD ?= core@head

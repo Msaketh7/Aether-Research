@@ -16,9 +16,12 @@ no evidence at all is dropped with it - ``ClaimItem`` will not hold one, because
 a claim with nothing behind it could only ever be cited to nothing.
 
 Claim identity is derived, not generated: a claim's id is a UUID5 over the run
-and its normalized key. So the same assertion found again in a later round is
-the *same* claim, the state's reducer replaces it rather than storing a second
-copy, and the evidence behind it accumulates instead of splitting in two.
+and what the claim asserts - its normalized key *and* its value. So the same
+assertion found again in a later round is the *same* claim, the state's reducer
+replaces it rather than storing a second copy, and the evidence behind it
+accumulates instead of splitting in two - while two sources quoting different
+numbers about one subject stay two claims, which is the only state the
+contradiction check can act on (Phase 19).
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ import asyncio
 import itertools
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from app.agents.base import AgentContext, ModelAgent, total_usage
@@ -76,8 +79,9 @@ CHUNKS_PER_SUBTASK = 8
 MAX_EVIDENCE_TOKENS = 8000
 MAX_CLAIM_TOKENS = 8000
 
-#: Namespace for derived claim ids. Fixed forever: changing it would make every
-#: stored claim a different claim.
+#: Namespace for derived claim ids. Fixed forever: changing it - or changing
+#: what ``claim_identity`` hashes - would make every stored claim a different
+#: claim, so either is a migration rather than an edit.
 _CLAIM_NAMESPACE = uuid.UUID("6f1d5a2e-0b74-4f2a-9a1c-2f1a6b4e7c30")
 _KEY_NOISE = re.compile(r"[^a-z0-9|]+")
 
@@ -334,15 +338,18 @@ class ClaimNormalizerAgent(ModelAgent):
             if not cited:
                 continue
             key = normalize_key(proposed.normalized_key)
-            claim_id = claim_identity(state["research_id"], key)
+            value = asserted_value(proposed.object_value, proposed.text)
+            if proposed.object_value and not value:
+                unquoted_values += 1
+            claim_id = claim_identity(state["research_id"], key, value)
             # A claim found again keeps every span it already had: the reducer
             # replaces by id, so a re-emitted claim listing only this round's
             # evidence would silently drop the last round's.
             previous = claims.get(claim_id) or existing.get(claim_id)
+            if previous is None and not value:
+                previous = _only_claim_keyed(key, existing, claims)
+                claim_id = previous.id if previous else claim_id
             ids = _merge_evidence(previous, cited)
-            value = asserted_value(proposed.object_value, proposed.text)
-            if proposed.object_value and not value:
-                unquoted_values += 1
             claims[claim_id] = ClaimItem(
                 id=claim_id,
                 normalized_key=key,
@@ -376,13 +383,47 @@ class ClaimNormalizerAgent(ModelAgent):
 # --- helpers ------------------------------------------------------------------
 
 
-def claim_identity(research_id: uuid.UUID, normalized_key: str) -> uuid.UUID:
+def claim_identity(
+    research_id: uuid.UUID, normalized_key: str, object_value: str = ""
+) -> uuid.UUID:
     """A claim's id, derived from what it asserts within its run.
 
     Derived rather than random so the same assertion is the same claim across
     rounds. Scoped to the run so two runs never share one.
+
+    **Both halves of the assertion, not only its subject.** The key deliberately
+    holds no value - that is what lets the contradiction check group by it - so
+    identity that ignored the value would make two sources quoting different
+    numbers about one subject into a single claim, the second silently replacing
+    the first. FR-7 would then be unreachable: the checker looks for a key held
+    by more than one claim, and no key ever could be. Two sources agreeing on
+    both halves are still one claim with two spans behind it, which is
+    corroboration and is what the loop exists to find.
+
+    The value is normalised the way the key is, so "$4.10" and "4.10" are the
+    same assertion rather than two claims about the same number.
     """
-    return uuid.uuid5(_CLAIM_NAMESPACE, f"{research_id}:{normalized_key}")
+    value = normalize_key(object_value) if object_value else ""
+    return uuid.uuid5(_CLAIM_NAMESPACE, f"{research_id}:{normalized_key}:{value}")
+
+
+def _only_claim_keyed(
+    key: str,
+    existing: Mapping[uuid.UUID, ClaimItem],
+    pending: Mapping[uuid.UUID, ClaimItem],
+) -> ClaimItem | None:
+    """The one claim already holding ``key``, if there is exactly one.
+
+    For the round that re-finds a claim but rephrases it out of its value: the
+    assertion has not changed, so it must corroborate what is there rather than
+    sit beside it under a value-less id. Only when the key holds one claim -
+    where it holds two, this round has not said which of them it found, and
+    guessing would attach a span to the wrong side of a disagreement.
+    """
+    found = [
+        claim for claim in (*existing.values(), *pending.values()) if claim.normalized_key == key
+    ]
+    return found[0] if len(found) == 1 else None
 
 
 def asserted_value(value: str, text: str) -> str:

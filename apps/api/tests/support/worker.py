@@ -36,6 +36,7 @@ from app.db.repositories.trace import SqlAlchemyTraceStore
 from app.db.repositories.user import UserRepository
 from app.db.repositories.worker import SqlAlchemyRunLifecycle
 from app.db.session import Database
+from app.models.budget import RunBudgetGuard
 from app.observability.ledger import DatabaseTracer
 from app.research.cancellation import PostgresCancellationProbe
 from app.research.eventbus import build_event_broker
@@ -178,6 +179,7 @@ def build_worker(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     queue: InMemoryJobQueue | None = None,
     worker_id: str = "worker-1",
+    budget: RunBudgetGuard | None = None,
 ) -> Harness:
     scripted = nodes or ScriptedNodes(script or Script())
     job_queue = queue or InMemoryJobQueue()
@@ -185,10 +187,15 @@ def build_worker(
     saver = checkpointer or InMemorySaver(serde=build_serializer())
     lifecycle = SqlAlchemyRunLifecycle(database)
     recorder = RecordedRuns()
-    nodes_bundle = bundle or scripted.bundle()
-    nodes_bundle = dataclasses.replace(
-        nodes_bundle, researcher=_IngestingResearcher(nodes_bundle.researcher, database)
-    )
+    nodes_bundle = bundle
+    if nodes_bundle is None:
+        # Only the scripted researcher needs its rows seeded. A real one writes
+        # them itself, and wrapping it would insert nothing and hide nothing -
+        # but it would also make the scenario suite (Phase 19) depend on a
+        # helper that exists for the opposite kind of test.
+        nodes_bundle = dataclasses.replace(
+            scripted.bundle(), researcher=_IngestingResearcher(scripted, database)
+        )
     runner = ResearchGraphRunner(
         nodes=nodes_bundle,
         checkpointer=saver,
@@ -214,6 +221,10 @@ def build_worker(
             broker=broker,
             reports=StoredReportFacts(database),
             settings=settings,
+            # The guard the gateway was built with, so a run's ceiling is
+            # enforced before each call rather than only between nodes. A
+            # scripted-node harness has no gateway and passes none (Phase 16).
+            budget=budget,
         ),
         settings=settings,
         worker_id=worker_id,
@@ -237,8 +248,10 @@ def respawn(
     storage: ObjectStorage,
     *,
     nodes: ScriptedNodes | None = None,
+    bundle: ResearchNodes | None = None,
     worker_id: str = "worker-2",
     settings: Settings | None = None,
+    budget: RunBudgetGuard | None = None,
 ) -> Harness:
     """The next worker process: same queue, same checkpoints, new loop.
 
@@ -251,9 +264,11 @@ def respawn(
         storage,
         settings or harness.settings,
         nodes=nodes or harness.nodes,
+        bundle=bundle,
         checkpointer=harness.checkpointer,
         queue=harness.queue,
         worker_id=worker_id,
+        budget=budget,
     )
 
 
@@ -330,7 +345,11 @@ async def serve_until(
     harness: Harness,
     condition: Callable[[], Awaitable[bool]],
     *,
-    deadline_seconds: float = 20.0,
+    #: Sixty rather than twenty since Phase 19: the scenario suite made the
+    #: parallel run heavier, and a worker loop that is simply starved of CPU
+    #: was reaching this. It is a hang detector, not a measurement - nothing
+    #: here is asserting how fast a run is.
+    deadline_seconds: float = 60.0,
 ) -> None:
     """Run the real loop until ``condition`` holds, then stop it and drain.
 

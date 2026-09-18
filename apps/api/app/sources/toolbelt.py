@@ -31,6 +31,8 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+import httpx2 as httpx
+
 from app.cache import CacheNamespace, ResponseCache, disabled_cache
 from app.core.config import Settings
 from app.core.enums import ToolName
@@ -249,8 +251,16 @@ def build_toolbelt(
     recorder: CallRecorder | None = None,
     permitted: frozenset[ToolName] = RESEARCH_TOOLS,
     cache: ResponseCache | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> Toolbelt:
-    """Assemble a toolbelt from configuration."""
+    """Assemble a toolbelt from configuration.
+
+    ``transport`` is the socket, and the same seam ``SafeHttpClient`` already
+    offers for the same reason: the Phase 19 scenarios drive a whole run through
+    this belt - its executor, its retry policy, its provider, its SSRF guard -
+    against a scripted web rather than the open one. Passing nothing is what
+    every deployment does, and builds the ordinary client.
+    """
     client = SafeHttpClient(
         connect_timeout_seconds=settings.fetch_connect_timeout_seconds,
         read_timeout_seconds=settings.fetch_read_timeout_seconds,
@@ -259,6 +269,7 @@ def build_toolbelt(
         user_agent=settings.sec_user_agent,
         blocked_domains=frozenset(settings.blocked_domains),
         allowed_domains=frozenset(settings.allowed_domains) if settings.allowed_domains else None,
+        transport=transport,
     )
     executor = ToolExecutor(
         recorder=recorder,
