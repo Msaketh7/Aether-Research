@@ -147,6 +147,10 @@ test: ## Unit tests (all workspaces)
 test-e2e: ## Playwright end-to-end smoke tests
 	npm run test:e2e --workspace $(WEB)
 
+.PHONY: screenshots
+screenshots: ## Regenerate the README screenshots from a running dev server (make dev first)
+	node scripts/screenshots.mjs
+
 .PHONY: ci
 ci: format-check lint typecheck test api-lint api-test migrate-check ## Everything a pull request must pass
 

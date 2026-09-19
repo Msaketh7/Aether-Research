@@ -43,7 +43,10 @@ thread is the single failure mode this architecture exists to prevent.
 | `worker` | LangGraph execution, agents, tools, retrieval, persistence | queue depth         |
 
 `api` and `worker` are built from **one image** with different entrypoints, so
-they share models, migrations and configuration.
+they share models, migrations and configuration. That image has a third
+entrypoint, `migrate`, which the deployment runs as its own task before the
+services roll - so the migration and the code that requires it are never
+different builds.
 
 ## 3. Module boundaries (`apps/api/app/`)
 
@@ -60,8 +63,11 @@ they share models, migrations and configuration.
 | `evidence/`      | claim/evidence/contradiction domain logic                          |
 | `reports/`       | report schema, synthesis assembly, citation validation             |
 | `evaluations/`   | benchmark runner, metrics, thresholds                              |
-| `observability/` | tracing, metrics, structured logging                               |
+| `observability/` | the ledger, Prometheus instruments, OTel spans, middleware         |
 | `cache/`         | content-hash response cache, TTL policy, single-flight             |
+| `models/`        | the LLM gateway, its registry, routing, provider adapters          |
+| `storage/`       | the `ObjectStorage` protocol, S3 and filesystem backends           |
+| `loadtest/`      | load profiles and the measuring apparatus                          |
 | `db/`            | SQLAlchemy models, repositories, migrations                        |
 | `workers/`       | queue consumer, job lifecycle, checkpoint recovery, event emission |
 
@@ -138,9 +144,49 @@ hope about the model.
 | Every auth event and research mutation is recorded                    | `security/audit` -> `audit_log`         |
 | Run state is durable and resumable                                    | LangGraph checkpointer + Postgres       |
 
-## 8. Delivery phases
+## 8. Deployment topology
 
-Phases build vertically: frontend prototype, backend foundation, data layer, LLM
-layer, RAG, agents, evaluation, observability, load handling, deployment. Each
-phase ships something runnable and tested before the next begins. Current
-status is tracked in the root [README](../README.md).
+The same three process types, on ECS Fargate
+([ADR 0008](ADRs/0008-aws-ecs-deployment.md)). **Written and validated; never
+applied** - there is no AWS account behind this repository.
+
+```
+   Route 53 -> ALB (TLS) ---> web service   (Next standalone)
+                         '--> api service   (/api/*, /metrics not routed)
+                                  |
+   migrate task (run once, before the services roll, same task definition)
+                                  |
+         RDS Postgres + pgvector  |  ElastiCache Redis  |  S3
+                                  |
+                              worker service  (no ingress; scales on queue depth)
+```
+
+Nine Terraform modules - `network`, `security`, `database`, `cache`, `storage`,
+`alb`, `ecs-cluster`, `ecs-service`, `secrets` - with one `.tfvars` per
+environment, and a Kubernetes manifest set as the portability escape hatch.
+`infra/monitoring/` holds the Prometheus scrape config and the Grafana
+dashboard, so the dashboard is a reviewable file rather than something someone
+once clicked together.
+
+**Four deployment decisions are asserted by tests** rather than left to review:
+images are scanned _before_ they are pushed; deployment is _by digest_, because
+a tag can be moved after a deployment decided to trust it; the rollback target
+is recorded _before_ anything changes; and the migration runs after the new task
+definition is registered and before the services roll. The schema is
+deliberately never rolled back - a failed deployment rolls the code back and
+leaves the schema forward, which is safe only because every migration must leave
+the previous release able to run.
+
+## 9. Delivery
+
+Phases built vertically: frontend prototype, backend foundation, data layer, LLM
+layer, RAG, agents, evaluation, observability, load handling, deployment,
+documentation. Each phase shipped something runnable and tested before the next
+began. **All 25 are complete**; what each one actually landed - including the
+defects found while verifying it - is in [PHASES.md](PHASES.md), and the current
+state is summarised in the root [README](../README.md).
+
+Two things are built and have never been executed, and both say so wherever they
+are described: the **evaluation benchmark**, because every case is a real
+research run that costs money, and the **deployment**, because there is no cloud
+account. Everything else in this document has been run.

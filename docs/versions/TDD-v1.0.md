@@ -15,7 +15,7 @@
 | **Version** | 1.0 |
 | **Last updated** | 2026-09-05 |
 | **Owner** | Engineering |
-| **Related** | [`PRD.md`](PRD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md`, `ADRs/` |
+| **Related** | [`PRD.md`](PRD-v1.0.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md`, `ADRs/` |
 
 ---
 
@@ -111,7 +111,7 @@ design.
   and come away with an accurate mental model.
 - **The detail under each box is for engineers**: schemas, protocols, limits,
   trade-offs.
-- **Jargon** is expanded in Section 25 (Glossary). The [`PRD.md`](PRD.md) glossary is
+- **Jargon** is expanded in Section 25 (Glossary). The [`PRD.md`](PRD-v1.0.md) glossary is
   gentler if this one is too dense.
 
 ---

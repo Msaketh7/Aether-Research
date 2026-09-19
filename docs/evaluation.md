@@ -90,14 +90,19 @@ not a model quality issue.
 
 Latency (P50/P95/P99), cost per run, failure rate, cache hit rate, tokens per
 run. These come from the same telemetry that production uses (Phase 17), not
-from a separate measurement path.
+from a separate measurement path - which is what let Phase 21 answer "where does
+a run's time go" with a `GROUP BY` over `agent_runs` rather than with a sampler.
+The system half of this table **has** been measured, under a scripted provider:
+[`load-testing.md`](load-testing.md). The research half has not.
 
 ## 4. Runner
 
-`packages/evaluation` executes a dataset against a target build, writes one
+`app/evaluations` executes a dataset against a target build, writes one
 `evaluations` row per case, and emits a report artifact containing: dataset
 version, git SHA, model routing configuration, per-case metrics, aggregates, and
-pass/fail against thresholds.
+pass/fail against thresholds. (`packages/evaluation` is the workspace package
+that once held it; the runner lives with the code it drives, because a benchmark
+that ran against a copy of the application would measure the copy.)
 
 A judged metric (correctness, faithfulness) uses an LLM judge with a fixed
 prompt version and a fixed model, both recorded in the report. Changing the

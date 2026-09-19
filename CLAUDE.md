@@ -17,13 +17,16 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–24 of 25 are complete.** Full plan and per-phase status:
-[`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
+**All 25 phases are complete.** Full plan and per-phase status:
+[`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work. Two
+things are built and have never been executed, and every document says so where
+it describes them: the evaluation benchmark (needs credentials, costs money per
+case) and the deployment (no cloud account).
 
 | Layer                                 | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Frontend (`apps/web`)                 | Complete product surface, 106 unit + 21 e2e tests. Runs against mock fixtures or the live API by one env var.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| API (`apps/api`)                      | FastAPI: research surface, file uploads, SSE, authentication and authorisation, rate limiting, error contract, health probes, `/metrics`, `/evaluations`, `/settings`. 1402 tests.                                                                                                                                                                                                                                                                                                                                                                                |
+| API (`apps/api`)                      | FastAPI: research surface, file uploads, SSE, authentication and authorisation, rate limiting, error contract, health probes, `/metrics`, `/evaluations`, `/settings`. 1415 tests.                                                                                                                                                                                                                                                                                                                                                                                |
 | Database                              | PostgreSQL, 23 tables (`users` and `sessions` are written for the first time in Phase 20, `audit_log` added by it), Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). A run's row carries the worker's lease (ADR 0017) and, since Phase 22, the clock that stops the reconciliation sweep re-dispatching a backlog it already dispatched; `research_events` carries the progress stream (ADR 0018); UUIDs come back as `uuid.UUID`, never the driver's subclass.                              |
 | Object storage                        | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Model gateway                         | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`. Embeddings are cached per text; completions deliberately are not (ADR 0019).                                                                                                                                                                                                                                                                                           |
@@ -174,6 +177,9 @@ data/seed|fixtures|eval/       eval/ holds the benchmark dataset (Phase 18)
 .github/workflows/  ci.yml, test.yml, build.yml, eval.yml, deploy.yml (Phase 24)
 scripts/smoke.py    the post-deploy check: stdlib only, asks a deployment from
                     outside whether it works rather than whether it is running
+scripts/screenshots.mjs  drives the real app in a real browser and writes
+                    docs/screenshots/ - `make screenshots`, so the README's
+                    pictures are regenerated rather than re-taken
 infra/docker/       api.Dockerfile (api + worker + migrate) and web.Dockerfile,
                     both built from the repository root
 infra/terraform/    the AWS root: modules/{network,security,database,cache,
@@ -227,6 +233,7 @@ make secrets               # gitleaks over the working tree and its history
 make tf-validate           # terraform fmt + validate (no credentials needed)
 make images                # build both container images (needs Docker)
 make up-app                # the whole stack in containers (needs Docker)
+make screenshots           # regenerate the README screenshots (needs `make dev` running)
 ```
 
 Point the frontend at the real API with `NEXT_PUBLIC_API_MODE=live` and
@@ -373,6 +380,14 @@ api-test` uses four xdist workers; `WORKERS=0` makes it serial, which is what
   backend and the rate-limit backend, so pretending to be `staging` in order to
   test sign-in would mean needing Redis and S3 to test sign-in.
 - Bash heredocs fail above roughly 8 KB — use the Write tool for larger files.
+- **The dev server does not hydrate on `127.0.0.1`, only on `localhost`.**
+  Turbopack's HMR socket rejects the literal address (`ERR_INVALID_HTTP_RESPONSE`
+  on the handshake), and in Next 16 a failed HMR handshake leaves the page
+  server-rendered but never hydrated - no client fetches, no page error, just an
+  app with a correct shell and an empty body. `scripts/screenshots.mjs`
+  photographed exactly that before the host was changed. The Playwright config
+  uses `127.0.0.1` and is fine, because its `webServer` runs `next start` rather
+  than `next dev`.
 - **Ollama is installed but not running**, and has pulled neither the registry's
   chat model nor `nomic-embed-text`. Live embeddings are unverified here; tests
   drive the real adapter over `httpx2.MockTransport`.

@@ -15,7 +15,7 @@
 | **Version** | 1.0 |
 | **Last updated** | 2026-09-05 |
 | **Owner** | Product |
-| **Related** | [`TDD.md`](TDD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md` |
+| **Related** | [`TDD.md`](TDD-v1.0.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md` |
 
 ---
 
@@ -95,7 +95,7 @@ This PRD is written for a mixed audience.
   then skip the details underneath.
 - **If you are technical:** Section 7 (Functional requirements), Section 8 (Non-functional
   requirements), Section 9 (Data), and Section 10 (Evaluation) are the contract. The
-  [`TDD.md`](TDD.md) has the implementation design.
+  [`TDD.md`](TDD-v1.0.md) has the implementation design.
 - **Jargon** is expanded in Section 14 (Glossary).
 
 ---
@@ -598,7 +598,7 @@ Full detail: `threat-model.md`.
 - **Live internet data, generated per task.** No prebuilt dataset.
 - Persistent research memory is a relational database (PostgreSQL) with tables
   for tasks, agent activity, sources, documents, claims, evidence, citations,
-  contradictions, and reports (full schema in [`TDD.md`](TDD.md) Section 7).
+  contradictions, and reports (full schema in [`TDD.md`](TDD-v1.0.md) Section 7).
 - The evidence base accumulates across runs so later tasks reuse prior sources,
   claims and verified facts.
 - Large files (PDFs, saved web pages, screenshots, parsed documents, generated

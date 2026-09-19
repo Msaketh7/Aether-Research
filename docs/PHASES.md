@@ -11,34 +11,40 @@ on. Never generate thousands of lines without validating them.
 
 Status legend: **Done** · **Next** · **Planned**
 
-| #   | Phase                      | Status   |
-| --- | -------------------------- | -------- |
-| 0   | Repository initialisation  | Done     |
-| 1   | Frontend product prototype | Done     |
-| 2   | Backend foundation         | Done     |
-| 3   | Database                   | Done     |
-| 4   | Storage                    | Done     |
-| 5   | Model abstraction          | Done     |
-| 6   | Web research tools         | Done     |
-| 7   | Document ingestion         | Done     |
-| 8   | Retrieval                  | Done     |
-| 9   | LangGraph agent system     | Done     |
-| 10  | Agents                     | Done     |
-| 11  | Evidence system            | Done     |
-| 12  | Report generation          | Done     |
-| 13  | Background workers         | Done     |
-| 14  | Streaming                  | Done     |
-| 15  | Caching                    | Done     |
-| 16  | Cost and token governance  | Done     |
-| 17  | Observability              | Done     |
-| 18  | Evaluation framework       | Done     |
-| 19  | Testing                    | Done     |
-| 20  | Security                   | Done     |
-| 21  | Load testing               | Done     |
-| 22  | Optimization               | Done     |
-| 23  | Infrastructure             | Done     |
-| 24  | CI/CD                      | Done     |
-| 25  | Documentation              | **Next** |
+**All 25 are done.** What remains is not a phase: the evaluation benchmark has
+never been executed (it needs provider credentials and spends money per case)
+and nothing is deployed (there is no cloud account behind this repository).
+Both are recorded as such everywhere they are described, and neither is
+reported as a zero.
+
+| #   | Phase                      | Status |
+| --- | -------------------------- | ------ |
+| 0   | Repository initialisation  | Done   |
+| 1   | Frontend product prototype | Done   |
+| 2   | Backend foundation         | Done   |
+| 3   | Database                   | Done   |
+| 4   | Storage                    | Done   |
+| 5   | Model abstraction          | Done   |
+| 6   | Web research tools         | Done   |
+| 7   | Document ingestion         | Done   |
+| 8   | Retrieval                  | Done   |
+| 9   | LangGraph agent system     | Done   |
+| 10  | Agents                     | Done   |
+| 11  | Evidence system            | Done   |
+| 12  | Report generation          | Done   |
+| 13  | Background workers         | Done   |
+| 14  | Streaming                  | Done   |
+| 15  | Caching                    | Done   |
+| 16  | Cost and token governance  | Done   |
+| 17  | Observability              | Done   |
+| 18  | Evaluation framework       | Done   |
+| 19  | Testing                    | Done   |
+| 20  | Security                   | Done   |
+| 21  | Load testing               | Done   |
+| 22  | Optimization               | Done   |
+| 23  | Infrastructure             | Done   |
+| 24  | CI/CD                      | Done   |
+| 25  | Documentation              | Done   |
 
 ---
 
@@ -1811,7 +1817,7 @@ decisions the linters cannot see, `tests/test_smoke_script.py`, which runs the
 real application on a real socket, and one in `tests/test_config.py` that is
 what makes the secret scanner's single allowance safe.
 
-## Phase 25 — Documentation · **Next**
+## Phase 25 — Documentation · **Done**
 
 README, `docs/PRD.md`, `docs/TDD.md`, `docs/architecture.md`,
 `docs/evaluation.md`, `docs/threat-model.md`. ADRs for LangGraph, LlamaIndex,
@@ -1821,8 +1827,81 @@ agent graph, data model, API architecture, evaluation methodology,
 observability, security, load testing, deployment, local setup, production
 setup, future improvements.
 
-_Mostly in place:_ all documents and all eight required ADRs exist. Remaining:
-screenshots, and refreshing every section once the system is complete.
+_Landed:_ seven screenshots, seven new README sections, a pass over every
+document, and 13 tests that fail when the documentation stops matching the code.
+
+**The screenshots are generated, not taken.** `scripts/screenshots.mjs` drives
+the real app in a real browser and `make screenshots` overwrites every file, so
+refreshing them is a command rather than a chore nobody does. They run against
+mock mode because that is the only deterministic corpus - the same seven runs,
+the same claims, the same contradictions on every machine - and the app's own
+demo banner is in every frame saying exactly that. A screenshot of fixture data
+presented as research output would be the fabrication rule broken in the one
+place a reader cannot check. The script pins locale, timezone and colour scheme
+so a re-run's diff is the pixels that actually changed, fails the build if the
+page threw while being photographed, and deletes any PNG it did not write.
+
+**Seven sections the README was missing**, all named by this phase and none of
+them present before: screenshots, the data model, the API architecture,
+security, observability, deployment, production setup and future improvements.
+
+**The pass found the documentation was wrong in ways review does not catch**,
+because each error was in a file nobody was editing:
+
+- **The tech-stack table named two dependencies that have never been
+  installed.** `LangChain` as the model/tool layer and `Celery/ARQ` as the
+  queue - both written in Phase 0 from the plan, neither ever true. The model
+  layer is 3,300 lines of `app/models`; the queue is a doorbell in front of a
+  lease that lives in a database row. Both are now named only to say why they
+  are _absent_, and a test reads `pyproject.toml` and fails if either comes back
+  as a claim.
+- **Six broken relative links**, invisible until something followed them:
+  `load-testing.md` pointed at `ADRs/0008-cloud-deployment.md` when the file is
+  `0008-aws-ecs-deployment.md`, and the two frozen v1.0 documents still linked
+  to their siblings as though they had never been moved into `docs/versions/`.
+  The frozen pair now point at each other rather than at the living masters -
+  a snapshot citing "TDD.md Section 7" means the section as it was numbered
+  then.
+- **"19 tables"** in the backend section, written at Phase 3 and overtaken by
+  `research_events`, `users`, `sessions` and `audit_log`. It is 23.
+- **The frontend tree said the mock API was "deleted in Phase 2".** It was not,
+  and should not be: it is what makes the fixtures, the e2e suite and now the
+  screenshots deterministic. It goes when live mode is the only mode, which is
+  now written down as a future item rather than as a thing that already
+  happened.
+- **The performance table was seven `[benchmark]` placeholders** four phases
+  after the benchmark ran. It now carries the measured numbers with their
+  conditions attached, and the four things those numbers do not measure.
+- **`make eval` does not exist** - the target is `make evaluate` - and TDD §17
+  was still headed `packages/evaluation` when the runner lives at
+  `app/evaluations`, next to the code it drives.
+
+**The documentation now has a test.** `tests/test_documentation.py` asserts what
+a rename or a deletion breaks silently: every relative link resolves, every
+embedded image is a file that exists, every screenshot is referenced by
+something, the ADR index lists all 21 records, the required documents exist and
+are not stubs, and the tech-stack table claims no dependency that is not
+installed. It is structural on purpose - no test can tell whether a paragraph is
+true, and the failures above were all of the kind that happen without anyone
+deciding to let them. It found all six broken links on its first run. 13 new
+API tests - 1415 total.
+
+**One defect in the product, found by photographing it.** The dev server's HMR
+socket refuses the literal address `127.0.0.1`, and in Next 16 a failed HMR
+handshake leaves the page server-rendered but never hydrated - so the first
+capture attempt produced an application with a correct shell and an empty body,
+and no page error to say why. It is a dev-server artifact rather than a bug in
+the app, but it is exactly the failure a screenshot script must not photograph
+quietly, which is why the script now names the host in a comment and why the
+capture fails the build when the page reports an error.
+
+**What the documentation still says it cannot claim.** No evaluation has been
+executed, nothing is deployed, and no live model call has been made in this
+repository. Every document now says so in its own voice rather than by
+omission - the PRD's roadmap grew a status column, the TDD grew §17.5, the
+architecture map grew a deployment topology labelled _never applied_, and the
+README's future-improvements section leads with the two gaps that need money and
+an AWS account rather than time.
 
 ---
 

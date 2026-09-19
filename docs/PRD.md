@@ -5,7 +5,7 @@
 | **Working name**    | Aether Research                                                                           |
 | **Document status** | Draft                                                                                     |
 | **Version**         | 1.0                                                                                       |
-| **Last updated**    | 2026-09-05                                                                                |
+| **Last updated**    | 2026-09-19                                                                                |
 | **Owner**           | Product                                                                                   |
 | **Related**         | [`TDD.md`](TDD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md` |
 
@@ -651,6 +651,25 @@ Every code change runs unit + integration + agent + RAG tests + the evaluation
 benchmark. CI **fails** when a gated metric drops below threshold, for example,
 citation correctness below 90%.
 
+### 10.5 Status
+
+**The surface and the harness are built; no evaluation has been executed.**
+`/evaluations` is a real page served from real rows, the dataset is versioned in
+`data/eval/cases`, the structural scorers and the gate are implemented, and
+`make evaluate` runs them. What has not happened is a run: every case is a real
+research run against real providers, so a baseline needs credentials and spends
+money per case.
+
+Until then **every threshold in 10.4 is ungated**, deliberately - a threshold
+written before a measurement is an aspiration presented as a requirement - and
+every unmeasured metric is rendered as _not measured_ rather than as zero, on
+the page and in the API alike.
+
+Two things have been measured and are published with their conditions: the
+**retrieval** row of 10.3 (lexical arm only - see `data/eval/retrieval/`) and
+the **infrastructure** row, under a scripted model provider, in
+[`load-testing.md`](load-testing.md).
+
 ---
 
 ## 11. Release roadmap
@@ -660,22 +679,32 @@ citation correctness below 90%.
 > website running on fake data, so the experience can be judged before the engine
 > is built.
 
-| Phase                         | Scope                                                                       | Deliverable                     |
-| ----------------------------- | --------------------------------------------------------------------------- | ------------------------------- |
-| **0. Product prototype**      | Website + fake research data + fake agents + fake activity feed + report UI | A convincing clickable product  |
-| **1. Basic backend**          | Accounts, database, create/read research                                    | Authenticated CRUD              |
-| **2. First AI**               | One Planner + Researcher + Synthesizer; a single straight-line path         | One end-to-end AI answer        |
-| **3. Web research**           | Real search, fetch, parse, source database, citations                       | Cited answers from the live web |
-| **4. RAG**                    | Indexing and smart retrieval over collected documents                       | Retrieval-grounded answers      |
-| **5. Multi-agent**            | Add Critic + Verifier; run researchers in parallel                          | Parallel, verified research     |
-| **6. Durable execution**      | Save-points, queue, background workers, resume, retry                       | Resumable long-running runs     |
-| **7. Evaluation**             | Test set, scoring runner, dashboard, release gate                           | `/evaluations` + automated gate |
-| **8. Production engineering** | Monitoring, rate limiting, caching, load testing, security, cost controls   | An operable service             |
-| **9. Deployment**             | Cloud hosting, infrastructure-as-code, automated deploys, monitoring        | Live demo at 99.5% uptime       |
+| Phase                         | Scope                                                                       | Deliverable                     | Status         |
+| ----------------------------- | --------------------------------------------------------------------------- | ------------------------------- | -------------- |
+| **0. Product prototype**      | Website + fake research data + fake agents + fake activity feed + report UI | A convincing clickable product  | Done           |
+| **1. Basic backend**          | Accounts, database, create/read research                                    | Authenticated CRUD              | Done           |
+| **2. First AI**               | One Planner + Researcher + Synthesizer; a single straight-line path         | One end-to-end AI answer        | Done           |
+| **3. Web research**           | Real search, fetch, parse, source database, citations                       | Cited answers from the live web | Done           |
+| **4. RAG**                    | Indexing and smart retrieval over collected documents                       | Retrieval-grounded answers      | Done           |
+| **5. Multi-agent**            | Add Critic + Verifier; run researchers in parallel                          | Parallel, verified research     | Done           |
+| **6. Durable execution**      | Save-points, queue, background workers, resume, retry                       | Resumable long-running runs     | Done           |
+| **7. Evaluation**             | Test set, scoring runner, dashboard, release gate                           | `/evaluations` + automated gate | Built, unrun   |
+| **8. Production engineering** | Monitoring, rate limiting, caching, load testing, security, cost controls   | An operable service             | Done, measured |
+| **9. Deployment**             | Cloud hosting, infrastructure-as-code, automated deploys, monitoring        | Live demo at 99.5% uptime       | Not deployed   |
 
 Sequencing rules: mock-first frontend before backend; one AI and one linear path
 before multi-agent; RAG before the critic loop; durability added **after** the
 agents work synchronously; evaluation before production hardening.
+
+**Where this stands.** Rows 0-6 and 8 are built, tested and - for row 8 -
+measured: 370 research runs through the real pipeline plus four Locust ladders
+over the HTTP surface ([`load-testing.md`](load-testing.md)). Row 7 is built and
+has never been run (see 10.5). Row 9 is written as code and has never been
+applied: the container images, the Terraform root and the five CI/CD pipelines
+all exist and are checked on every change, but there is no cloud account behind
+this repository, so "live demo at 99.5% uptime" is the one deliverable in this
+table that does not exist. The 25 engineering phases these nine rows were
+delivered through are in [`PHASES.md`](PHASES.md).
 
 ---
 

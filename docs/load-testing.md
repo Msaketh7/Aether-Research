@@ -377,7 +377,7 @@ removing it.**
 The shipped default of `worker_concurrency: 1` was **not changed**, and the
 reason is the one in section 2: this is one throttled laptop with a scripted
 provider, and the deployment model is horizontal
-([ADR 0008](ADRs/0008-cloud-deployment.md)), where one run per task makes
+([ADR 0008](ADRs/0008-aws-ecs-deployment.md)), where one run per task makes
 resource accounting and autoscaling mean something. A default changed on the
 strength of a measurement this narrow would be exactly the guesswork this phase
 exists to replace. What the measurement is good for is the relationship, and

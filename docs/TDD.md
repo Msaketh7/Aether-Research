@@ -5,7 +5,7 @@
 | **Working name**    | Aether Research                                                                                    |
 | **Document status** | Draft                                                                                              |
 | **Version**         | 1.0                                                                                                |
-| **Last updated**    | 2026-09-10                                                                                         |
+| **Last updated**    | 2026-09-19                                                                                         |
 | **Owner**           | Engineering                                                                                        |
 | **Related**         | [`PRD.md`](PRD.md), `CHANGELOG.md`, `architecture.md`, `threat-model.md`, `evaluation.md`, `ADRs/` |
 
@@ -1558,7 +1558,7 @@ Each node/span records: `latency`, `tokens`, `cost`, `model`, `prompt_version`,
 
 ---
 
-## 17. Evaluation system (`packages/evaluation`)
+## 17. Evaluation system (`apps/api/app/evaluations`)
 
 > **In plain terms:** a permanent, versioned exam. 100-300 questions with known
 > good answers and sources. The system sits the exam after every change; the
@@ -1573,7 +1573,7 @@ Each node/span records: `latency`, `tokens`, `cost`, `model`, `prompt_version`,
 
 ### 17.2 Runner
 
-- `make eval` runs the benchmark against the current build; writes rows to
+- `make evaluate` runs the benchmark against the current build; writes rows to
   `evaluations` and artifacts to S3.
 - Modes: `retrieval`, `generation`, `agent`, `infrastructure`, `full`.
 
@@ -1597,6 +1597,41 @@ rubric for correctness / faithfulness, sampled and spot-audited by a human.
 - The build **fails** when a gated metric drops below threshold (e.g. citation
   correctness < 90%).
 - A trend view in `/evaluations` compares against the last N commits.
+
+### 17.5 As built (Phase 18), and what has not happened
+
+The runner lives at `app/evaluations/`, beside the code it drives, rather than
+in the `packages/evaluation` workspace this section's heading originally named -
+a benchmark that ran against a copy of the application would measure the copy.
+`packages/evaluation` remains as a pointer.
+
+| Piece                               | Module                               |
+| ----------------------------------- | ------------------------------------ |
+| Case and dataset schema             | `app/evaluations/dataset.py`         |
+| Structural scorers                  | `app/evaluations/metrics.py`         |
+| Retrieval metrics                   | `app/retrieval/metrics.py` (Phase 8) |
+| Thresholds and the gate             | `app/evaluations/thresholds.py`      |
+| Runner and printed report           | `app/evaluations/{runner,report}.py` |
+| Results as rows, and `/evaluations` | `app/db/repositories/evaluations.py` |
+
+**No evaluation has been executed**, so every threshold in 17.4 is ungated and
+every metric in 17.3 except the retrieval row reads _not measured_ rather than
+zero. Each case is a real research run against real providers: a baseline needs
+credentials and spends money, and a benchmark that exercised a special
+evaluation path would measure that path. `eval.yml` exists and is guarded on
+both credentials and an explicit repository variable for the same reason.
+
+The **judged** half of 17.3 - correctness and faithfulness - is the half that
+needs a model and is not implemented. The structural half is: the chain
+`citation -> claim -> evidence -> document -> source` either resolves or does
+not, and a structural failure is a defect rather than a model-quality signal.
+Adding the judge means fixing a model and a prompt version and recording both
+with every result, which is worth doing against a real baseline rather than
+against none.
+
+The **infrastructure** row of 17.3 _has_ been measured, under a scripted model
+provider, and is published with its conditions in
+[`load-testing.md`](load-testing.md).
 
 ---
 
@@ -1759,34 +1794,48 @@ every job beside it.
 aether-research/
 ├── apps/
 │   ├── web/                     # Next.js (the website)
-│   │   ├── app/ components/ lib/ tests/
+│   │   ├── src/app/             # pages, and the mock backend (REST + SSE)
+│   │   ├── src/components/ src/lib/ src/mocks/
+│   │   └── e2e/                 # Playwright journeys
 │   └── api/                     # FastAPI + worker (front counter + back room)
 │       ├── app/
-│       │   ├── api/             # request routers
-│       │   ├── agents/          # planner, researchers, verifier, critic, synthesizer, citation validator
-│       │   ├── research/        # run lifecycle, followups, cancel
-│       │   ├── retrieval/       # LlamaIndex ingestion + hybrid retrieval + rerank + KG
-│       │   ├── sources/         # connectors (web/SEC/arXiv/GitHub), fetcher, dedup, SearchBudget
-│       │   ├── evidence/        # claim normalization, verification, contradictions
-│       │   ├── models/          # LLM Gateway, model_registry, routing
-│       │   ├── db/              # DB models, migrations, pooling
-│       │   ├── workers/         # queue consumers, supervisor, dead-letter queue
-│       │   └── observability/   # tracing, metrics, logging
-│       └── tests/
+│       │   ├── api/             # request routers, DI, error handlers, SSE relay
+│       │   ├── core/            # settings, logging, error taxonomy, enums
+│       │   ├── auth/            # passwords, sessions, cookies, principal
+│       │   ├── security/        # rate limiting, client address, audit log
+│       │   ├── agents/          # the graph + the nine agents + versioned prompts
+│       │   ├── research/        # run lifecycle, recorder, the progress event bus
+│       │   ├── retrieval/       # ingestion (parse, chunk, embed) + hybrid retrieval
+│       │   ├── sources/         # SSRF guard, guarded client, the six tools, toolbelt
+│       │   ├── evidence/        # dedup, and the claim/evidence/contradiction projection
+│       │   ├── reports/         # report assembly and its projection
+│       │   ├── models/          # LLM Gateway, registry.yaml, routing, providers
+│       │   ├── storage/         # ObjectStorage protocol, S3 + filesystem backends
+│       │   ├── cache/           # content-hash cache, TTLs, single-flight
+│       │   ├── evaluations/     # dataset, scorers, thresholds, runner
+│       │   ├── loadtest/        # load profiles and the measuring apparatus
+│       │   ├── db/              # DB models, repositories, pooling
+│       │   ├── workers/         # queue, lease, progress, events, worker, loop, runner
+│       │   └── observability/   # the ledger, metrics, OTel spans, middleware
+│       ├── migrations/          # Alembic, two branches: core and vector
+│       └── tests/               # incl. tests/scenarios/ - the fifteen (Phase 19)
 ├── packages/
 │   ├── shared-types/            # shared data definitions (website <-> server)
 │   ├── prompts/                 # pointer: the templates ship inside the API
 │   │                            # package, at app/agents/prompts/ (ADR 0015)
-│   └── evaluation/              # dataset loaders, runner, metrics, graders
+│   └── evaluation/              # pointer: the runner lives at app/evaluations/
 ├── data/
-│   ├── seed/  eval/  fixtures/
+│   ├── eval/                    # benchmark dataset + the retrieval baseline
+│   ├── loadtest/                # the measured load-test results
+│   └── seed/  fixtures/
 ├── infra/
 │   ├── docker/  terraform/  kubernetes/  monitoring/
 ├── docs/
-│   ├── PRD.md  TDD.md  architecture.md  threat-model.md  evaluation.md
+│   ├── PHASES.md  PRD.md  TDD.md  architecture.md  threat-model.md
+│   ├── evaluation.md  load-testing.md  screenshots/
 │   └── ADRs/
-├── scripts/
-├── .github/workflows/
+├── scripts/                     # smoke.py, screenshots.mjs, loadtest.py
+├── .github/workflows/           # ci, test, build, eval, deploy
 ├── docker-compose.yml
 ├── Makefile
 ├── README.md
