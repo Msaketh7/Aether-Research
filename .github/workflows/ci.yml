@@ -1,16 +1,24 @@
 name: CI
 
-# Runs on every pull request and on main. Scope grows with the build: today it
-# covers the frontend, the backend, the cross-language contract between them,
-# and dependency scanning on both sides. The evaluation gate and container
-# image scanning are added by the phases that introduce them - images do not
-# exist until Phase 23, and scanning one that has not been built is a job that
-# always passes (docs/TDD.md section 20).
+# The fast gates: formatting, lint, types, secrets, static analysis, and the
+# infrastructure descriptions Phase 23 added. Everything here answers in a few
+# minutes and fails for a reason that is in the diff.
+#
+# The slow half - unit tests, integration tests against real Postgres and
+# Redis, Playwright, the production build - lives in test.yml and is called
+# from here, so a pull request has one required check rather than five and one
+# place to look when it goes red. The evaluation benchmark (eval.yml) is
+# separate because it costs real money, and the images (build.yml) because they
+# are an artifact rather than a verdict.
 
 on:
   push:
     branches: [main]
   pull_request:
+
+# Least privilege by default. A job that needs more asks for it.
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,10 +28,12 @@ env:
   NODE_VERSION: '22'
 
 jobs:
-  frontend:
-    name: Frontend (lint, typecheck, unit tests, build)
+  # --- formatting, lint and types -------------------------------------------
+
+  frontend-static:
+    name: Frontend (format, lint, types)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -37,6 +47,8 @@ jobs:
       # `npm ci` from the committed lockfile does not.
       - run: npm ci
 
+      # Prettier covers Markdown and YAML across the whole repository, backend
+      # documentation and these workflows included.
       - name: Formatting
         run: npm run format:check
 
@@ -46,56 +58,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck --workspaces --if-present
 
-      - name: Unit tests
-        run: npm run test --workspaces --if-present
-
-      - name: Build
-        run: npm run build --workspace @aether/web
-
-  backend:
-    name: Backend (lint, typecheck, tests)
+  backend-static:
+    name: Backend (format, lint, types)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/api
-
-    services:
-      # The pgvector image, not plain postgres: the suite must exercise the
-      # 0002 migration and the embedding column, which a stock server cannot
-      # create. Locally the tests fall back to a throwaway cluster and skip the
-      # vector-specific assertions with an explicit reason.
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: aether
-          POSTGRES_PASSWORD: aether
-          POSTGRES_DB: aether_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aether"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-      # The worker's queue (Phase 13). Its blocking pop, its timeout and the
-      # fact that one job reaches exactly one worker cannot be faked, so the
-      # tests that assert them skip locally and run here.
-      redis:
-        image: redis:8-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      AETHER_TEST_DATABASE_URL: postgresql+asyncpg://aether:aether@127.0.0.1:5432/aether_test
-      REDIS_URL: redis://127.0.0.1:6379/0
-
     steps:
       - uses: actions/checkout@v5
 
@@ -110,34 +79,47 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
-      - name: Lint
+      # Ruff's select list includes `S`, the bandit security rules, so Python
+      # static analysis is this step rather than a separate SAST tool. A second
+      # scanner over the same code would produce a second backlog of the same
+      # findings.
+      - name: Lint and Python static analysis
         run: uv run ruff check .
 
       - name: Typecheck
         run: uv run mypy app
 
-      # Reversibility is a deployment property, so it is verified separately
-      # against a clean database rather than inside the suite, which shares one.
-      - name: Migrations round trip
-        run: uv run python scripts/check_migrations.py
+  # --- security -------------------------------------------------------------
 
-      # Includes the cross-language contract tests, which read
-      # packages/shared-types and fail if the Python and TypeScript
-      # vocabularies have diverged, and the schema tests, which run against the
-      # database Alembic actually built.
-      # Parallel, with a database per worker on the service container (see
-      # tests/support/postgres.py). Two workers, not four: the hosted runner has
-      # two cores, and oversubscribing only adds contention.
-      - name: Tests
-        run: uv run pytest -n 2
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Gitleaks scans history, not just the working tree, so a key
+          # committed and then removed is still a finding - which is the point,
+          # because it is still published.
+          fetch-depth: 0
 
-  # Known-vulnerable dependencies, both ecosystems. Separate from the build
-  # jobs on purpose: an advisory published overnight is not a reason the
-  # frontend tests should go red, and the two questions are answered by
-  # different people. `continue-on-error` is deliberate for the same reason -
-  # the finding is reported in the job summary and does not block a merge that
-  # has nothing to do with it. Phase 23 adds image scanning, once there are
-  # images.
+      # The released binary rather than a marketplace action: one fewer
+      # third-party action with a token in its environment, and the version is
+      # pinned here rather than by a tag someone else can move.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+
+      # `gitleaks git`, not `gitleaks detect`: the subcommands were renamed and
+      # `detect` no longer exists in 8.30. Configuration, including the one
+      # allowance for .env.example, is in .gitleaks.toml at the root.
+      - name: Scan
+        run: gitleaks git --no-banner --redact --exit-code 1 .
+
   dependencies:
     name: Dependency scan
     runs-on: ubuntu-latest
@@ -161,6 +143,10 @@ jobs:
       # produces a steady trickle of low and moderate advisories that never
       # reach a production bundle, and a gate that fires every week is one
       # people learn to ignore.
+      #
+      # `continue-on-error` throughout, and deliberately: an advisory published
+      # overnight is not a reason a change that touches neither ecosystem
+      # should fail to merge. The finding is in the job summary.
       - name: npm audit
         run: npm audit --audit-level=high
         continue-on-error: true
@@ -172,32 +158,74 @@ jobs:
         working-directory: apps/api
         continue-on-error: true
 
-  e2e:
-    name: End-to-end smoke tests
+  # --- the infrastructure descriptions --------------------------------------
+
+  # Phase 23 added three descriptions of how to run this system, none of which
+  # can be executed on the machine it is developed on. This job is where they
+  # are checked by their own tools; the claims those tools cannot make - that
+  # the files still describe *this* application - are asserted by
+  # apps/api/tests/test_infrastructure.py, in the backend suite.
+  infrastructure:
+    name: Infrastructure (terraform, dockerfiles, workflows)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
+      - uses: hashicorp/setup-terraform@v3
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
+          terraform_version: 1.14.4
+          terraform_wrapper: false
 
-      - run: npm ci
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive infra/terraform
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-        working-directory: apps/web
+      # -backend=false: validation needs the provider schemas and nothing else,
+      # so this runs with no credentials, no state bucket and no cloud.
+      - name: Terraform validate
+        run: |
+          terraform -chdir=infra/terraform init -backend=false -input=false
+          terraform -chdir=infra/terraform validate
 
-      - name: Run Playwright
-        run: npm run test:e2e --workspace @aether/web
+      # The repository is mounted rather than the Dockerfiles piped in on
+      # stdin, because hadolint reads `.hadolint.yaml` from its working
+      # directory - and piping would silently lint under the default rules,
+      # with the two declined checks and their reasons ignored.
+      - name: Lint the Dockerfiles
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo hadolint/hadolint:v2.14.0-alpine \
+            hadolint infra/docker/api.Dockerfile infra/docker/web.Dockerfile
+
+      # These workflow files are themselves configuration that only fails when
+      # it runs. actionlint catches the half of that which is static: an
+      # expression that cannot evaluate, a `needs` on a job that is not there,
+      # a shell that will not parse.
+      - name: Lint the workflows
         env:
-          CI: 'true'
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz actionlint
+          ./actionlint -color
 
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: apps/web/playwright-report
-          retention-days: 7
+  # --- the slow half --------------------------------------------------------
+
+  tests:
+    name: Tests
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
+  # One check to require on a branch protection rule, which is green only when
+  # everything above it is. Without this, adding a job to this file silently
+  # leaves it optional until somebody remembers to add it to the rule as well.
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [frontend-static, backend-static, secrets, dependencies, infrastructure, tests]
+    if: always()
+    steps:
+      - name: Verdict
+        run: |
+          echo "${{ join(needs.*.result, ' ') }}"
+          [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "false" ]]

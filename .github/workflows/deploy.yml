@@ -1,0 +1,349 @@
+name: Deploy
+
+# Build, migrate, deploy, prove it works, and put the old one back if it does
+# not.
+#
+# **This has never run.** There is no AWS account behind this repository, so
+# every step below is a description of a deployment rather than a record of
+# one. It is written to be readable and correct rather than to look finished;
+# where a thing cannot be verified from here it says so.
+#
+# The order is the whole design:
+#
+#   1. Build and scan the images (build.yml). Nothing is deployed that has not
+#      been scanned, because a gate behind the thing it guards is not a gate.
+#   2. Run the migrations as a one-off task, and wait for it to exit 0. Not on
+#      service startup: two replicas racing `alembic upgrade` is how a
+#      migration deadlocks.
+#   3. Roll the services - worker first, then api, then web.
+#   4. Ask the deployment whether it works.
+#   5. On any failure from step 2 onwards, put the previous task definitions
+#      back. Which revisions those are is recorded before step 2 starts,
+#      because after a failure the only reliable account of what was running
+#      is the one written down before it stopped.
+#
+# Worker first is deliberate. The worker is the process that executes research
+# runs, and it is the one with no traffic to drain; rolling it before the API
+# means that if the new build cannot execute a run at all, that is visible
+# before any user-facing replica has been replaced.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Which environment to deploy'
+        type: choice
+        options: [staging, production]
+        default: staging
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deployment per environment at a time, and never cancelled halfway:
+  # a cancelled deploy leaves a service mid-roll with two task definitions
+  # live and nothing watching it.
+  group: deploy-${{ inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Images
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    with:
+      push: true
+      tag: ${{ github.event.release.tag_name || github.ref_name }}
+
+  deploy:
+    name: Deploy to ${{ inputs.environment || 'production' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # The GitHub environment, which is where approval, the deployment history
+    # and the environment-scoped variables live. A production deployment should
+    # need a person, and that person is configured here rather than in this
+    # file.
+    environment:
+      name: ${{ inputs.environment || 'production' }}
+      url: ${{ vars.DEPLOYMENT_URL }}
+
+    permissions:
+      contents: read
+      # Read, not write: this job copies the images build.yml published, and
+      # publishes nothing itself.
+      packages: read
+      # OIDC: the workflow exchanges a short-lived GitHub token for an AWS
+      # role, so there is no long-lived access key in this repository's
+      # secrets to rotate or to leak.
+      id-token: write
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Assume the deployment role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Both ends of the copy below. The GHCR package inherits this
+      # repository's visibility, so without this sign-in the mirror step fails
+      # to read the manifest of an image this very workflow just pushed.
+      - name: Sign in to the source registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # The images were built and scanned in GHCR. ECS pulls from ECR, so they
+      # are copied across by digest - `imagetools create` copies the manifest
+      # server side, so nothing is pulled, rebuilt or re-tagged, and the image
+      # that was scanned is byte for byte the image that runs.
+      - name: Mirror the images into ECR
+        id: images
+        env:
+          API_SOURCE: ${{ needs.build.outputs.api_image }}
+          WEB_SOURCE: ${{ needs.build.outputs.web_image }}
+        run: |
+          set -euo pipefail
+          api="${ECR_REGISTRY}/aether-api:${GITHUB_SHA}"
+          web="${ECR_REGISTRY}/aether-web:${GITHUB_SHA}"
+          docker buildx imagetools create --tag "$api" "$API_SOURCE"
+          docker buildx imagetools create --tag "$web" "$WEB_SOURCE"
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+
+      # What to go back to. Captured before anything changes, because after a
+      # failure the only reliable source of "what was running" is what was
+      # written down before it stopped running.
+      - name: Record the running revisions
+        id: previous
+        run: |
+          set -euo pipefail
+          for service in api web worker; do
+            arn=$(aws ecs describe-services \
+              --cluster "$CLUSTER" \
+              --services "${CLUSTER}-${service}" \
+              --query 'services[0].taskDefinition' --output text)
+            echo "${service}=${arn}" >> "$GITHUB_OUTPUT"
+            echo "${service} was running ${arn}"
+          done
+
+      # --- register the new revisions -----------------------------------------
+      #
+      # Registered before anything is migrated or rolled, and for a reason that
+      # is easy to get wrong: `ecs run-task` can override a task definition's
+      # *command* but not its *image*, so a migration run against the existing
+      # family would run the old build's Alembic against the new schema
+      # requirement. The new revision has to exist first, and then it is the
+      # same revision that both migrates and serves.
+      #
+      # The render action is used only to produce the JSON - it fetches the
+      # current definition and strips the read-only fields, which is the fiddly
+      # part - and the CLI does the registering, so that this workflow holds
+      # the ARNs it needs rather than a file path.
+
+      - name: Render the API task definition
+        id: api_task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: ${{ env.CLUSTER }}-api
+          container-name: api
+          image: ${{ steps.images.outputs.api }}
+
+      - name: Render the worker task definition
+        id: worker_task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: ${{ env.CLUSTER }}-worker
+          container-name: worker
+          image: ${{ steps.images.outputs.api }}
+
+      - name: Render the web task definition
+        id: web_task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: ${{ env.CLUSTER }}-web
+          container-name: web
+          image: ${{ steps.images.outputs.web }}
+
+      - name: Register them
+        id: revisions
+        env:
+          API_FILE: ${{ steps.api_task.outputs.task-definition }}
+          WORKER_FILE: ${{ steps.worker_task.outputs.task-definition }}
+          WEB_FILE: ${{ steps.web_task.outputs.task-definition }}
+        run: |
+          set -euo pipefail
+          register() {
+            aws ecs register-task-definition \
+              --cli-input-json "file://$1" \
+              --query 'taskDefinition.taskDefinitionArn' --output text
+          }
+          {
+            echo "api=$(register "$API_FILE")"
+            echo "worker=$(register "$WORKER_FILE")"
+            echo "web=$(register "$WEB_FILE")"
+          } >> "$GITHUB_OUTPUT"
+
+      # --- migrate ------------------------------------------------------------
+      #
+      # One task, the new API revision, `alembic upgrade heads`, run to
+      # completion. Not on service startup: two replicas racing the same
+      # migration is how one deadlocks.
+      #
+      # There is no automatic schema rollback below, and that is a decision
+      # rather than an omission: `alembic downgrade` against a database that has
+      # already taken writes under the new schema can lose them. What makes the
+      # code rollback safe instead is that every migration must leave the
+      # *previous* revision of the application able to run - expand in one
+      # release, contract in a later one. `make migrate-check` verifies the
+      # migrations are reversible; this stronger property is enforced by review.
+      - name: Run the migrations
+        env:
+          # Everything from `vars` and from an earlier step arrives through the
+          # environment rather than interpolated into the script. These are
+          # repository-configured values and not user input, but a `${{ }}` in
+          # a `run:` block is pasted into the shell before it runs, and that is
+          # the shape of a command injection regardless of who fills it in.
+          TASK_DEFINITION: ${{ steps.revisions.outputs.api }}
+          SUBNETS: ${{ vars.PRIVATE_SUBNET_IDS }}
+          TASKS_SG: ${{ vars.TASKS_SECURITY_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          overrides='{"containerOverrides":[{"name":"api","command":["alembic","upgrade","heads"]}]}'
+          network="awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${TASKS_SG}],assignPublicIp=DISABLED}"
+          task=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEFINITION" \
+            --launch-type FARGATE \
+            --network-configuration "$network" \
+            --overrides "$overrides" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task $task"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task"
+          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          reason=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task" \
+            --query 'tasks[0].stoppedReason' --output text)
+          echo "exit code ${code} (${reason})"
+          test "$code" = "0"
+
+      # --- roll the services --------------------------------------------------
+      #
+      # Worker first, then api, then web. The worker is the process that
+      # executes research runs and the one with no traffic to drain, so if the
+      # new build cannot run at all that is visible before a user-facing replica
+      # has been replaced.
+      #
+      # ECS rolls each one: new tasks start before old ones stop (minimum
+      # healthy 100%), and the deployment circuit breaker rolls the service back
+      # by itself if the new tasks never become healthy. `wait services-stable`
+      # is what makes this workflow find out rather than report success and
+      # leave.
+      - name: Roll the services
+        env:
+          WORKER_TASK: ${{ steps.revisions.outputs.worker }}
+          API_TASK: ${{ steps.revisions.outputs.api }}
+          WEB_TASK: ${{ steps.revisions.outputs.web }}
+        run: |
+          set -euo pipefail
+          for pair in "worker:$WORKER_TASK" "api:$API_TASK" "web:$WEB_TASK"; do
+            service="${pair%%:*}"
+            revision="${pair#*:}"
+            echo "rolling ${service} to ${revision}"
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "${CLUSTER}-${service}" \
+              --task-definition "$revision" >/dev/null
+            aws ecs wait services-stable \
+              --cluster "$CLUSTER" --services "${CLUSTER}-${service}"
+          done
+
+      # --- prove it works -----------------------------------------------------
+      #
+      # A stable service is a service whose tasks are running, which is not the
+      # same claim as a deployment that works. scripts/smoke.py asks the
+      # questions that distinguish them, from outside, the way a browser would:
+      # does the frontend render, is the API reachable at the *same origin* as
+      # the frontend (which is what the built image's relative base URL depends
+      # on), is it this application rather than something that answered, does
+      # the versioned surface refuse an unauthenticated caller - and are the
+      # probes still not routed publicly, because /ready reports whether every
+      # dependency is reachable and that is not an answer for the internet.
+      - name: Smoke test
+        env:
+          DEPLOYMENT_URL: ${{ vars.DEPLOYMENT_URL }}
+        run: python scripts/smoke.py --base-url "$DEPLOYMENT_URL"
+
+      # --- roll back ----------------------------------------------------------
+      #
+      # Reached when anything after "Record the running revisions" failed. ECS
+      # has already rolled back any service whose tasks would not start; this
+      # covers the other case, which is the one that matters more - tasks that
+      # start, pass their health check, and are wrong.
+      - name: Put the previous revisions back
+        if: failure() && steps.previous.outcome == 'success'
+        env:
+          PREVIOUS_WORKER: ${{ steps.previous.outputs.worker }}
+          PREVIOUS_API: ${{ steps.previous.outputs.api }}
+          PREVIOUS_WEB: ${{ steps.previous.outputs.web }}
+        run: |
+          # Not `set -e`: every service must be attempted even if the first one
+          # fails to roll back, because stopping halfway leaves the deployment
+          # in a state that is neither version.
+          set -uo pipefail
+          status=0
+          for pair in "worker:$PREVIOUS_WORKER" "api:$PREVIOUS_API" "web:$PREVIOUS_WEB"; do
+            service="${pair%%:*}"
+            previous="${pair#*:}"
+            echo "::warning::rolling ${service} back to ${previous}"
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "${CLUSTER}-${service}" \
+              --task-definition "$previous" >/dev/null || status=1
+          done
+          for service in worker api web; do
+            aws ecs wait services-stable \
+              --cluster "$CLUSTER" --services "${CLUSTER}-${service}" || status=1
+          done
+          # The schema is deliberately not rolled back; see the migration step.
+          echo "::warning::The code was rolled back. The schema was not - migrations are expand-only."
+          exit "$status"
+
+      - name: Summary
+        if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'production' }}
+          API_IMAGE: ${{ steps.images.outputs.api }}
+          WEB_IMAGE: ${{ steps.images.outputs.web }}
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "### Deployment"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Environment | ${ENVIRONMENT} |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| API image | \`${API_IMAGE}\` |"
+            echo "| Web image | \`${WEB_IMAGE}\` |"
+            echo "| Result | ${RESULT} |"
+          } >> "$GITHUB_STEP_SUMMARY"

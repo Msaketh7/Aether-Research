@@ -1,0 +1,138 @@
+name: Tests
+
+# The suites, separated from the fast gates in ci.yml because they are slow and
+# because they need services. Called by ci.yml on every pull request and every
+# push to main; runnable on its own when a flaky run needs repeating without
+# re-running lint.
+#
+# Nothing here is mocked that has a real implementation. The database is a real
+# PostgreSQL with pgvector - the suite must exercise the 0002 migration and the
+# embedding column, which a stock server cannot create. Redis is real, because
+# a blocking pop, a timeout, and "one job reaches exactly one worker" cannot be
+# faked. The model providers and the open internet are the only things
+# replaced, and they are replaced at the transport.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  frontend:
+    name: Frontend unit tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm run test --workspaces --if-present
+
+      - name: Build
+        run: npm run build --workspace @aether/web
+
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/api
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: aether
+          POSTGRES_PASSWORD: aether
+          POSTGRES_DB: aether_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aether"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AETHER_TEST_DATABASE_URL: postgresql+asyncpg://aether:aether@127.0.0.1:5432/aether_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      # Reversibility is a deployment property, so it is verified separately
+      # against a clean database rather than inside the suite, which shares one.
+      - name: Migrations round trip
+        run: uv run python scripts/check_migrations.py
+
+      # Everything: unit, integration, the cross-language contract tests that
+      # read packages/shared-types, the schema tests against the database
+      # Alembic actually built, the fifteen end-to-end research scenarios, and
+      # the infrastructure tests that hold the deployment files to this code.
+      #
+      # Parallel, with a database per worker on the service container (see
+      # tests/support/postgres.py). Two workers, not four: the hosted runner has
+      # two cores, and oversubscribing only adds contention.
+      - name: Tests
+        run: uv run pytest -n 2
+
+  e2e:
+    name: End-to-end smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Run Playwright
+        run: npm run test:e2e --workspace @aether/web
+        env:
+          CI: 'true'
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

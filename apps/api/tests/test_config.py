@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
 from app.models import build_providers
@@ -90,6 +90,49 @@ def test_a_process_started_from_the_shipped_example_builds_its_providers(monkeyp
     # Ollama needs no credential, which is what a developer with nothing
     # configured is left with - and is the honest answer, not a crash.
     assert sorted(provider.value for provider in build_providers(settings)) == ["ollama"]
+
+
+def test_the_shipped_example_carries_no_credential_values(monkeypatch):
+    """Every secret in `.env.example` is present and empty, without exception.
+
+    Two things depend on this and neither is obvious. `make env` copies the
+    file, so a value here is a value in every developer's `.env` - and a real
+    one would be a published credential, because the example is committed.
+
+    And the secret scanner is configured to skip this file (`.gitleaks.toml`),
+    because the generic-api-key rule matches `OPENAI_API_KEY=` and then scores
+    the entropy of the comment on the next line. That allowance is only safe
+    while this test holds: it is what would fail if somebody pasted a working
+    key into the example.
+
+    Written over the declared fields rather than over a list of names, so a
+    credential added to `Settings` later is covered without anyone
+    remembering.
+    """
+    # The two exceptions, and they are exceptions rather than an exemption:
+    # MinIO's own documented default, which docker-compose.yml starts the local
+    # object store with. Pinned to the exact value, so the field is still
+    # covered - a real access key here fails this test like any other.
+    local_development_defaults = {
+        "s3_access_key_id": "minioadmin",
+        "s3_secret_access_key": "minioadmin",
+    }
+
+    load_env_example(monkeypatch)
+
+    settings = Settings()
+    found: dict[str, str] = {}
+    for name, field in Settings.model_fields.items():
+        if field.annotation not in (SecretStr, SecretStr | None):
+            continue
+        value = getattr(settings, name)
+        if value is None:
+            continue
+        if value.get_secret_value() == local_development_defaults.get(name):
+            continue
+        found[name] = "carries a value"
+
+    assert not found, found
 
 
 @pytest.mark.parametrize("blank", ["", "   "])

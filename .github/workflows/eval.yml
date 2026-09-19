@@ -1,0 +1,185 @@
+name: Evaluation
+
+# The benchmark, run against a build.
+#
+# **This spends money.** Every case is a real research run through the real
+# graph against real providers, which is the only way it measures the system
+# rather than a special path built for it. So the trigger is not "every merge":
+# it is a schedule, a manual run, and a push to main *when the repository has
+# been configured to allow it*. A quality gate that silently charges for every
+# merge is one somebody turns off at the worst moment.
+#
+# Nothing here has ever run. The suite exists, the dataset exists, the gates
+# exist and are all ungated because there is no baseline to set them from
+# (docs/evaluation.md). The first execution produces the first numbers; until
+# then every metric reads as "not measured" rather than as zero, and this
+# workflow is a description of how to get them rather than a record of having.
+
+on:
+  schedule:
+    # Sunday, early. Far from a working day, so a bill and a red run arrive
+    # together and are read together.
+    - cron: '17 4 * * 0'
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Override every case mode. quick is the cheap smoke run.'
+        type: choice
+        options: [as-written, quick, deep]
+        default: as-written
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two at once. Each run writes evaluation rows and spends money, and a
+  # queued second copy of a thing that costs money is not a thing to queue.
+  group: evaluation
+  cancel-in-progress: false
+
+jobs:
+  # A run needs an API key and a search provider. Without them the benchmark
+  # cannot execute a single case, and the honest outcome is a skipped job that
+  # says why - not a green run that measured nothing, and not a red one that
+  # blames the code for a missing credential.
+  configured:
+    name: Check the credentials exist
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          # On a push to main the benchmark runs only if the repository asks
+          # for it. The default is off, because the default should not be a
+          # charge per merge.
+          ON_MAIN: ${{ vars.RUN_EVALUATION_ON_MAIN }}
+          EVENT: ${{ github.event_name }}
+        # Every test is an `if`, not a `[[ ... ]] && flag=true` one-liner.
+        # GitHub runs `run:` under `bash -e`, where such a list is exempt from
+        # errexit *because* it is a list - until the day it ends up as the last
+        # line of the script, at which point its exit status becomes the step's
+        # and a false condition fails the job. This job's whole purpose is to
+        # answer "no" calmly, so it is written in the form that cannot acquire
+        # that behaviour by being edited.
+        run: |
+          allowed=true
+
+          if [[ -z "$ANTHROPIC_API_KEY" && -z "$OPENAI_API_KEY" ]]; then
+            allowed=false
+            echo "::notice::Skipped: the benchmark needs a model provider key."
+          fi
+
+          if [[ -z "$TAVILY_API_KEY" && -z "$BRAVE_API_KEY" ]]; then
+            allowed=false
+            echo "::notice::Skipped: the benchmark needs a search provider key."
+          fi
+
+          if [[ "$EVENT" == "push" && "$ON_MAIN" != "true" ]]; then
+            allowed=false
+            echo "::notice::Skipped on main. Set the RUN_EVALUATION_ON_MAIN variable to enable it."
+          fi
+
+          echo "ready=$allowed" >> "$GITHUB_OUTPUT"
+
+  evaluate:
+    name: Run the benchmark
+    needs: configured
+    if: needs.configured.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    # Generous, because the ceiling that matters is the one the application
+    # enforces per run (MAX_RUNTIME_SECONDS, MAX_ESTIMATED_COST_USD), not this
+    # one. This is the hang detector.
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/api
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: aether
+          POSTGRES_PASSWORD: aether
+          POSTGRES_DB: aether_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aether"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      APP_ENV: staging
+      DATABASE_URL: postgresql+asyncpg://aether:aether@127.0.0.1:5432/aether_eval
+      REDIS_URL: redis://127.0.0.1:6379/0
+      # The filesystem backend, because there is no bucket here and the
+      # benchmark's artifacts do not outlive the job.
+      STORAGE_BACKEND: filesystem
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      # Both branches: the benchmark retrieves, and retrieval needs the vector
+      # line, which the pgvector image can create and a stock server cannot.
+      - name: Migrate
+        run: uv run alembic upgrade heads
+
+      # Exits non-zero when a gated metric regresses. Every gate is currently
+      # open, so today this can only fail on a run that did not complete - and
+      # that is the correct behaviour until there is a baseline.
+      - name: Evaluate
+        env:
+          # Through the environment rather than interpolated into the script.
+          # `inputs.mode` is a choice and so is constrained, but a workflow
+          # input pasted into a shell is the shape of a command injection
+          # whether or not this particular one can be exploited - and the
+          # habit is what matters, because the next one may be free text.
+          MODE: ${{ inputs.mode }}
+        run: |
+          args=()
+          if [[ -n "$MODE" && "$MODE" != "as-written" ]]; then
+            args+=(--mode "$MODE")
+          fi
+          uv run python -m app.evaluations "${args[@]}" | tee evaluation.md
+
+      - name: Report
+        if: always()
+        run: cat evaluation.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evaluation
+          path: apps/api/evaluation.md
+          retention-days: 90

@@ -1682,6 +1682,51 @@ its test.
 - Quality gate: evaluation thresholds (see Section 17.4).
 - Database migrations run as a pre-deploy step with a rollback path.
 
+### 20.1 As built (Phase 24)
+
+Five workflows in `.github/workflows/`, split by what they cost rather than by
+what they cover.
+
+| Workflow     | Trigger                                  | What it is for                                                         |
+| ------------ | ---------------------------------------- | ---------------------------------------------------------------------- |
+| `ci.yml`     | every pull request, every push to `main` | The fast gates, plus one aggregate check to require on the branch rule |
+| `test.yml`   | called by `ci.yml`; also on demand       | Unit, integration, scenarios, Playwright, the production build         |
+| `build.yml`  | push to `main`; called by `deploy.yml`   | The two images: build, run, scan, then push by digest                  |
+| `eval.yml`   | weekly, on demand, guarded on `main`     | The benchmark, which spends real money per case                        |
+| `deploy.yml` | manual, or a published release           | Build → migrate → roll → smoke → roll back                             |
+
+Four properties that are decisions rather than defaults:
+
+- **Scan before push.** A vulnerable image already in a registry is one
+  somebody can deploy. `build.yml` builds to the local daemon, runs the image,
+  scans it, and only then pushes.
+- **Deploy by digest, not by tag.** A tag can be moved after a deployment has
+  decided to trust it.
+- **Migrations are expand-only, and are not rolled back.** The pre-deploy task
+  runs `alembic upgrade heads` against the _new_ image's revision — `ecs
+run-task` can override a command but not an image, so the revision is
+  registered before it is used. On failure the pipeline rolls the **code**
+  back and leaves the schema forward, because `alembic downgrade` against a
+  database that has taken writes under the new schema can lose them. What
+  makes that safe is the discipline the rollback path depends on: every
+  migration must leave the previous revision of the application able to run.
+  Expand in one release, contract in a later one.
+- **The smoke test is not a health check.** `scripts/smoke.py` asks from
+  outside, over the internet, the questions that distinguish "the tasks are
+  running" from "the deployment works": the frontend renders, the API answers
+  at the _same origin_, it is this application (its error envelope, its
+  headers), it refuses an unauthenticated caller, and the probes are still not
+  routed publicly.
+
+**None of this has been executed.** There is no AWS account behind the
+repository and no credentials for the benchmark, so `deploy.yml` and `eval.yml`
+are descriptions rather than records. What is verified: `actionlint` and
+`shellcheck` in `ci.yml`, and `apps/api/tests/test_workflows.py`, which asserts
+the decisions above — the ordering of the deploy steps, that scanning precedes
+pushing, that no action is pinned to a moving reference, that `deploy.yml`
+cannot be reached from a pull request, and that the aggregate check waits for
+every job beside it.
+
 ---
 
 ## 21. Deployment & infrastructure (`infra/`)

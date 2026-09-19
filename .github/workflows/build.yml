@@ -1,0 +1,254 @@
+name: Build images
+
+# Builds the two images, scans them, and pushes them when asked to.
+#
+# Two things this file is careful about. It **scans before it pushes**: a
+# vulnerable image that is already in a registry is one somebody can deploy,
+# and the point of a gate is to be in front of the thing it guards. And it
+# reports the **digest**, not the tag it pushed - a tag can be moved after a
+# deployment has decided to trust it, and a digest cannot.
+#
+# Called by deploy.yml, and runnable on its own to check that the Dockerfiles
+# still build. Not part of ci.yml: an image is an artifact, not a verdict, and
+# a pull request that cannot merge until two images build is a pull request
+# waiting on the slowest possible thing.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: 'Push the images to the registry'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      push:
+        description: 'Push the images to the registry'
+        type: boolean
+        default: false
+      tag:
+        description: 'Tag to publish in addition to the commit SHA'
+        type: string
+        default: ''
+    outputs:
+      api_image:
+        description: 'The API image, by digest'
+        value: ${{ jobs.images.outputs.api_image }}
+      web_image:
+        description: 'The web image, by digest'
+        value: ${{ jobs.images.outputs.web_image }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  images:
+    name: Build, scan and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # Only what pushing to GHCR needs, and only on this job.
+      packages: write
+      # Lets the scanner upload SARIF, so a finding appears in the security tab
+      # rather than only in a log nobody opens.
+      security-events: write
+
+    outputs:
+      api_image: ${{ steps.digests.outputs.api }}
+      web_image: ${{ steps.digests.outputs.web }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to the registry
+        if: inputs.push || github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- build ------------------------------------------------------------
+      #
+      # Built to the local daemon first, scanned, and only then pushed. The
+      # GitHub Actions cache carries the layers between runs; without it every
+      # build reinstalls the Python and npm dependency trees from scratch, which
+      # is most of the time either image takes.
+
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          load: true
+          tags: aether-api:candidate
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          load: true
+          tags: aether-web:candidate
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      # --- the images run ---------------------------------------------------
+      #
+      # Cheap, and it catches the class of defect that a build cannot: an image
+      # that builds and then cannot start. The API is asked for its own settings
+      # rather than started - importing the application and constructing
+      # Settings exercises the path layout, the virtualenv, the user and the
+      # entrypoint, without needing a database.
+
+      - name: The API image starts
+        run: |
+          docker run --rm --entrypoint python aether-api:candidate -c \
+            "from app.core.config import Settings, REPO_ROOT; \
+             s = Settings(app_env='test'); \
+             print('repo root', REPO_ROOT); \
+             print('storage', s.resolved_storage_backend)"
+
+      - name: The API image runs as a non-root user
+        run: |
+          uid=$(docker run --rm --entrypoint id aether-api:candidate -u)
+          test "$uid" != "0" || { echo "the API image runs as root"; exit 1; }
+          uid=$(docker run --rm --entrypoint id aether-web:candidate -u)
+          test "$uid" != "0" || { echo "the web image runs as root"; exit 1; }
+
+      # Imported, not started. `python -m app.workers.runner` would reserve a
+      # run and block on a queue that is not there; importing the module proves
+      # the entrypoint resolves inside the image, which is the claim being made.
+      - name: The worker entrypoint resolves inside the image
+        run: |
+          docker run --rm --entrypoint python aether-api:candidate -c \
+            "import importlib.util as u; assert u.find_spec('app.workers.runner')"
+
+      # --- scan -------------------------------------------------------------
+
+      # Two passes per image, because they answer different questions. The
+      # table pass is the gate and fails the build. The SARIF pass is the
+      # report and must not fail it - a finding belongs in the security tab
+      # whether or not it is the one that stopped the build, and the two
+      # cannot be one step because a scanner that exits non-zero on the way to
+      # writing its report is a report that does not get uploaded.
+      - name: Scan the API image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aether-api:candidate
+          format: table
+          severity: HIGH,CRITICAL
+          # Unfixed advisories are reported and do not fail the build: there is
+          # no action to take on one, and a gate nobody can pass is a gate
+          # people route around.
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan the web image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aether-web:candidate
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Record the API findings
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aether-api:candidate
+          format: sarif
+          output: trivy/api.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Record the web findings
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aether-web:candidate
+          format: sarif
+          output: trivy/web.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      # Never the reason a build fails. If an earlier step failed before the
+      # scanners wrote anything, there is no report to upload and that is not
+      # a second problem - the first one is already failing the job.
+      - name: Publish the findings
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy
+          category: container-images
+
+      # --- push -------------------------------------------------------------
+
+      - name: Names
+        id: names
+        run: |
+          repo=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "api=${{ env.REGISTRY }}/${repo}-api" >> "$GITHUB_OUTPUT"
+          echo "web=${{ env.REGISTRY }}/${repo}-web" >> "$GITHUB_OUTPUT"
+
+      - name: Push the API image
+        id: push_api
+        if: inputs.push || github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.names.outputs.api }}:${{ github.sha }}
+            ${{ inputs.tag && format('{0}:{1}', steps.names.outputs.api, inputs.tag) || '' }}
+          cache-from: type=gha,scope=api
+          provenance: mode=max
+          sbom: true
+
+      - name: Push the web image
+        id: push_web
+        if: inputs.push || github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.names.outputs.web }}:${{ github.sha }}
+            ${{ inputs.tag && format('{0}:{1}', steps.names.outputs.web, inputs.tag) || '' }}
+          cache-from: type=gha,scope=web
+          provenance: mode=max
+          sbom: true
+
+      # By digest, because that is what a deployment should pin. A tag names
+      # whatever was pushed to it last, including after somebody decided to
+      # trust it.
+      - name: Digests
+        id: digests
+        if: inputs.push || github.event_name == 'push'
+        run: |
+          echo "api=${{ steps.names.outputs.api }}@${{ steps.push_api.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "web=${{ steps.names.outputs.web }}@${{ steps.push_web.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Images"
+            echo ""
+            echo "- \`${{ steps.names.outputs.api }}@${{ steps.push_api.outputs.digest }}\`"
+            echo "- \`${{ steps.names.outputs.web }}@${{ steps.push_web.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

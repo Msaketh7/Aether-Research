@@ -1,0 +1,23 @@
+# Dockerfile linting (Phase 24). Read by the `infrastructure` job in
+# .github/workflows/ci.yml, which mounts the repository so this file is the
+# working directory's config.
+
+ignored:
+  # DL3008 (apt) and DL3018 (apk): "pin the package version".
+  #
+  # Declined, with a reason rather than out of convenience. Each image
+  # installs exactly one OS package - tini, so that PID 1 reaps the parse
+  # worker's children - and pinning its version means the build breaks on the
+  # next security update of the one package we install, which is precisely
+  # backwards. Reproducibility comes from the layer above: the base images are
+  # pinned by tag (`python:3.12-slim-bookworm`, `node:22-alpine`) and the
+  # Python and npm dependency trees are installed from committed lockfiles
+  # with `uv sync --frozen` and `npm ci`.
+  #
+  # This is the trade to revisit by pinning the base images *by digest*, which
+  # fixes the package snapshot as a side effect and does not need a human to
+  # chase distribution version strings.
+  - DL3008
+  - DL3018
+
+failure-threshold: warning

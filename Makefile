@@ -165,6 +165,13 @@ audit: ## Scan both dependency trees for known vulnerabilities
 	cd $(API) && uv run --with pip-audit pip-audit
 	npm audit --audit-level=high
 
+# The secret scan CI runs, for running before pushing rather than after.
+# Needs gitleaks on the PATH; configuration, including the one allowance for
+# .env.example, is in .gitleaks.toml.
+.PHONY: secrets
+secrets: ## Scan the working tree and its history for committed secrets
+	gitleaks git --no-banner --redact --exit-code 1 .
+
 .PHONY: format-check
 format-check:
 	npm run format:check

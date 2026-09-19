@@ -37,8 +37,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 21  | Load testing               | Done     |
 | 22  | Optimization               | Done     |
 | 23  | Infrastructure             | Done     |
-| 24  | CI/CD                      | **Next** |
-| 25  | Documentation              | Planned  |
+| 24  | CI/CD                      | Done     |
+| 25  | Documentation              | **Next** |
 
 ---
 
@@ -1634,8 +1634,8 @@ IAM. Modular and configurable.
 
 _Landed:_ two images, a compose stack that runs the whole system, a modular
 Terraform root that `terraform validate` accepts, the Kubernetes escape hatch
-ADR 0008 promised, and 43 tests whose entire job is to notice when any of it
-stops describing the code.
+ADR 0008 promised, and 43 new API tests whose entire job is to notice when any
+of it stops describing the code - 1375 total.
 
 **Three files describe how to run this system and none of them can be run
 here.** Docker is not installed on this machine and neither is an AWS account,
@@ -1687,7 +1687,7 @@ a metric that does not exist would silently never fire, which is worse than not
 having one. The shape of the policy is written down; it is switched off, and
 says why at the code.
 
-## Phase 24 — CI/CD · **Next**
+## Phase 24 — CI/CD · **Done**
 
 GitHub Actions: `ci.yml`, `test.yml`, `eval.yml`, `build.yml`, `deploy.yml`.
 Pull request: lint, typecheck, unit tests, integration tests, security scan,
@@ -1695,10 +1695,123 @@ frontend tests, build. Main: all of the above plus the evaluation benchmark.
 Deployment: build images, push to registry, deploy, smoke test, verify health,
 roll back on failure where practical.
 
-_Partially in place:_ `ci.yml` runs frontend and backend lint, typecheck, tests,
-migration round trip, build and Playwright.
+_Landed:_ the five workflows, split by what they cost rather than by what they
+cover - `ci.yml` (the fast gates plus one aggregate check), `test.yml` (the
+suites and the services they need), `build.yml` (the two images: built, run,
+scanned, then pushed by digest), `eval.yml` (the benchmark, guarded) and
+`deploy.yml` (build, migrate, roll, prove, roll back). Plus `scripts/smoke.py`,
+and 26 tests that hold the pipelines to the decisions they were written under.
 
-## Phase 25 — Documentation · Planned
+**The split is by cost, not by subject.** A pull request runs one required
+check, `ci`, which waits for lint, types, the secret scan, the dependency scan,
+the infrastructure checks and the whole of `test.yml`. That aggregate job
+exists because a branch protection rule names one check: without it, a job
+added to `ci.yml` is optional until somebody remembers to add it to the rule as
+well, and a test asserts it waits for every job beside it. The evaluation is
+separate because each case is a real research run against real providers and
+costs money; the images are separate because an image is an artifact rather
+than a verdict, and a pull request that cannot merge until two images build is
+a pull request waiting on the slowest possible thing.
+
+**Four properties of the deployment pipeline are decisions rather than
+defaults**, and each is asserted by `tests/test_workflows.py` rather than left
+to review. The images are **scanned before they are pushed** - a vulnerable
+image already in a registry is one somebody can deploy. Deployment is **by
+digest**, because a tag can be moved after a deployment has decided to trust
+it. The rollback target is **recorded before anything changes**, because after
+a failure the only reliable account of what was running is the one written down
+before it stopped. And the **migration runs before the services roll** and
+after the new revision is registered.
+
+**That last ordering was a defect until shellcheck and a second reading found
+it.** The pre-deploy migration was written as a command override on the
+existing task definition - but `ecs run-task` can override a container's
+_command_ and not its _image_, so it would have run the previous build's
+Alembic against the new build's schema requirement. The new revision is now
+registered first, and the same revision both migrates and serves.
+
+**The schema is deliberately not rolled back.** `alembic downgrade` against a
+database that has already taken writes under the new schema can lose them, so a
+failed deployment rolls the _code_ back and leaves the schema forward. What
+makes that safe is a discipline rather than a mechanism: every migration must
+leave the previous revision of the application able to run - expand in one
+release, contract in a later one. It is written down at the step that depends
+on it.
+
+**The smoke test is the part that could be verified here, so it was.**
+`scripts/smoke.py` is stdlib-only, because a smoke test that installs a
+dependency tree first can fail for reasons that have nothing to do with the
+deployment. It asks five questions from outside: does the frontend render, is
+the API reachable **at the same origin** (which is what the built image's
+relative base URL depends on), is it this application rather than something
+that answered, does the versioned surface refuse an unauthenticated caller, and
+are the probes still not routed publicly - `/ready` reports whether Postgres,
+Redis and S3 are reachable, which is a free map of the deployment for anyone
+who asks. `tests/test_smoke_script.py` runs the real application on a real
+socket and runs those checks against it, in both directions: the
+unauthenticated check is also run against a server with the development
+identity on, and asserted to fail, because a check that passes either way is
+not a check.
+
+**Four defects the verification found**, every one of them only visible by
+running something.
+
+`gitleaks detect` does not exist any more - the subcommands were renamed, and
+the pinned 8.30 binary has `git` and `dir` - so the secret scan would have
+failed on its first execution rather than found anything. Run properly, it then
+reported a leak in `.env.example`: a false positive, because the
+`generic-api-key` rule matches the key `OPENAI_API_KEY=` and scores the entropy
+of the comment on the following line. `.gitleaks.toml` skips that file, and a
+new test walks every `SecretStr` field and fails if one of them loads a value
+from the shipped example - which is what makes the allowance safe rather than a
+hole. It also found the two MinIO defaults that are deliberately there, and
+they are now pinned to that exact string rather than exempted by field.
+
+`ecs run-task` can override a container's _command_ and not its _image_, so the
+pre-deploy migration as first written would have run the previous build's
+Alembic against the new build's schema requirement. The new task definition
+revision is now registered before the migration, and the same revision both
+migrates and serves.
+
+The smoke test's probe check looked for a `"status"` key on both probes.
+`/health` has one and `/ready` does not - readiness answers
+`{"ready", "dependencies"}` - so the `/ready` branch was dead and a deployment
+that published the state of every dependency would have passed the check. It
+was invisible because `/health` failed first and hid it, and it was found by
+reading the endpoint rather than the test. The check now recognises each path
+by the shape of its own response and reports all of them together.
+
+And the full suite found the fourth: a 30-second server-startup deadline in the
+new test that passed every time the module ran alone and failed four-wide under
+xdist, for the same reason every other timeout on this machine is generous.
+
+**One rule declined rather than satisfied.** hadolint wants every OS package
+version pinned (DL3008, DL3018). Each image installs exactly one - `tini`, so
+that PID 1 reaps the parse worker's children - and pinning it means the build
+breaks on the next security update of the one package we install, which is
+backwards. `.hadolint.yaml` records the decision and where reproducibility
+actually comes from: base images pinned by tag, dependency trees installed from
+committed lockfiles. The threshold is set at `warning`, so everything else
+still fails the build.
+
+**What has not run.** `deploy.yml` and `eval.yml` have never executed - there
+is no AWS account behind this repository and no provider credentials for the
+benchmark - so both are descriptions rather than records, and both say so in
+their own header.
+
+What was verified, and how: `actionlint` with `shellcheck` on all five
+workflows, `hadolint` on both Dockerfiles, `gitleaks` over the whole history,
+and `terraform fmt` and `validate` on the root. None of those four tools is
+installed on this machine - each was fetched as a pinned release binary into
+the session's scratch directory, run once, and then wired into `ci.yml` so it
+runs on every change from now on. Every one of them found something, which is
+the argument for fetching them rather than assuming a check cannot be run
+here. Plus 27 new API tests - 1402 total: `tests/test_workflows.py` for the
+decisions the linters cannot see, `tests/test_smoke_script.py`, which runs the
+real application on a real socket, and one in `tests/test_config.py` that is
+what makes the secret scanner's single allowance safe.
+
+## Phase 25 — Documentation · **Next**
 
 README, `docs/PRD.md`, `docs/TDD.md`, `docs/architecture.md`,
 `docs/evaluation.md`, `docs/threat-model.md`. ADRs for LangGraph, LlamaIndex,

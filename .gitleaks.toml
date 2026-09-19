@@ -1,0 +1,24 @@
+# Secret scanning configuration.
+#
+# The default rule set, plus one allowance. `make audit` and the CI secret scan
+# both read this file.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+.env.example ships every credential present and blank, which is deliberate:
+`make env` copies it, and app/core/config.py reads a blank value as an absent
+credential rather than an empty one, so a developer with nothing configured
+gets a process that starts and simply has no OpenAI (Phase 13 found that the
+other way round). The generic-api-key rule matches `OPENAI_API_KEY=` and scores
+the entropy of the *next* line, which is a comment.
+
+This allowance would be dangerous on its own, because a real key pasted into
+the example would then be missed. What closes that is a test rather than a
+rule: `test_config.py::test_the_shipped_example_carries_no_credential_values`
+asserts that every credential setting resolves to None when the shipped example
+is loaded, which is false the moment one of them has a value.
+"""
+paths = ['''^\.env\.example$''']
