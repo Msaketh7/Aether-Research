@@ -1,6 +1,10 @@
 # Scrape configuration for the local stack.
-# The api/worker targets start reporting in Phase 17 (observability); until then
-# Prometheus simply reports them as down, which is the honest state.
+#
+# The targets are compose service names, so they resolve only when the
+# application profile is running (`make up-app`). Under a plain `make up` the
+# API and the worker are expected on the host, outside this network, and
+# Prometheus reports both jobs as down - which is the honest state rather than
+# a misconfiguration.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s

@@ -36,8 +36,8 @@ Status legend: **Done** · **Next** · **Planned**
 | 20  | Security                   | Done     |
 | 21  | Load testing               | Done     |
 | 22  | Optimization               | Done     |
-| 23  | Infrastructure             | **Next** |
-| 24  | CI/CD                      | Planned  |
+| 23  | Infrastructure             | Done     |
+| 24  | CI/CD                      | **Next** |
 | 25  | Documentation              | Planned  |
 
 ---
@@ -1625,14 +1625,69 @@ one.
 numbers, `data/loadtest/results.json` is the current measurement and
 `results-before-dispatch-clock.json` is the one it is compared against.
 
-## Phase 23 — Infrastructure · **Next**
+## Phase 23 — Infrastructure · **Done**
 
 Dockerfiles for web, api and worker. Docker Compose for local development:
 Next.js, FastAPI, PostgreSQL, Redis, MinIO, Prometheus, Grafana. Terraform for
 AWS: VPC, ALB, ECS/Fargate, RDS PostgreSQL, ElastiCache Redis, S3, CloudWatch,
 IAM. Modular and configurable.
 
-## Phase 24 — CI/CD · Planned
+_Landed:_ two images, a compose stack that runs the whole system, a modular
+Terraform root that `terraform validate` accepts, the Kubernetes escape hatch
+ADR 0008 promised, and 43 tests whose entire job is to notice when any of it
+stops describing the code.
+
+**Three files describe how to run this system and none of them can be run
+here.** Docker is not installed on this machine and neither is an AWS account,
+so the usual discipline - verify by running it - is unavailable for the first
+time in twenty-three phases. Infrastructure that is never executed does not
+fail; it drifts, silently, until somebody applies it. So the phase's test
+strategy is different: `apps/api/tests/test_infrastructure.py` takes each fact
+a deployment file states _about the application_ and asserts it against the
+application. Every variable set in compose, Terraform or Kubernetes is a
+declared `Settings` field - pydantic's `extra="ignore"` means a misspelling is
+otherwise a silent default. Every probe path is a route the router serves - a
+404 is an unhealthy replica, on every replica at once. The load balancer's idle
+timeout outlasts `SSE_MAX_CONNECTION_SECONDS`; the worker's container stop
+timeout outlasts `WORKER_SHUTDOWN_GRACE_SECONDS`; the worker's published
+metrics port is the one the worker listens on; the API and the worker are one
+image with two commands, in all three descriptions.
+
+**The image's WORKDIR is load-bearing.** `app/core/config.py` computes
+`REPO_ROOT` as `Path(__file__).resolve().parents[4]`, so the obvious
+`WORKDIR /app` puts `config.py` four directories from the filesystem root and
+that index raises `IndexError` - at import, before logging exists, with a
+traceback about path arithmetic rather than about container layout. The images
+keep the `apps/api` depth, and a test fails if the WORKDIR is ever shortened.
+
+**Two other decisions that are the deployment, not decoration.** The built web
+image carries a _relative_ API base URL, because the load balancer routes
+`/api/*` to the API and everything else to the frontend: one origin, so the
+request is same-origin, the session cookie is first-party, CORS never applies -
+and the image contains no hostname, so one build serves every environment. And
+`APP_ENV=production` is baked into the API image rather than left at the `local`
+default, because under `local` the development identity is allowed: a deployment
+that merely forgot the variable would serve every request as an authenticated
+developer. Compose sets `APP_ENV=local` explicitly, which is a thing you can see
+in a diff.
+
+**The defect `terraform validate` found**, which review had not: Terraform
+propagates sensitivity through every expression, so a map whose values are
+sensitive is itself sensitive - keys included - and a sensitive value cannot
+drive a `for_each`, because the key would appear in resource addresses and plan
+output. The secrets module took one map of name to value and could not have been
+applied. Names and values now arrive separately, with a precondition that keeps
+the halves in step.
+
+**What is deliberately not built.** The worker's autoscaling policy is CPU
+rather than queue depth, in both ECS and Kubernetes, because
+`research_queue_depth` is a Prometheus gauge and nothing publishes it to
+CloudWatch or to a custom-metrics adapter - a target-tracking policy pointed at
+a metric that does not exist would silently never fire, which is worse than not
+having one. The shape of the policy is written down; it is switched off, and
+says why at the code.
+
+## Phase 24 — CI/CD · **Next**
 
 GitHub Actions: `ci.yml`, `test.yml`, `eval.yml`, `build.yml`, `deploy.yml`.
 Pull request: lint, typecheck, unit tests, integration tests, security scan,

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 /**
@@ -14,6 +15,24 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  /**
+   * Standalone output is what the container image copies: a self-contained
+   * server plus only the node_modules it traced, rather than the whole
+   * workspace install (Phase 23).
+   *
+   * It is opt-in by variable rather than always on, because Next refuses
+   * `next start` when it is set - and `next start` is how `npm run start` and
+   * Playwright's webServer run the built app. One flag, set by
+   * infra/docker/web.Dockerfile, keeps both paths working.
+   */
+  output: process.env.NEXT_BUILD_STANDALONE === '1' ? 'standalone' : undefined,
+  /**
+   * The standalone tracer starts from this directory by default, which in a
+   * workspace misses the hoisted node_modules at the repository root. Pointing
+   * it at the monorepo root is what makes @aether/shared-types and the hoisted
+   * dependencies land in the traced output.
+   */
+  outputFileTracingRoot: path.join(import.meta.dirname, '../..'),
   // The shared contract is consumed as TypeScript source; there is no build
   // step for it, so a contract change is a compile error here immediately.
   transpilePackages: ['@aether/shared-types'],

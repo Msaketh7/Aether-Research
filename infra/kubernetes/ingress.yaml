@@ -1,0 +1,39 @@
+# The same routing decision as the ALB listener rule: `/api` to the API,
+# everything else to the frontend.
+#
+# That is what makes NEXT_PUBLIC_API_BASE_URL a relative path in the built
+# image - one image, no hostname, a same-origin request and a first-party
+# session cookie.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aether
+  namespace: aether
+  annotations:
+    # A research request holds an SSE connection open for the whole run, and
+    # SSE_MAX_CONNECTION_SECONDS is 900. A proxy read timeout below that cuts
+    # the stream and the frontend reconnects in a loop, for a reason that
+    # appears nowhere in the application's logs.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '960'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '960'
+    # Server-sent events must not be buffered, or the client receives the
+    # whole run's progress at the end of it.
+    nginx.ingress.kubernetes.io/proxy-buffering: 'off'
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: aether-api
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aether-web
+                port:
+                  name: http

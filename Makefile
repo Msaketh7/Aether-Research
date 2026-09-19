@@ -170,17 +170,66 @@ format-check:
 	npm run format:check
 
 # --- infrastructure (local) ------------------------------------------------
+# Two different questions, two targets. `up` brings up the dependencies and
+# leaves the application on the host, which is how it is developed. `up-app`
+# adds web, api and worker from the images in infra/docker/, which is how the
+# images themselves get tested.
 .PHONY: up
 up: ## Start local infrastructure (Postgres, Redis, MinIO, Prometheus, Grafana)
 	docker compose up -d
 
+.PHONY: up-app
+up-app: ## Start infrastructure plus web, api and worker from their images
+	docker compose --profile app up -d --build
+
 .PHONY: down
 down: ## Stop local infrastructure
-	docker compose down
+	docker compose --profile app down
 
 .PHONY: logs
 logs: ## Tail local infrastructure logs
-	docker compose logs -f
+	docker compose --profile app logs -f
+
+# --- container images ------------------------------------------------------
+# Built from the repository root: the web build needs the npm workspace and the
+# API image must keep the apps/api path depth (see infra/docker/api.Dockerfile).
+IMAGE_TAG ?= local
+
+.PHONY: images
+images: image-api image-web ## Build both container images
+
+.PHONY: image-api
+image-api: ## Build the API/worker image
+	docker build -f infra/docker/api.Dockerfile -t aether-api:$(IMAGE_TAG) .
+
+.PHONY: image-web
+image-web: ## Build the web image
+	docker build -f infra/docker/web.Dockerfile -t aether-web:$(IMAGE_TAG) .
+
+# --- infrastructure (cloud) ------------------------------------------------
+# Terraform is modular and environment-selected: one root, one .tfvars per
+# environment, one state key per environment. ENV picks which.
+ENV ?= staging
+TF := terraform -chdir=infra/terraform
+
+.PHONY: tf-fmt
+tf-fmt: ## Format the Terraform sources
+	terraform fmt -recursive infra/terraform
+
+.PHONY: tf-validate
+tf-validate: ## Validate the Terraform configuration (no cloud credentials needed)
+	$(TF) init -backend=false -input=false
+	$(TF) validate
+
+.PHONY: tf-plan
+tf-plan: ## Plan the named environment: make tf-plan ENV=staging
+	$(TF) init -input=false -backend-config=environments/$(ENV).backend.hcl
+	$(TF) plan -input=false -var-file=environments/$(ENV).tfvars
+
+.PHONY: tf-apply
+tf-apply: ## Apply the named environment: make tf-apply ENV=staging
+	$(TF) init -input=false -backend-config=environments/$(ENV).backend.hcl
+	$(TF) apply -input=false -var-file=environments/$(ENV).tfvars
 
 .PHONY: clean
 clean: ## Remove build output and caches

@@ -17,7 +17,7 @@ untrusted-content handling, measured evaluation, observability, deployment.
 
 ## Current state
 
-**Phases 0–22 of 25 are complete.** Full plan and per-phase status:
+**Phases 0–23 of 25 are complete.** Full plan and per-phase status:
 [`docs/PHASES.md`](docs/PHASES.md) — read it before starting new work.
 
 | Layer                                 | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -44,6 +44,7 @@ untrusted-content handling, measured evaluation, observability, deployment.
 | Load testing (`app/loadtest`)         | Two arms, both measured: `make loadtest` drives 10/25/50/100 concurrent research jobs through the real worker and graph with the model and socket scripted at a declared latency; `make loadtest-api-local` drives the HTTP surface with Locust. `breakdown.py` reads where a run's time went back out of `agent_runs`, and the driver counts Postgres's own committed transactions. Numbers: [`docs/load-testing.md`](docs/load-testing.md), artefacts in `data/loadtest/`.                                                         |
 | Scenario tests (`tests/scenarios`)    | The fifteen situations Phase 19 requires the system to survive, each driven through the whole vertical slice: queue, worker, lease, graph, nine real agents, the real toolbelt over a scripted socket, ingestion, retrieval, the projections and real Postgres. Only the model and the socket are replaced. `catalogue.py` holds the list as code and fails the build when a scenario loses its test.                                                                                                                                |
 | Security (`app/auth`, `app/security`) | Argon2id passwords, opaque server-side sessions in an `HttpOnly` cookie that can be revoked per device, token-bucket rate limiting per identity and route class, the client address resolved through _declared_ proxy hops, and an append-only `audit_log` written outside the request's transaction (ADR 0021). The development identity still exists, gated by the `local`/`test` allowlist and by `DEV_IDENTITY_ENABLED`, which can only close it further.                                                                        |
+| Infrastructure (`infra/`)             | Two images (api serves api, worker and migrate; web is the Next standalone build), a compose stack that runs the whole system behind the `app` profile, a modular Terraform root for ECS Fargate that `terraform validate` accepts, and a Kubernetes manifest set as the escape hatch. **None of it has been applied or built here** - there is no Docker and no AWS account on this machine; `tests/test_infrastructure.py` is what holds all three descriptions to the code they deploy.                                           |
 | Everything else                       | Not built. Nothing on the `/api/v1` surface returns `501` any more - Phase 20 implemented the last of it - but `NotImplementedYet` stays in the taxonomy for the next capability that is declared before it is built.                                                                                                                                                                                                                                                                                                                |
 
 Nothing fabricates data to fill a gap. Two benchmarks have been executed: the
@@ -169,7 +170,13 @@ apps/api/          FastAPI + worker, one codebase two process types (ADR 0001)
 packages/shared-types/   TypeScript DTOs shared by web and mock API
 packages/prompts|evaluation/   prompts/ is a pointer (ADR 0015); evaluation/ is Phase 18
 data/seed|fixtures|eval/       eval/ holds the benchmark dataset (Phase 18)
-infra/docker|terraform|kubernetes|monitoring/
+infra/docker/       api.Dockerfile (api + worker + migrate) and web.Dockerfile,
+                    both built from the repository root
+infra/terraform/    the AWS root: modules/{network,security,database,cache,
+                    storage,alb,ecs-cluster,ecs-service,secrets} and one
+                    .tfvars per environment. Validated, never applied.
+infra/kubernetes/   the portability escape hatch ADR 0008 names. Never applied.
+infra/monitoring/   Prometheus scrape config and the Grafana dashboard
 ```
 
 ## Tech stack (as pinned)
@@ -221,7 +228,11 @@ Point the frontend at the real API with `NEXT_PUBLIC_API_MODE=live` and
 
 Hard-won; do not rediscover them.
 
-- **Docker is not installed, and neither is Redis.** `make up` cannot run here.
+- **Docker is not installed, and neither is Redis.** `make up`, `make up-app`
+  and `make images` cannot run here, so the Phase 23 images have never been
+  built on this machine - CI builds them. `terraform` is not installed either;
+  it was fetched into a scratch directory to run `fmt` and `validate` once, and
+  CI runs both.
   The API and the worker both need Redis outside `APP_ENV=test`, so use
   `APP_ENV=test` for local end-to-end checks - it selects the in-memory queue.
   `tests/test_worker_queue.py` skips its Redis tests with a reason when no

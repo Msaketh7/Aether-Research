@@ -1,0 +1,49 @@
+# Schema first, as a Job, for the same reason the compose file has a one-shot
+# `migrate` service and Terraform has a pre-deploy task: two replicas racing
+# `alembic upgrade` is how a migration deadlocks, so nothing migrates on
+# startup.
+#
+# Run this to completion before rolling the Deployments.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aether-migrate
+  namespace: aether
+  labels:
+    app.kubernetes.io/name: aether
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 2
+  # Kept for a day so a failed migration can be read after the fact.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aether
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: migrate
+          image: aether-api:latest
+          command: ['alembic', 'upgrade', 'heads']
+          envFrom:
+            - configMapRef:
+                name: aether-config
+            - secretRef:
+                name: aether-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

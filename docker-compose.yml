@@ -1,16 +1,52 @@
 # Local development stack for Aether Research.
 #
-# Phase 0/1 scope: the backing services only. The `web`, `api` and `worker`
-# application services are added in Phase 2 (backend) and Phase 23
-# (infrastructure) once their Dockerfiles exist under infra/docker/.
+#   make up        backing services only (Postgres, Redis, MinIO, Prometheus, Grafana)
+#   make up-app    all of the above plus web, api and worker, built from infra/docker/
+#   make down      stop everything
 #
-#   make up      start everything below
-#   make down    stop it
+# The application services sit behind the `app` profile so that `make up` keeps
+# doing what it has always done: bring up the dependencies and let the API and
+# the worker run from the host, which is how they are developed. `make up-app`
+# is the other question - does the *image* work - and that one is answered by
+# building it.
 #
 # Credentials here are local-development defaults and are intentionally weak.
 # Nothing in this file is used in production; see infra/terraform/.
 
 name: aether
+
+# One image, two process types (ADR 0001). The anchor is what makes that
+# structural rather than a convention: api, worker and migrate cannot drift
+# apart, because there is one build definition and they all reference it.
+x-api-build: &api-build
+  context: .
+  dockerfile: infra/docker/api.Dockerfile
+
+# Everything the API and the worker need to reach the rest of this file. Both
+# processes read the same settings (app/core/config.py is shared), so this
+# block is shared too; anything that differs is set on the service.
+#
+# `.env` is optional and loaded first, so a developer's provider keys are
+# picked up without being listed here. The values below then override the
+# host-facing URLs in it: inside the network the hostname is the service name,
+# not localhost.
+x-api-environment: &api-environment
+  APP_ENV: local
+  LOG_LEVEL: info
+  DATABASE_URL: postgresql+asyncpg://aether:aether@postgres:5432/aether
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_BACKEND: s3
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_BUCKET: aether-artifacts
+  S3_REGION: us-east-1
+  S3_ACCESS_KEY_ID: minioadmin
+  S3_SECRET_ACCESS_KEY: minioadmin
+  # MinIO has no DNS for virtual-host addressing, so the bucket goes in the
+  # path. `auto` picks virtual-host style against a custom endpoint and the
+  # request then resolves nowhere.
+  S3_ADDRESSING_STYLE: path
+  CORS_ALLOW_ORIGINS: http://localhost:3000
+  OTEL_SERVICE_NAME: aether-api
 
 services:
   postgres:
@@ -32,7 +68,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: aether-redis
     command: ['redis-server', '--appendonly', 'yes']
     ports:
@@ -100,6 +136,98 @@ services:
     volumes:
       - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
+
+  # --- application (profile: app) -------------------------------------------
+
+  # Schema first, as its own short-lived container, because both long-lived
+  # services assume the tables exist and neither should migrate on startup:
+  # two replicas racing `alembic upgrade` is how a migration deadlocks. In the
+  # cloud this is the pre-deploy task (infra/terraform, .github/workflows/deploy.yml);
+  # here it is a container that runs once and exits 0.
+  migrate:
+    build: *api-build
+    image: aether-api:local
+    container_name: aether-migrate
+    profiles: [app]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment: *api-environment
+    command: ['alembic', 'upgrade', 'heads']
+    restart: 'no'
+
+  api:
+    build: *api-build
+    image: aether-api:local
+    container_name: aether-api
+    profiles: [app]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment: *api-environment
+    ports:
+      - '8000:8000'
+    restart: unless-stopped
+
+  worker:
+    build: *api-build
+    image: aether-api:local
+    container_name: aether-worker
+    profiles: [app]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *api-environment
+      OTEL_SERVICE_NAME: aether-worker
+    # The second process type: same image, different command.
+    command: ['python', '-m', 'app.workers.runner']
+    ports:
+      # The worker's own Prometheus endpoint (WORKER_METRICS_PORT). Published
+      # because infra/monitoring/prometheus.yml scrapes it from the host.
+      - '9100:9100'
+    # The API image's HEALTHCHECK probes /health, which the worker does not
+    # serve - it would report unhealthy forever. Liveness for a worker is the
+    # lease it renews, visible in the run's row.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        # Against the local API rather than the mock corpus, and absolute
+        # because nothing puts the two behind one origin here. The deployed
+        # image is built with the relative default; see web.Dockerfile.
+        NEXT_PUBLIC_API_MODE: live
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+    image: aether-web:local
+    container_name: aether-web
+    profiles: [app]
+    depends_on:
+      - api
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
 
 volumes:
   postgres-data:

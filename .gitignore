@@ -45,3 +45,15 @@ apps/web/tsconfig.tsbuildinfo
 # are committed - they are the measurement. Locust's CSVs are per-invocation
 # scratch and the numbers that matter from them live in docs/load-testing.md.
 data/loadtest/api_*.csv
+
+# terraform (Phase 23). The lock file is committed - it pins the provider
+# checksums for every platform CI and developers run on - and the working
+# directory, the plan output and any real .tfvars are not: a plan can contain
+# resource attributes, and a .tfvars can contain an account id.
+infra/terraform/.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+!infra/terraform/environments/*.tfvars

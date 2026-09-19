@@ -1,0 +1,82 @@
+# Build context exclusions, for every image under infra/docker/.
+#
+# Both images build from the repository root, because both need more than their
+# own directory: the web build needs the npm workspace (@aether/shared-types is
+# a workspace dependency, not a published package) and the API image must keep
+# the `apps/api` path depth, which `app/core/config.py` resolves REPO_ROOT from.
+#
+# The context is therefore the whole repository, and this file is what keeps
+# that from meaning 77,000 files and a secret. Order matters: the negations at
+# the end re-admit what an earlier pattern excluded.
+
+# --- never, under any circumstances -----------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+.ssh/
+
+# --- dependency trees: reinstalled inside the image from the lockfiles -------
+node_modules/
+**/node_modules/
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# --- build output: rebuilt inside the image ---------------------------------
+.next/
+**/.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# --- caches -----------------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.turbo/
+**/.cache/
+
+# --- test and measurement output --------------------------------------------
+coverage/
+**/coverage/
+playwright-report/
+**/playwright-report/
+test-results/
+**/test-results/
+.playwright/
+
+# --- local runtime state ----------------------------------------------------
+.data/
+data/loadtest/*.csv
+
+# --- history and tooling that no runtime reads ------------------------------
+.git/
+.github/
+.husky/
+.claude/
+.vscode/
+.idea/
+docs/
+infra/terraform/
+infra/kubernetes/
+scripts/node_modules/
+**/*.md
+!apps/api/README.md
+!README.md
+
+# --- tests: the images ship the application, not its suite ------------------
+apps/api/tests/
+apps/web/e2e/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+
+# --- os noise ---------------------------------------------------------------
+.DS_Store
+Thumbs.db

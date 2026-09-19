@@ -1,0 +1,105 @@
+# The second process type: the same image as the API, a different command
+# (ADR 0001).
+#
+# No Service and no readiness probe, because nothing calls a worker - it takes
+# work from the queue. Liveness for a worker is the lease it renews, which is
+# visible in the run's row rather than over HTTP, so the only probe here is the
+# one that says the metrics endpoint is up.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aether-worker
+  namespace: aether
+  labels:
+    app.kubernetes.io/name: aether
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aether
+      app.kubernetes.io/component: worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aether
+        app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/path: /metrics
+        prometheus.io/port: '9100'
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: worker
+          image: aether-api:latest
+          command: ['python', '-m', 'app.workers.runner']
+          ports:
+            - name: metrics
+              containerPort: 9100
+          envFrom:
+            - configMapRef:
+                name: aether-config
+            - secretRef:
+                name: aether-secrets
+          livenessProbe:
+            tcpSocket:
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 500m
+              # Above PARSE_MAX_MEMORY_BYTES (2 GiB): document parsing forks a
+              # child with its own address space, so a pod limited below that
+              # is killed by the kernel rather than by the parser's own bound.
+              memory: 2Gi
+            limits:
+              memory: 4Gi
+      # Longer than WORKER_SHUTDOWN_GRACE_SECONDS. A worker handed a SIGTERM
+      # hands its runs back; killed before it finishes, those runs wait for
+      # their leases to expire and then for the reconciliation sweep.
+      terminationGracePeriodSeconds: 90
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aether-worker
+  namespace: aether
+  annotations:
+    # The metric this should scale on is `research_queue_depth`, a Prometheus
+    # gauge (app/observability/metrics.py). Using it needs an adapter that
+    # exposes Prometheus to the custom-metrics API; without one, an `External`
+    # metric here would silently never fire, which is worse than not having
+    # it. CPU is the honest placeholder, and the same gap is marked in the ECS
+    # autoscaling policy.
+    aether.dev/note: 'CPU is a placeholder for research_queue_depth; see infra/terraform/modules/ecs-service.'
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aether-worker
+  minReplicas: 1
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

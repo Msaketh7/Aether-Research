@@ -1,0 +1,72 @@
+# The namespace, and the network policy that makes "least privilege" the
+# starting point rather than a later tightening.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aether
+  labels:
+    app.kubernetes.io/part-of: aether-research
+---
+# Default deny, both directions. Every allowance below is then explicit, which
+# is the same property the Terraform security groups have: a rule that is not
+# written does not exist.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: aether
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Egress for the API and the worker: DNS, and everything else.
+#
+# "Everything else" is deliberate and is the same decision as the Terraform
+# task security group - this platform's job is to read the open web, and the
+# list of domains a research question might reach is not a list that exists.
+# What may be fetched is decided by the four-layer SSRF guard in app/sources/,
+# at the point where the URL is known.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress
+  namespace: aether
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, worker, web, migrate]
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - {}
+---
+# Ingress: only the ingress controller reaches the two services that serve
+# HTTP, and only the metrics scraper reaches the worker.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-http-ingress
+  namespace: aether
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, web]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8000
+          protocol: TCP
+        - port: 3000
+          protocol: TCP
