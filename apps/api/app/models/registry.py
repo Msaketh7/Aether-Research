@@ -21,6 +21,7 @@ its ceiling while the ledger reads $0.00.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -33,6 +34,12 @@ from app.core.enums import LlmProvider
 from app.core.logging import get_logger
 from app.models.base import EmbeddingPurpose, TokenUsage
 from app.models.errors import ModelNotConfigured
+
+#: What a provider appends when it resolves an alias to a dated snapshot:
+#: OpenAI's ``-2024-07-18`` and Anthropic's ``-20240718``. Anchored to a bare
+#: date so that a longer model name is never mistaken for a snapshot of a
+#: shorter one - see ``ModelRegistry.find``.
+_SNAPSHOT_SUFFIX = re.compile(r"-(?:\d{4}-\d{2}-\d{2}|\d{8})")
 
 logger = get_logger(__name__)
 
@@ -193,8 +200,18 @@ class ModelRegistry:
         Declaration order decides when one model id is declared twice - two
         entries for the same id with different prices is a registry defect, and
         picking the first at least makes it a *consistent* one.
+
+        **A returned id may be a dated snapshot of a declared alias.** Ask a
+        provider for ``gpt-4o-mini`` and the completion reports
+        ``gpt-4o-mini-2024-07-18``; the alias is a pointer and the response
+        names what actually ran. An exact match alone therefore missed every
+        real call, and the caller - ``LLMGateway.cost_of`` - read that miss as
+        "this model has no declared price", which under a run's cost ceiling
+        stops discovery early and reports the spend as *not measured*. Found by
+        the first live call this repository made; no scripted provider could
+        surface it, because a fake echoes back the id it was handed.
         """
-        return next(
+        exact = next(
             (
                 spec
                 for spec in self.specs.values()
@@ -202,6 +219,23 @@ class ModelRegistry:
             ),
             None,
         )
+        if exact is not None:
+            return exact
+
+        # Only a bare date may follow. `gpt-4o` is a prefix of `gpt-4o-mini`, so
+        # a plain `startswith` would price a mini call at the full model's rate -
+        # trading an under-report for an over-report rather than fixing it.
+        snapshots = [
+            spec
+            for spec in self.specs.values()
+            if spec.provider is provider
+            and model_id.startswith(spec.model_id)
+            and _SNAPSHOT_SUFFIX.fullmatch(model_id[len(spec.model_id) :])
+        ]
+        # Longest declared id wins, so the most specific alias claims its own
+        # snapshot. `max` keeps the first of equals, so declaration order still
+        # decides a genuine tie.
+        return max(snapshots, key=lambda spec: len(spec.model_id), default=None)
 
     def embedding_models(self) -> list[ModelSpec]:
         return [spec for spec in self.specs.values() if spec.supports_embeddings]

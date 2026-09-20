@@ -15,6 +15,7 @@ across the whole product. It is data, so it must be asserted like data.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -302,6 +303,68 @@ def test_no_embedding_model_is_an_explicit_failure():
 
     with pytest.raises(ModelNotConfigured):
         router.embedding_model()
+
+
+def test_a_dated_snapshot_is_priced_as_the_alias_it_resolved_from():
+    """Found by the first live call this repository ever made.
+
+    A provider resolves an alias to a dated snapshot and reports *that* in the
+    response: ask for `gpt-4o-mini` and the completion says
+    `gpt-4o-mini-2024-07-18`. Pricing looks the returned id up in the registry,
+    so an exact match missed and every call to a correctly declared, correctly
+    priced model was recorded as uncosted - which under a run's cost ceiling
+    stops discovery at the end of the round and reports the spend as *not
+    measured*.
+
+    No scripted provider could catch this: a fake echoes back the model id it
+    was handed, so the returned id and the declared id always agreed.
+    """
+    declared = ModelSpec(
+        key="openai:small",
+        provider=LlmProvider.OPENAI,
+        model_id="gpt-4o-mini",
+        tier=ModelTier.SMALL,
+        context_window=128_000,
+        max_output_tokens=16_384,
+        pricing=Pricing(
+            input_usd_per_mtok=1.0,
+            output_usd_per_mtok=2.0,
+            as_of=dt.date(2026, 1, 1),
+            source="test",
+        ),
+    )
+    known = ModelRegistry(specs={declared.key: declared})
+
+    assert known.find(LlmProvider.OPENAI, "gpt-4o-mini") is declared
+    assert known.find(LlmProvider.OPENAI, "gpt-4o-mini-2024-07-18") is declared
+    # Anthropic's suffix has no separators, and is the same idea.
+    assert known.find(LlmProvider.OPENAI, "gpt-4o-mini-20240718") is declared
+
+
+def test_a_snapshot_never_matches_a_different_model_that_is_a_prefix_of_it():
+    """`gpt-4o` is a prefix of `gpt-4o-mini`, so a plain `startswith` would
+    price a mini call at the full model's rate - turning an under-report into an
+    over-report, which is not an improvement. Only a bare date may follow."""
+    openai = {"provider": LlmProvider.OPENAI}
+    big = replace(spec("openai:strong", ModelTier.STRONG, **openai), model_id="gpt-4o")
+    small = replace(spec("openai:small", ModelTier.SMALL, **openai), model_id="gpt-4o-mini")
+
+    both = ModelRegistry(specs={big.key: big, small.key: small})
+
+    assert both.find(LlmProvider.OPENAI, "gpt-4o-mini-2024-07-18") is small
+    assert both.find(LlmProvider.OPENAI, "gpt-4o-2024-08-06") is big
+    # Not a snapshot of anything declared.
+    assert both.find(LlmProvider.OPENAI, "gpt-4o-audio-preview") is None
+
+
+def test_a_snapshot_of_one_provider_is_not_a_snapshot_of_another():
+    anthropic_spec = replace(
+        spec("a", ModelTier.SMALL, provider=LlmProvider.ANTHROPIC), model_id="shared-name"
+    )
+    known = ModelRegistry(specs={anthropic_spec.key: anthropic_spec})
+
+    assert known.find(LlmProvider.ANTHROPIC, "shared-name-20260101") is anthropic_spec
+    assert known.find(LlmProvider.OPENAI, "shared-name-20260101") is None
 
 
 def test_two_embedding_models_and_no_choice_is_refused():
