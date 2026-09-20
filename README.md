@@ -1101,15 +1101,16 @@ python scripts/dev.py         # no toolchain at all
 It adapts to what you have installed rather than demanding it, and says what
 each choice costs:
 
-| Missing        | What happens instead                                                                                                                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Redis**      | The API and worker cannot share a queue, so the worker's reconciliation sweep picks queued runs out of Postgres. A real mechanism, not a stub - it just costs a few seconds before a run starts.         |
-| **pgvector**   | Only the relational migration branch is applied and retrieval runs its lexical arm. Chunks are stored with vectors pending, which is a declared state rather than an error.                              |
-| **A database** | It tells you the two commands that create the role and the database. A Postgres that has never heard of this application reports itself as an authentication failure, which reads like a wrong password. |
+| Missing               | What happens instead                                                                                                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Redis**             | The API and worker cannot share a queue, so the worker's reconciliation sweep picks queued runs out of Postgres. A real mechanism, not a stub - it just costs a few seconds before a run starts.                                              |
+| **pgvector**          | Only the relational migration branch is applied and retrieval runs its lexical arm. Chunks are stored with vectors pending, which is a declared state rather than an error.                                                                   |
+| **A usable database** | It creates one - `initdb` under `.data/postgres`, trust auth, port 55432, data persisted between runs. No superuser password, because it is our cluster. A `DATABASE_URL` you set yourself is always used as-is; only the default falls back. |
 
 ```bash
 npm run app:api               # the same, without the frontend
 npm run dev                   # only the frontend, on fixtures - no backend needed
+python scripts/dev.py --own-db   # force the managed database, ignoring any other
 ```
 
 `make dev` is still the fastest way to look at the product: it needs no

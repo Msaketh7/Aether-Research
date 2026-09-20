@@ -24,9 +24,20 @@ detected and the consequence is printed rather than discovered:
   * **No pgvector** - only the relational migration branch is applied, and
     retrieval runs its lexical arm. Chunks are stored with their vectors
     pending, which is a documented state and not an error (ADR 0013).
+  * **No usable database** - it creates one, under `.data/postgres`, with
+    `initdb` and trust auth on port 55432. This is the difference between a
+    first run that works and one that stops on a superuser password: both
+    `createuser` and `createdb` against an existing service need one, and a
+    PostgreSQL installed once with its password long forgotten is a wall rather
+    than a step. A cluster we create has no such wall, and the data persists, so
+    it is a real development database rather than a throwaway.
+
+    A `DATABASE_URL` you set explicitly is never second-guessed: a launcher
+    quietly using a different database than the one you configured is the worst
+    thing it could do. It is only the *default* that falls back.
 
 Stdlib only, and no Docker: the point is to be runnable on a machine that has
-Postgres and nothing else.
+Postgres installed and nothing else set up.
 
 Ctrl-C stops all three, children included.
 """
@@ -128,18 +139,240 @@ def port_owner(port: int) -> bool:
     return listening("127.0.0.1", port, timeout=0.3)
 
 
+# --- a database of our own ----------------------------------------------------
+
+#: Where the managed cluster lives. Under `.data/`, which is already ignored,
+#: and persistent: a developer's runs, sources and reports should survive a
+#: restart, which is the whole difference between this and the throwaway cluster
+#: the test suite provisions.
+MANAGED_DIR = REPO / ".data" / "postgres"
+
+#: Not 5432. A machine with PostgreSQL already installed has a service on the
+#: default port, and binding next to it rather than fighting it is what lets
+#: both exist.
+MANAGED_PORT = 55432
+
+#: Trust auth, so there is no password to know, lose or store. Safe because the
+#: cluster listens on loopback only and holds nothing but local development
+#: data - the same trade the test harness already makes.
+MANAGED_URL = f"postgresql+asyncpg://postgres@127.0.0.1:{MANAGED_PORT}/aether"
+
+WINDOWS_POSTGRES_ROOTS = (
+    Path(r"C:\Program Files\PostgreSQL"),
+    Path(r"C:\Program Files (x86)\PostgreSQL"),
+)
+
+
+def postgres_binary(name: str) -> Path | None:
+    """Locate a Postgres binary on PATH, or under a standard install root."""
+    if (found := shutil.which(name)) is not None:
+        return Path(found)
+    for root in WINDOWS_POSTGRES_ROOTS:
+        if not root.is_dir():
+            continue
+        for version_dir in sorted(root.iterdir(), reverse=True):  # 17 before 16
+            candidate = version_dir / "bin" / f"{name}.exe"
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def managed_running() -> bool:
+    return listening("127.0.0.1", MANAGED_PORT, timeout=1.0)
+
+
+def start_managed() -> str | None:
+    """Create the cluster if it does not exist, start it, ensure the database.
+
+    Returns the URL, or None when the tools to do it are not installed.
+
+    This exists because the alternative first-run experience is a superuser
+    password the developer has to know: `createuser` and `createdb` against an
+    existing service both need one, and on a machine where PostgreSQL was
+    installed once and its password forgotten, that is a wall rather than a
+    step. A cluster we create ourselves has no such wall.
+    """
+    initdb = postgres_binary("initdb")
+    pg_ctl = postgres_binary("pg_ctl")
+    if initdb is None or pg_ctl is None:
+        return None
+
+    datadir = MANAGED_DIR / "data"
+    logfile = MANAGED_DIR / "postgres.log"
+
+    if not (datadir / "PG_VERSION").exists():
+        say(f"creating     {colour(str(datadir), DIM)}")
+        datadir.parent.mkdir(parents=True, exist_ok=True)
+        created = subprocess.run(
+            [
+                str(initdb),
+                "-D",
+                str(datadir),
+                "-U",
+                "postgres",
+                "-A",
+                "trust",
+                "-E",
+                "UTF8",
+                "--no-locale",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            print((created.stderr or created.stdout)[-800:], file=sys.stderr)
+            fail("could not create a local database cluster.")
+
+    if not managed_running():
+        say(f"starting     {colour(f'postgres on {MANAGED_PORT}', DIM)}")
+        started = subprocess.run(
+            [
+                str(pg_ctl),
+                "-D",
+                str(datadir),
+                "-l",
+                str(logfile),
+                "-w",
+                "-t",
+                "60",
+                "-o",
+                f"-p {MANAGED_PORT} -c listen_addresses=127.0.0.1",
+                "start",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if started.returncode != 0:
+            print((started.stderr or started.stdout)[-800:], file=sys.stderr)
+            fail(
+                "the local cluster would not start.",
+                fix=f"look in {logfile}",
+            )
+
+    # `createdb` against our own trust-auth cluster needs no password.
+    createdb = postgres_binary("createdb")
+    if createdb is not None:
+        subprocess.run(
+            [
+                str(createdb),
+                "-U",
+                "postgres",
+                "-h",
+                "127.0.0.1",
+                "-p",
+                str(MANAGED_PORT),
+                "aether",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,  # "already exists" is the normal case after the first run.
+        )
+    return MANAGED_URL
+
+
+def stop_managed() -> None:
+    pg_ctl = postgres_binary("pg_ctl")
+    if pg_ctl is None or not managed_running():
+        return
+    subprocess.run(
+        [
+            str(pg_ctl),
+            "-D",
+            str(MANAGED_DIR / "data"),
+            "-m",
+            "fast",
+            "-w",
+            "-t",
+            "30",
+            "stop",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 # --- preflight ---------------------------------------------------------------
 
 
-def check_postgres(url: str) -> None:
+def reachable(url: str) -> bool:
+    """Whether something is listening where this URL points."""
     parts = urlsplit(url.replace("+asyncpg", ""))
-    host, port = parts.hostname or "localhost", parts.port or 5432
-    if not listening(host, port, timeout=2.0):
+    return listening(parts.hostname or "localhost", parts.port or 5432, timeout=2.0)
+
+
+def usable(python: Path, url: str) -> bool:
+    """Whether we can actually *connect* - the half a port check cannot answer.
+
+    A machine with PostgreSQL installed answers on 5432 and then refuses the
+    credentials, because the role this application expects was never created.
+    Treating "the port is open" as "the database is ready" is what turns that
+    into a migration failure three steps later.
+    """
+    return detect(python, url, CONNECT_PROBE)
+
+
+CONNECT_PROBE = """
+import asyncio, os, asyncpg
+async def main():
+    try:
+        conn = await asyncpg.connect(os.environ["DATABASE_URL"].replace("+asyncpg", ""))
+    except Exception:
+        print("no")
+        return
+    await conn.close()
+    print("yes")
+asyncio.run(main())
+"""
+
+
+def resolve_database(
+    python: Path, url: str, *, configured: bool, own: bool
+) -> tuple[str, bool]:
+    """Pick the database to use, and say whether we are managing it.
+
+    Order: an explicitly configured URL wins and is never second-guessed - if
+    someone set DATABASE_URL, a launcher quietly using a different database is
+    the worst thing it could do. Otherwise the default is tried, and a managed
+    cluster is the fallback.
+    """
+    if own:
+        managed = start_managed()
+        if managed is None:
+            fail(
+                "--own-db needs the PostgreSQL client tools (initdb, pg_ctl).",
+                fix="install PostgreSQL, or point DATABASE_URL at a database you have",
+            )
+        say(f"database     {colour(f'managed, 127.0.0.1:{MANAGED_PORT}', DIM)}")
+        return managed, True
+
+    if configured:
+        if not reachable(url):
+            parts = urlsplit(url.replace("+asyncpg", ""))
+            fail(
+                f"DATABASE_URL points at {parts.hostname}:{parts.port or 5432}, "
+                "which is not answering.",
+                fix="start it, or unset DATABASE_URL to use a managed local one",
+            )
+        say(f"database     {colour('DATABASE_URL', DIM)}")
+        return url, False
+
+    if reachable(url) and usable(python, url):
+        parts = urlsplit(url.replace("+asyncpg", ""))
+        say(f"database     {colour(f'{parts.hostname}:{parts.port or 5432}', DIM)}")
+        return url, False
+
+    # Either nothing is there, or something is there that will not let us in.
+    managed = start_managed()
+    if managed is None:
         fail(
-            f"Postgres is not answering on {host}:{port}.",
-            fix="start your local PostgreSQL service, or `make up` if you have Docker",
+            "no usable database, and the PostgreSQL client tools are not installed.",
+            fix="install PostgreSQL, or set DATABASE_URL to a database you can reach",
         )
-    say(f"Postgres     {colour(f'{host}:{port}', DIM)}")
+    say(f"database     {colour(f'managed, 127.0.0.1:{MANAGED_PORT}', DIM)}")
+    return managed, True
 
 
 def python_bin() -> Path:
@@ -352,16 +585,23 @@ def main() -> int:
         action="store_true",
         help="serve the frontend from fixtures, not the API",
     )
+    parser.add_argument(
+        "--own-db",
+        action="store_true",
+        help="always use the managed cluster under .data/postgres",
+    )
     args = parser.parse_args()
 
     print()
     say(colour("Aether Research", BOLD))
 
     env_file = read_dotenv()
-    url = database_url(env_file)
-
-    check_postgres(url)
     python = python_bin()
+
+    configured = bool(os.environ.get("DATABASE_URL") or env_file.get("DATABASE_URL"))
+    url, managing = resolve_database(
+        python, database_url(env_file), configured=configured, own=args.own_db
+    )
     if not args.no_web:
         check_web_dependencies()
         if shutil.which("npm") is None:
@@ -491,6 +731,11 @@ def main() -> int:
     finally:
         for process in reversed(processes):
             process.stop()
+        if managing:
+            # Stopped, not left running: an orphaned postmaster is the thing
+            # this repository has been bitten by before. The data stays in
+            # .data/postgres, so the next start is instant and nothing is lost.
+            stop_managed()
 
 
 if __name__ == "__main__":

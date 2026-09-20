@@ -282,6 +282,13 @@ Hard-won; do not rediscover them.
   directory on a random port with trust auth, destroyed afterwards. It touches
   no existing cluster and needs no credentials. `AETHER_TEST_DATABASE_URL`
   overrides it.
+- **`npm run app` provisions a _persistent_ one the same way**, under
+  `.data/postgres` on port 55432 with trust auth, because the real PostgreSQL 17
+  service on 5432 has no `aether` role and its `postgres` password is not known
+  here - `createuser` against it fails with `password authentication failed`.
+  The managed cluster needs no password because the launcher creates it. It is
+  reused across runs and stopped on a clean exit; a leftover one is harmless
+  because the next start reuses it rather than failing.
 - **The storage tests start their own S3 server** (`moto` in server mode, on a
   free port) rather than patching botocore, so signing and HTTP really run. No
   MinIO or Docker needed.
