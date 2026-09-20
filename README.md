@@ -1072,22 +1072,49 @@ the retrieval benchmark (Phase 8, lexical arm only).
 
 ## Quick start
 
-Requires Node 22+. The backend additionally needs Python 3.12+ and uv.
+Requires Node 22+, Python 3.12+, [uv](https://docs.astral.sh/uv/) and a
+PostgreSQL you can create a database in. **Docker is not required.**
 
 ```bash
-# 1. clone and configure
 git clone <repo-url> "aether-research" && cd aether-research
 cp .env.example .env
 
-# 2. install workspace dependencies
-#    --legacy-peer-deps is needed only for a cold resolve with no lockfile
-#    (npm arborist bug in the vitest peer graph); `npm ci` does not need it.
-npm install --legacy-peer-deps
+npm ci                        # --legacy-peer-deps only for a cold resolve
+cd apps/api && uv sync && cd -   # the API virtualenv, from the lockfile
 
-# 3. run the frontend against the mock API
-make dev                      # or: npm run dev
-open http://localhost:3000
+npm run app                   # everything
 ```
+
+`npm run app` is the whole system in one command: it migrates the database,
+starts the API on `:8000`, starts a worker, and serves the frontend on `:3000`
+**pointed at that API** rather than at its fixtures. One Ctrl-C stops all three,
+children included.
+
+Three spellings of the same thing, so it works whatever you have installed:
+
+```bash
+npm run app                   # needs only npm, which you already have
+make start                    # if you use make
+python scripts/dev.py         # no toolchain at all
+```
+
+It adapts to what you have installed rather than demanding it, and says what
+each choice costs:
+
+| Missing        | What happens instead                                                                                                                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Redis**      | The API and worker cannot share a queue, so the worker's reconciliation sweep picks queued runs out of Postgres. A real mechanism, not a stub - it just costs a few seconds before a run starts.         |
+| **pgvector**   | Only the relational migration branch is applied and retrieval runs its lexical arm. Chunks are stored with vectors pending, which is a declared state rather than an error.                              |
+| **A database** | It tells you the two commands that create the role and the database. A Postgres that has never heard of this application reports itself as an authentication failure, which reads like a wrong password. |
+
+```bash
+npm run app:api               # the same, without the frontend
+npm run dev                   # only the frontend, on fixtures - no backend needed
+```
+
+`make dev` is still the fastest way to look at the product: it needs no
+database, no Python and no keys, and every figure in it is synthetic fixture
+data that the app labels as such on every page.
 
 ### Verifying it
 

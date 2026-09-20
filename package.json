@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace @aether/web",
+    "app": "python scripts/dev.py",
+    "app:api": "python scripts/dev.py --no-web",
     "build": "npm run build --workspace @aether/web",
     "start": "npm run start --workspace @aether/web",
     "lint": "npm run lint --workspaces --if-present",

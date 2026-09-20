@@ -29,7 +29,7 @@ case) and the deployment (no cloud account).
 | API (`apps/api`)                      | FastAPI: research surface, file uploads, SSE, authentication and authorisation, rate limiting, error contract, health probes, `/metrics`, `/evaluations`, `/settings`. 1415 tests.                                                                                                                                                                                                                                                                                                                                                                                |
 | Database                              | PostgreSQL, 23 tables (`users` and `sessions` are written for the first time in Phase 20, `audit_log` added by it), Alembic migrations on two branches (`core`, `vector`), pgvector column sized for the declared embedding model (768). A run's row carries the worker's lease (ADR 0017) and, since Phase 22, the clock that stops the reconciliation sweep re-dispatching a backlog it already dispatched; `research_events` carries the progress stream (ADR 0018); UUIDs come back as `uuid.UUID`, never the driver's subclass.                              |
 | Object storage                        | `ObjectStorage` over S3/MinIO plus a filesystem backend. Bounded, classified, readiness-probed. Written by uploads and by ingestion.                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Model gateway                         | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`. Embeddings are cached per text; completions deliberately are not (ADR 0019). The embedding model is pinned by `EMBEDDING_MODEL`, not taken from registry order, and two declared without a choice is refused - an index holding vectors from two models fails silently.                                                                                                                                                                                                                                                                                           |
+| Model gateway                         | `LLMGateway` over Anthropic, OpenAI and Ollama. Registry, role/mode routing, retry, failover, call ledger. Every agent reaches a model through it and prices its own calls with `cost_of`. Embeddings are cached per text; completions deliberately are not (ADR 0019). The embedding model is pinned by `EMBEDDING_MODEL`, not taken from registry order, and two declared without a choice is refused - an index holding vectors from two models fails silently.                                                                                                |
 | Research tools                        | Six tools behind a `Toolbelt`: search, fetch, parse, SEC, arXiv, GitHub. Four-layer SSRF guard, untrusted-content type, per-call ledger. Search, fetch and parse are cached by content hash and coalesced in flight. Called by the web and data researchers; the synthesizer and validator are given no belt at all.                                                                                                                                                                                                                                              |
 | Ingestion (`app/retrieval`)           | Upload API; PDF, HTML, Markdown and text parsed in a killable, scrubbed child process; offset-exact LlamaIndex chunking; gateway embeddings; chunk metadata filters. Called by the web and data researchers, which is what turns a fetched page into a citable source. The worker ingests a run's attached uploads (Phase 13).                                                                                                                                                                                                                                    |
 | Retrieval (`app/retrieval`)           | `PostgresRetriever` behind the `Retriever` Protocol: pgvector cosine and OR-ed Postgres full-text run concurrently, fused by reciprocal rank, reranked for diversity by MMR. Metrics and a benchmark with measured numbers. Called by the document researcher and by evidence extraction.                                                                                                                                                                                                                                                                         |
@@ -215,7 +215,11 @@ configured.
 
 ```bash
 npm install --legacy-peer-deps   # cold resolve only; npm ci afterwards
-make dev            # frontend on :3000 against mock fixtures
+npm run app         # EVERYTHING: migrate, API, worker, web - one command, no Docker.
+                    # `make start` and `python scripts/dev.py` are the same thing;
+                    # make is NOT installed on this machine, so npm is the one to use.
+npm run app:api     # the same without the frontend
+make dev            # only the frontend, on :3000 against mock fixtures
 make up             # Postgres+pgvector, Redis, MinIO, Prometheus, Grafana
 make api-install && make migrate && make api    # backend on :8000
 make ci             # format, lint, typecheck, unit tests, both stacks
@@ -379,6 +383,10 @@ api-test` uses four xdist workers; `WORKERS=0` makes it serial, which is what
   different `APP_ENV`: that also selects the queue, the cache, the storage
   backend and the rate-limit backend, so pretending to be `staging` in order to
   test sign-in would mean needing Redis and S3 to test sign-in.
+- **`make` is not installed on this machine.** Every `make ...` in this file is
+  a description of the workflow, not a runnable command here - use the npm
+  script or the underlying command. `npm run app` is the single local
+  entry point (`scripts/dev.py`).
 - Bash heredocs fail above roughly 8 KB — use the Write tool for larger files.
 - **The dev server does not hydrate on `127.0.0.1`, only on `localhost`.**
   Turbopack's HMR socket rejects the literal address (`ERR_INVALID_HTTP_RESPONSE`

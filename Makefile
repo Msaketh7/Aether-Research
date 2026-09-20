@@ -118,8 +118,16 @@ evaluate: ## Run the evaluation dataset against this build
 	cd $(API) && uv run python -m app.evaluations $(ARGS)
 
 # --- frontend --------------------------------------------------------------
+.PHONY: start
+start: ## Run everything locally - database migration, API, worker and web - in one command
+	python scripts/dev.py
+
+.PHONY: start-api
+start-api: ## Like `make start`, without the frontend
+	python scripts/dev.py --no-web
+
 .PHONY: dev
-dev: ## Run the Next.js app in development (mock API mode)
+dev: ## Run only the Next.js app, against mock fixtures (see `make start` for the whole system)
 	npm run dev --workspace $(WEB)
 
 .PHONY: build
