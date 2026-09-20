@@ -1,0 +1,98 @@
+%% Aether Research - one run, end to end, across every process
+%% Source of truth: app/api/v1/research.py, app/workers/*, app/agents/graph.py,
+%% app/research/{eventbus,recorder}.py
+%% Render: any Mermaid renderer.
+sequenceDiagram
+    autonumber
+    actor B as Browser
+    participant A as API process (FastAPI)
+    participant P as PostgreSQL
+    participant R as Redis (queue + pub/sub)
+    participant W as Worker process
+    participant G as LangGraph + 9 agents
+    participant X as Gateway / toolbelt / internet
+
+    rect rgb(238, 245, 255)
+    Note over B,A: 1. Accepting the work - boundary 2, the public HTTP surface
+    B->>A: POST /api/v1/research {question, mode, depth, domains, document_ids}
+    A->>A: resolve principal from the opaque session cookie
+    A->>R: draw on the token bucket for this identity and route class
+    A->>A: validate body (Pydantic), check upload ids belong to the caller
+    A->>P: INSERT research_projects (if new) + research_runs status=queued
+    A->>P: INSERT audit_log (outside the request transaction)
+    A->>R: enqueue {run_id} -- boundary 3, only an id crosses
+    A-->>B: 202 Accepted {run_id}
+    Note right of A: The API has now finished. It never runs a graph.
+    end
+
+    rect rgb(240, 248, 238)
+    Note over B,A: 2. Attaching the live feed
+    B->>A: GET /research/{id}/events (EventSource, Last-Event-ID if reconnecting)
+    A->>P: replay research_events above that seq
+    A-->>B: replayed events
+    A->>R: SUBSCRIBE run channel
+    Note right of A: heartbeat comment every 15 s so intermediaries do not close it
+    end
+
+    rect rgb(247, 242, 251)
+    Note over W,X: 3. Taking the run - at-least-once, arbitrated by the row
+    R->>W: reserve {run_id}
+    W->>P: UPDATE research_runs SET worker_id, heartbeat_at WHERE status=queued
+    alt no row changed
+        P-->>W: 0 rows - another worker already holds it
+        W->>W: drop the job, no lock needed (ADR 0017)
+    else claimed
+        P-->>W: the lease (run + worker_id + attempt)
+        W->>P: ingest the run's attached uploads into its corpus
+        W->>G: invoke or resume by langgraph_thread_id
+    end
+    end
+
+    rect rgb(255, 246, 236)
+    Note over W,X: 4. One node, repeated - this block is the whole loop
+    loop for every node the graph executes
+        G->>G: cancellation check, then the FR-8 gate BEFORE the work
+        G->>X: model call by role+mode, or a guarded tool call
+        X-->>G: completion or untrusted content, priced and recorded
+        G->>P: agent_runs + tool_calls + llm_calls (the only cost tally)
+        G->>P: checkpoint the full state (durability=sync)
+        G->>W: node finished
+        W->>P: UPDATE status, phase, progress, counts - naming its own worker_id
+        W->>P: renew heartbeat_at
+        W->>P: INSERT research_events (the insert allocates seq, ADR 0018)
+        W->>R: PUBLISH to the run channel
+        R->>A: event
+        A-->>B: data: {...}
+    end
+    end
+
+    rect rgb(253, 240, 239)
+    Note over W,P: 5. What happens when it goes wrong
+    alt worker is killed, deployed over, or partitioned away
+        W--xW: stops renewing the heartbeat
+        Note over P: another worker's sweep sees a stale lease and re-dispatches
+        R->>W: reserve again
+        W->>G: resume from the last checkpoint, not from the start
+        Note right of G: repeated work is harmless - ingestion and writes<br/>are idempotent on content hash and natural key
+    else the run hits a hard ceiling
+        G->>G: discovery stops; the first reason and a measured caveat are recorded
+        G->>G: route straight to the synthesizer - the run still produces a report
+    else the user cancels
+        B->>A: POST /research/{id}/cancel
+        A->>P: UPDATE status = cancelled
+        G->>P: reads that column at the next node boundary and stops
+    end
+    end
+
+    rect rgb(240, 248, 238)
+    Note over W,B: 6. Finishing
+    G->>G: citation validator walks every marker back to a real source
+    W->>P: evidence chain and report in ONE transaction<br/>(the citations' foreign keys require that order)
+    W->>P: UPDATE research_runs status=completed, cost, tokens, source_count
+    W->>R: PUBLISH report_completed
+    R->>A: report_completed
+    A-->>B: data: report_completed
+    B->>A: GET /research/{id}/report
+    A->>P: report + sections + citations, scoped by user_id
+    A-->>B: 200 with the citation check's verdict
+    end

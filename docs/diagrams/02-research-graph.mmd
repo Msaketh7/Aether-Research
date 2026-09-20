@@ -1,0 +1,81 @@
+%% Aether Research - the LangGraph research graph
+%% Source of truth: apps/api/app/agents/graph.py (node names and conditional edges)
+%% Render: any Mermaid renderer, or paste into the draw.io connector with postLayout "elk".
+flowchart TD
+    S0([START]) --> PLAN
+
+    PLAN["planner &nbsp;·&nbsp; small tier<br/>in: question, mode, depth, domains, date range,<br/>parent evidence on a followup<br/>out: ResearchPlan - research_goal + subtasks[id, question, priority]"]
+    PLAN --> D1{"after_planner<br/>cancelled? budget spent?<br/>anything dispatchable?"}
+
+    D1 -->|"one LangGraph Send per subtask, each carrying<br/>its slice of the query, source and time budget"| ROUTE
+    D1 -->|"nothing left to research - synthesize what we have"| SYN
+    D1 -->|cancelled| ENDN
+
+    ROUTE{"research router<br/>deterministic, no model<br/>routes on the subtask's channel"}
+    ROUTE -->|web| RWEB
+    ROUTE -->|"the run's attached uploads"| RDOC
+    ROUTE -->|"SEC / arXiv / GitHub"| RDATA
+
+    RWEB["web researcher<br/>search - fetch - extract - ingest<br/>strong tier reasoning, small tier relevance filter"]
+    RDOC["document researcher<br/>hybrid retrieval over the run's corpus<br/>no toolbelt access to the internet"]
+    RDATA["data researcher<br/>SEC EDGAR, arXiv, GitHub tools<br/>same SSRF guard, same ledger"]
+
+    RWEB --> EV
+    RDOC --> EV
+    RDATA --> EV
+
+    EV["evidence extractor &nbsp;·&nbsp; medium tier<br/>out: EvidenceCandidate[] - claim text, verbatim span,<br/>char offsets into normalized_content, stance"]
+    EV --> NORM
+    NORM["claim normalizer &nbsp;·&nbsp; medium tier<br/>atomic subject / predicate / object<br/>+ normalized_key, which groups a claim across sources"]
+
+    NORM --> MODE{"graph shape, fixed at build time by mode"}
+    MODE -->|"quick or conversational - trimmed graph"| SYN
+    MODE -->|deep| VER
+
+    VER["verification agent &nbsp;·&nbsp; strong tier<br/>corroboration counted per dedup cluster, not per copy<br/>out: status + calibrated confidence"]
+    VER --> CON
+    CON["contradiction check &nbsp;·&nbsp; strong tier<br/>claims grouped by normalized_key<br/>records the disagreement and a likely_reason - never resolves it"]
+    CON --> CRI
+    CRI["critic &nbsp;·&nbsp; strong tier<br/>coverage, confidence and contradiction state per subtask<br/>out: sufficient + missing[]"]
+
+    CRI --> D3{"after_critic"}
+    D3 -->|"insufficient AND rounds left - re-plan, bounded to 4"| PLAN
+    D3 -->|"sufficient, or the last round is spent"| SYN
+    D3 -->|cancelled| ENDN
+
+    SYN["synthesizer &nbsp;·&nbsp; strongest configured tier<br/>writes only from verified claims, contradictions and sources<br/>cites by catalogue number, never an identifier - ADR 0015<br/>the coverage caveat is written into the report itself"]
+    SYN --> VAL
+    VAL["citation validator &nbsp;·&nbsp; calls no model<br/>walks citation to claim to evidence to document to source<br/>a chain that breaks at any link is rejected"]
+
+    VAL --> D4{"after_validation"}
+    D4 -->|"markers unresolved - repair pass, allowed exactly once"| SYN
+    D4 -->|"every marker resolves"| ENDN
+    ENDN([END])
+
+    GATE["FR-8 ceilings, checked BEFORE the work, not between nodes<br/>cost, runtime, sources, search queries, iterations<br/>a refusal ends discovery - the run still writes its report"]
+    WRAP["every node is wrapped: cancellation check, budget gate,<br/>node timeout, usage accounting, a ledger span,<br/>then a sync checkpoint to Postgres"]
+
+    GATE -.-> PLAN
+    GATE -.-> ROUTE
+    GATE -.-> EV
+    GATE -.-> CRI
+    WRAP -.-> SYN
+    WRAP -.-> VAL
+
+    classDef plan fill:#dae8fc,stroke:#4a72a8,stroke-width:2px,color:#12263f
+    classDef research fill:#e1d5e7,stroke:#8557a0,stroke-width:2px,color:#2f1c3d
+    classDef evid fill:#d5e8d4,stroke:#5a9146,stroke-width:2px,color:#19340f
+    classDef check fill:#ffe6cc,stroke:#c98a12,stroke-width:2px,color:#40260a
+    classDef write fill:#f8cecc,stroke:#b85450,stroke-width:2px,color:#40100e
+    classDef gate fill:#f4f4f4,stroke:#8c8c8c,stroke-width:1px,color:#333333
+    classDef dec fill:#fff2cc,stroke:#c2a11e,stroke-width:2px,color:#3d3105
+    classDef term fill:#333333,stroke:#111111,stroke-width:2px,color:#ffffff
+
+    class PLAN plan
+    class RWEB,RDOC,RDATA research
+    class EV,NORM evid
+    class VER,CON,CRI check
+    class SYN,VAL write
+    class GATE,WRAP gate
+    class D1,D3,D4,MODE,ROUTE dec
+    class S0,ENDN term

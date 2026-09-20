@@ -3,7 +3,8 @@
 > This is the **map**. The [TDD](TDD.md) is the territory - it carries the full
 > component design, schema and failure analysis. Read this first to know where
 > things live and why; go to the TDD for detail; go to [ADRs](ADRs/) for the
-> reasoning behind each irreversible choice.
+> reasoning behind each irreversible choice, and to
+> [diagrams/](diagrams/) for the editable pictures of everything below.
 
 ## 1. The shape of the system
 

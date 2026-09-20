@@ -1,0 +1,156 @@
+%% Aether Research - the system of record, centred on the traceability chain
+%% Source of truth: docs/TDD.md 7.2 and apps/api/app/db/models/
+%% Render: any Mermaid renderer.
+erDiagram
+    users ||--o{ sessions : "opaque pointer, revocable per device"
+    users ||--o{ research_projects : owns
+    users ||--o{ research_runs : "denormalized for authz"
+    users ||--o{ uploads : owns
+    users ||--o{ audit_log : "actor"
+
+    research_projects ||--o{ research_runs : groups
+    research_runs ||--o{ research_runs : "parent_run_id - conversational followup"
+    research_runs ||--o{ research_tasks : "planner subtasks"
+    research_runs ||--o{ research_run_uploads : attaches
+    uploads ||--o{ research_run_uploads : "ingested as source_type=upload"
+
+    research_runs ||--o{ sources : discovers
+    sources ||--o{ documents : "fetched and normalized"
+    documents ||--o{ document_chunks : "offset-exact, 512/64"
+    sources ||--o{ sources : "dedup_cluster_id - N copies count as ONE"
+
+    research_runs ||--o{ claims : produces
+    research_tasks ||--o{ claims : "answers"
+    claims ||--o{ evidence : "supported or refuted by"
+    documents ||--o{ evidence : "span_start..span_end into normalized_content"
+    sources ||--o{ evidence : "attributed to"
+    claims ||--o{ contradictions : "claim_a_id / claim_b_id"
+    research_runs ||--o{ contradictions : records
+
+    research_runs ||--|| reports : "one report per run"
+    reports ||--o{ report_sections : "ordered kinds"
+    report_sections ||--o{ citations : "the [n] markers"
+    claims ||--o{ citations : "what the marker asserts"
+    sources ||--o{ citations : "where it came from"
+    reports ||--o{ feedback : "rated by a reader"
+
+    research_runs ||--o{ agent_runs : "one row per node execution"
+    agent_runs ||--o{ tool_calls : "request, status, latency, cache hit"
+    agent_runs ||--o{ llm_calls : "tokens, cost, latency, prompt_version"
+    research_runs ||--o{ research_events : "the durable progress log"
+
+    users {
+        uuid id PK
+        citext email UK
+        text password_hash "Argon2id, ~130 ms, hashed off the event loop"
+        text role "user | admin"
+    }
+    sessions {
+        uuid id PK
+        uuid user_id FK
+        text token_hash "the cookie is an opaque pointer; the row is the session"
+        timestamptz expires_at
+        timestamptz revoked_at "a revoked device stops on its next request"
+    }
+    research_runs {
+        uuid id PK
+        uuid project_id FK
+        uuid user_id FK
+        uuid parent_run_id FK "nullable"
+        text question
+        text mode "quick | deep | conversational"
+        text status "queued .. planning .. synthesizing .. completed | failed | cancelled"
+        text langgraph_thread_id "ties the run to its saved graph state"
+        text langgraph_checkpoint_id "last save-point"
+        text worker_id "the lease holder - ADR 0017"
+        timestamptz heartbeat_at "stale means the sweep may re-dispatch"
+        numeric total_cost_usd "counted from the ledger, never a second tally"
+        text coverage_caveat "set when a hard ceiling truncated the run"
+    }
+    sources {
+        uuid id PK
+        uuid run_id FK
+        text url
+        text canonical_url "tracking params stripped, AMP resolved"
+        text content_hash
+        text source_type "web | sec | arxiv | github | upload"
+        uuid dedup_cluster_id "confidence counts one cluster as one source"
+        text credibility_tier "from a declared table, not a model's opinion"
+        timestamptz accessed_at
+    }
+    documents {
+        uuid id PK
+        uuid source_id FK
+        text normalized_content "sanitized once, never rewritten"
+        text content_hash "unique per (source, hash) - re-ingest is a no-op"
+        text storage_key "raw bytes live in S3, never in Postgres"
+        text language "unknown below 0.80 confidence"
+    }
+    document_chunks {
+        uuid id PK
+        uuid document_id FK
+        int char_start "text[start:end] IS the chunk - computed and checked"
+        int char_end
+        vector embedding "pgvector(768), sized for the pinned model"
+        tsvector tsv "generated column; the lexical arm ORs the query terms"
+        text embedding_model "null until embedded - the retry embeds only these"
+    }
+    claims {
+        uuid id PK
+        uuid run_id FK
+        uuid task_id FK
+        text text "normalized atomic assertion"
+        text normalized_key "groups the same claim across sources"
+        text claim_type "quantitative | qualitative | event"
+        numeric confidence "calibrated, from the verification agent"
+        text status "candidate | verified | refuted | contested"
+    }
+    evidence {
+        uuid id PK
+        uuid claim_id FK
+        uuid document_id FK
+        uuid source_id FK
+        text span_text "verbatim - this is the proof"
+        int span_start
+        int span_end
+        text stance "supports | refutes | neutral"
+    }
+    contradictions {
+        uuid id PK
+        uuid run_id FK
+        text normalized_key
+        uuid claim_a_id FK
+        uuid claim_b_id FK
+        text likely_reason "e.g. different fiscal periods"
+        text resolution "unresolved by default - never resolved silently"
+        text resolved_by "agent or user; a person's resolution is never undone"
+    }
+    reports {
+        uuid id PK
+        uuid run_id FK,UK
+        numeric overall_confidence "mean of the CITED claims; NULL if it cites none"
+        text status "draft | validated | published"
+        jsonb validation "checked, valid, rejected, and the reasons"
+    }
+    citations {
+        uuid id PK
+        uuid report_section_id FK
+        uuid claim_id FK
+        uuid source_id FK
+        int ordinal "the [n] in the text, renumbered at assembly"
+        text quote "shown on hover - the span, not a paraphrase"
+    }
+    agent_runs {
+        uuid id PK
+        uuid run_id FK
+        text node "which graph node this execution was"
+        text trace_id "OTel"
+        text span_id
+    }
+    research_events {
+        uuid id PK
+        uuid run_id FK
+        bigint seq "allocated BY the insert, so two emitters cannot collide"
+        text type "constrained to ResearchEventType by a check constraint"
+        jsonb payload
+    }
