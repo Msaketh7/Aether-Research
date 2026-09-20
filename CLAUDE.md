@@ -52,14 +52,28 @@ case) and the deployment (no cloud account).
 | Everything else                       | Not built. Nothing on the `/api/v1` surface returns `501` any more - Phase 20 implemented the last of it - but `NotImplementedYet` stays in the taxonomy for the next capability that is declared before it is built.                                                                                                                                                                                                                                                                                                                                             |
 
 Nothing fabricates data to fill a gap. Two benchmarks have been executed: the
-retrieval benchmark (Phase 8, lexical arm only) and the load test (Phase 21 and 22,
-370 research runs through the real pipeline plus four Locust ladders over the
-HTTP surface and a worker-concurrency sweep). **No end-to-end evaluation has run**, and no live model call has
-been made on this machine - every run executed so far has been over scripted
-agents. The evaluation suite
-exists and will produce numbers the moment someone runs it with credentials;
-until then every gate is ungated and every unmeasured metric reads as _not
-measured_ rather than as zero.
+retrieval benchmark (Phase 8, lexical arm only) and the load test (Phase 21 and
+22, 370 research runs through the real pipeline plus four Locust ladders over
+the HTTP surface and a worker-concurrency sweep).
+
+**Live model runs have now happened**, and they found a defect nothing scripted
+could. `tests/scenarios/test_live_model.py` drives the whole vertical slice with
+the real OpenAI adapter behind the real gateway - opt-in behind
+`AETHER_LIVE_MODEL=1` and a key, skipped otherwise, about three cents and ninety
+seconds a run. Six runs produced 1 to 5 claims each and every one produced a
+report whose citations resolved to spans still present at their recorded
+offsets. What it caught: a provider reports the **dated snapshot** an alias
+resolved to (`gpt-4o-mini` comes back as `gpt-4o-mini-2024-07-18`), the registry
+matched the returned id exactly, so every priced call was recorded as uncosted -
+which reads as "not measured" and makes a budgeted run stop discovery early. A
+scripted provider echoes back the id it was handed, so the two always agreed.
+`tests/scenarios/test_live_web.py` removes the last substitution and goes to the
+open internet; it is **written but never run**, because that needs a search
+provider key this machine does not have.
+
+**No end-to-end evaluation has run.** The suite exists and will produce numbers
+the moment someone runs it with credentials; until then every gate is ungated
+and every unmeasured metric reads as _not measured_ rather than as zero.
 
 **Licensing.** Proprietary, all rights reserved - see [`LICENSE`](LICENSE). The
 repository is public on GitHub for reading, not reuse. Never add an open-source
