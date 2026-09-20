@@ -161,3 +161,22 @@ models:
   #   # OpenAI's embedding models are symmetric - no task prefix. Leave
   #   # embedding_document_prefix and embedding_query_prefix unset.
   #   pricing: ...
+  #
+  # ---------------------------------------------------------------------------
+  # Embeddings in a deployment
+  # ---------------------------------------------------------------------------
+  # The only embedding model declared above is `ollama:embed`, which needs a
+  # running Ollama. Nothing in infra/ deploys one, so a cloud deployment that
+  # does not run Ollama itself has to declare its own embedding model - here, or
+  # in the file MODEL_REGISTRY_PATH names - and pin it with EMBEDDING_MODEL.
+  #
+  # Declaring a second embedding model without pinning one is refused rather
+  # than resolved: picking the first would make "which model embeds my index" a
+  # property of the order of this file.
+  #
+  # The width has to match too. `EMBEDDING_DIMENSIONS` in app/db/models/source.py
+  # is the width of the pgvector column, currently 768 for nomic-embed-text, and
+  # ingestion refuses to start when the two disagree. A model of another width
+  # needs that constant changed and a resize migration beside it; the mechanism
+  # is apps/api/migrations/embedding_width.py and the procedure is in its
+  # docstring.

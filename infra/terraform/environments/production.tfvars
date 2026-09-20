@@ -14,6 +14,11 @@ availability_zone_count = 3
 api_image = "REPLACE_ME.dkr.ecr.us-east-1.amazonaws.com/aether-api:REPLACE_DIGEST"
 web_image = "REPLACE_ME.dkr.ecr.us-east-1.amazonaws.com/aether-web:REPLACE_DIGEST"
 
+# SEC's access terms require a real contact address and block anonymous
+# scrapers; the application's default carries example.com, which the variable's
+# own validation refuses. The same agent is sent on ordinary fetches too.
+sec_user_agent = "AetherResearch/0.1 (REPLACE_ME)"
+
 # Required here. Without it the HTTPS listener does not exist and nobody can
 # sign in, because the session cookie carries Secure.
 certificate_arn = "REPLACE_ME"

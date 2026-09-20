@@ -17,6 +17,11 @@ web_image = "REPLACE_ME.dkr.ecr.us-east-1.amazonaws.com/aether-web:staging"
 # No certificate yet. The deployment is reachable over HTTP and cannot be
 # signed into, because the session cookie carries Secure outside local and
 # test - see the note on this variable in variables.tf.
+# SEC's access terms require a real contact address and block anonymous
+# scrapers; the application's default carries example.com, which the variable's
+# own validation refuses. The same agent is sent on ordinary fetches too.
+sec_user_agent = "AetherResearch/0.1 (REPLACE_ME)"
+
 certificate_arn = ""
 
 api_service = {

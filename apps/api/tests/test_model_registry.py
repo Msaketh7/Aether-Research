@@ -302,3 +302,67 @@ def test_no_embedding_model_is_an_explicit_failure():
 
     with pytest.raises(ModelNotConfigured):
         router.embedding_model()
+
+
+def test_two_embedding_models_and_no_choice_is_refused():
+    """The defect this setting exists for.
+
+    Picking the first declared made "which model embeds my index" a property of
+    YAML ordering. Adding a second one above the first would silently re-embed
+    new chunks against a different model - and if the two are the same width,
+    nothing downstream notices: the dimension check passes and cosine distance
+    between vectors from two models is a number, just a meaningless one. So an
+    unstated choice is refused rather than guessed.
+    """
+    both = registry(
+        spec("local:embed", ModelTier.SMALL, chat=False, embeddings=True),
+        spec("hosted:embed", ModelTier.SMALL, chat=False, embeddings=True),
+    )
+
+    with pytest.raises(ModelNotConfigured) as raised:
+        ModelRouter(both).embedding_model()
+
+    assert set(raised.value.context["embedding_models"]) == {"local:embed", "hosted:embed"}
+
+
+def test_the_configured_embedding_model_is_the_one_used():
+    both = registry(
+        spec("local:embed", ModelTier.SMALL, chat=False, embeddings=True),
+        spec("hosted:embed", ModelTier.SMALL, chat=False, embeddings=True),
+    )
+
+    router = ModelRouter(both, embedding_model_key="hosted:embed")
+
+    # Not the first declared, which is the whole point.
+    assert router.embedding_model().key == "hosted:embed"
+
+
+def test_an_embedding_model_that_is_not_declared_says_so():
+    router = ModelRouter(
+        registry(spec("embed", ModelTier.SMALL, chat=False, embeddings=True)),
+        embedding_model_key="openai:embed",
+    )
+
+    with pytest.raises(ModelNotConfigured) as raised:
+        router.embedding_model()
+
+    assert "not declared" in str(raised.value)
+    assert raised.value.context["requested"] == "openai:embed"
+
+
+def test_naming_a_chat_model_for_embeddings_is_a_different_message():
+    """A declared key that cannot embed is a different mistake from a typo, and
+    the operator can only fix the one they actually made."""
+    router = ModelRouter(
+        registry(
+            spec("chat", ModelTier.SMALL),
+            spec("embed", ModelTier.SMALL, chat=False, embeddings=True),
+        ),
+        embedding_model_key="chat",
+    )
+
+    with pytest.raises(ModelNotConfigured) as raised:
+        router.embedding_model()
+
+    assert "does not support embeddings" in str(raised.value)
+    assert raised.value.context["embedding_models"] == ["embed"]

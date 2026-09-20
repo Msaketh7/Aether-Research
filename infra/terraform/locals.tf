@@ -49,6 +49,10 @@ locals {
     # request is same-origin and CORS does not apply.
     CORS_ALLOW_ORIGINS = join(",", var.cors_allow_origins)
 
+    # Required rather than defaulted: the application's fallback carries an
+    # example.com contact, which SEC blocks. See variables.tf.
+    SEC_USER_AGENT = var.sec_user_agent
+
     METRICS_ENABLED = "true"
   }
 

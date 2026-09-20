@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.db.base import Base
 from app.db.external import EXTERNALLY_OWNED_TABLES
+from app.db.models.source import EMBEDDING_DIMENSIONS
 from app.db.models.user import UserRow
 from tests.support.postgres import ProvisionedDatabase
 
@@ -439,7 +440,7 @@ async def test_a_uuid_read_through_the_orm_is_a_plain_uuid(database, raw: asyncp
 # --- pgvector -------------------------------------------------------------
 
 
-async def test_the_embedding_column_exists_when_pgvector_does(
+async def test_the_embedding_column_matches_the_declared_width(
     raw: asyncpg.Connection, postgres: ProvisionedDatabase
 ):
     if not postgres.has_pgvector:
@@ -469,9 +470,114 @@ async def test_the_embedding_column_exists_when_pgvector_does(
         WHERE attrelid = 'document_chunks'::regclass AND attname = 'embedding'
         """
     )
-    # Sized for the declared embedding model by 0004; 0002 created it at 1536,
-    # which no declared model could fill.
-    assert width == "vector(768)"
+    # Against the constant, not against a literal. This is the check that was
+    # missing when 0002 sized the column at 1536 for a model the registry never
+    # declared: nothing compared the schema's width with the width the code
+    # believed, so no embedding could be stored at all and the first symptom was
+    # a pgvector error on the first write, one phase later.
+    #
+    # Written this way it also tracks a deliberate change: move
+    # EMBEDDING_DIMENSIONS without shipping the migration beside it and this
+    # fails, naming both numbers.
+    assert width == f"vector({EMBEDDING_DIMENSIONS})", (
+        f"the column is {width} but app.db.models.source.EMBEDDING_DIMENSIONS is "
+        f"{EMBEDDING_DIMENSIONS}. Changing the embedding model family needs a "
+        "resize migration (see migrations/embedding_width.py) and a re-embed."
+    )
+
+
+def test_a_resize_drops_the_index_before_it_changes_the_type():
+    """The order is the whole content of a resize, and three of the four ways to
+    get it wrong are silent.
+
+    The index goes first because it is built over vectors of the width that is
+    about to stop existing. The rest are the quiet ones: clearing the old
+    vectors *after* the ALTER means asking pgvector to cast vectors of a width
+    it does not accept; not clearing them at all leaves rows in the index that
+    no query can meaningfully match, because the distance between vectors from
+    two models is a number rather than an answer; and not rebuilding the index
+    leaves every search correct and sequential.
+    """
+    from migrations.embedding_width import INDEX_NAME, statements
+
+    sql = statements(1536)
+
+    assert len(sql) == 4
+    drop, clear, alter, create = sql
+
+    assert drop.startswith("DROP INDEX") and INDEX_NAME in drop
+    assert clear.startswith("UPDATE document_chunks") and "embedding = NULL" in clear
+    # embedding_model too: it is the "is this chunk embedded" marker, and a
+    # cleared vector with a model still recorded is a chunk nothing re-embeds.
+    assert "embedding_model = NULL" in clear
+    assert "ALTER COLUMN embedding TYPE vector(1536)" in alter
+    assert create.startswith("CREATE INDEX") and "hnsw" in create
+    assert "vector_cosine_ops" in create
+
+
+@pytest.mark.parametrize("width", [0, -1])
+def test_a_resize_to_a_nonsense_width_is_refused(width: int):
+    from migrations.embedding_width import statements
+
+    with pytest.raises(ValueError, match="must be positive"):
+        statements(width)
+
+
+async def test_a_resize_really_changes_the_column(
+    raw: asyncpg.Connection, postgres: ProvisionedDatabase
+):
+    """And then the statements are run, because an order that reads correctly
+    and does not execute is still a broken migration."""
+    if not postgres.has_pgvector:
+        pytest.skip("pgvector is not installed on this server; CI runs this.")
+
+    from migrations.embedding_width import statements
+
+    async def width() -> str:
+        return await raw.fetchval(
+            """
+            SELECT format_type(atttypid, atttypmod) FROM pg_attribute
+            WHERE attrelid = 'document_chunks'::regclass AND attname = 'embedding'
+            """
+        )
+
+    assert await width() == f"vector({EMBEDDING_DIMENSIONS})"
+
+    for statement in statements(1536):
+        await raw.execute(statement)
+    assert await width() == "vector(1536)"
+
+    index = await raw.fetchval(
+        "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_document_chunks_embedding_hnsw'"
+    )
+    assert index is not None, "the resize left the column unindexed"
+
+    # Back, so this test does not decide the width for whatever runs next.
+    for statement in statements(EMBEDDING_DIMENSIONS):
+        await raw.execute(statement)
+    assert await width() == f"vector({EMBEDDING_DIMENSIONS})"
+
+
+def test_the_declared_embedding_model_matches_the_index_width():
+    """The third side of the triangle, and the one that needs no database.
+
+    Three things have to agree: the width the schema declares, the width the
+    chosen embedding model emits, and the width the column actually has. The
+    test above compares the first with the third; `ChunkEmbedder` compares the
+    first with the second at startup. This one makes that a build failure rather
+    than a failure on the first ingestion of a deployment nobody has run yet.
+    """
+    from app.models.registry import load_registry
+    from app.models.routing import ModelRouter
+
+    registry = load_registry(None)
+    spec = ModelRouter(registry).embedding_model()
+
+    assert spec.embedding_dimensions == EMBEDDING_DIMENSIONS, (
+        f"the registry's embedding model {spec.key} emits "
+        f"{spec.embedding_dimensions} dimensions and the index stores "
+        f"{EMBEDDING_DIMENSIONS}. Ingestion would refuse to start."
+    )
 
 
 # --- ingestion (Phase 7) --------------------------------------------------

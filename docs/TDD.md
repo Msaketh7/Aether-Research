@@ -850,11 +850,23 @@ meaning-vector and a keyword index._
 Indexes: `USING hnsw (embedding vector_cosine_ops)`, `USING gin (tsv)`,
 `(document_id, chunk_index)`, `gin (metadata)`.
 
-`EMBED_DIM` is 768, the width of the one declared embedding model
-(`nomic-embed-text`). The ingestion pipeline refuses to start against a model of
-another width; changing model families means a migration and a re-embed
-(ADR 0012). `embedding_model` is written in the same statement as `embedding`,
-so a null `embedding_model` marks a chunk that is still waiting for its vector.
+`EMBED_DIM` is 768, the width of the one embedding model the shipped registry
+declares (`nomic-embed-text`). **Which** model embeds an index is pinned by
+`EMBEDDING_MODEL` rather than taken from the registry's ordering, and a registry
+declaring more than one without naming a choice is refused: an index holding
+vectors from two models is not searchable, and it fails silently, because the
+distance between vectors from different models is a number rather than an
+answer.
+
+Three widths have to agree, and each disagreement is caught rather than
+discovered: the model's declared width against `EMBEDDING_DIMENSIONS` (the
+ingestion pipeline refuses to start), and that constant against the column's
+real width (a test fails the build - the check that was missing when 0002 sized
+the column for a model the registry never declared). Changing model families
+means a migration and a re-embed (ADR 0012); the mechanism is
+`migrations/embedding_width.py`. `embedding_model` is written in the same
+statement as `embedding`, so a null `embedding_model` marks a chunk that is
+still waiting for its vector.
 
 #### `uploads`
 

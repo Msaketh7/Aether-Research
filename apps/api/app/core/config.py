@@ -333,6 +333,16 @@ class Settings(BaseSettings):
     #: path, or None for the file shipped beside `app/models/`.
     model_registry_path: Path | None = None
 
+    #: Which declared model embeds the index, by registry key.
+    #:
+    #: Not a per-role choice and not a fallback chain: an index whose vectors
+    #: came from two models is not searchable, and the failure is silent -
+    #: cosine distance between vectors from different models is a number, just
+    #: a meaningless one. Left unset this resolves to the single declared
+    #: embedding model, and is refused as ambiguous if a registry declares more
+    #: than one. Name it explicitly whenever a deployment declares a choice.
+    embedding_model: str | None = None
+
     # Bounds on the gateway. A model call is the slowest and most expensive
     # thing the system does, so none of these has an unbounded default.
     llm_request_timeout_seconds: float = 60.0

@@ -1179,11 +1179,42 @@ blank.
 | `S3_BUCKET` + credentials      | raw documents and uploads; on ECS this is the task role         |
 | One model provider key         | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or a reachable Ollama    |
 | A search provider key          | `TAVILY_API_KEY` or `BRAVE_API_KEY` - the web researcher's tool |
+| An embedding model             | see below - the shipped one needs Ollama                        |
+| `SEC_USER_AGENT`               | a real contact address; SEC blocks anonymous agents             |
 | `DEV_IDENTITY_ENABLED=false`   | belt and braces; the allowlist already refuses it               |
 
 Sessions need no signing secret: the cookie carries an opaque 256-bit token and
 the server stores its SHA-256, so there is no key to rotate and nothing to forge
 ([ADR 0021](docs/ADRs/0021-sessions-not-tokens.md)).
+
+**The embedding model needs a decision, and it is the one that catches people
+out.** The shipped registry declares exactly one - `ollama:embed`, at 768
+dimensions - and nothing in `infra/` deploys an Ollama. A deployment that does
+not run one itself has to declare its own, in the file `MODEL_REGISTRY_PATH`
+names, and pin it with `EMBEDDING_MODEL`. Three things then have to agree, and
+each disagreement is caught rather than discovered later:
+
+- the **width the model emits** and `EMBEDDING_DIMENSIONS` in
+  `app/db/models/source.py` - ingestion refuses to start if they differ;
+- that constant and the **actual column width** - a test fails the build;
+- and if a registry declares more than one embedding model, **naming which**
+  is required rather than resolved, because picking the first would make the
+  choice a property of YAML ordering, and an index holding vectors from two
+  models fails silently.
+
+Changing width means a resize migration and a re-embed; the mechanism and the
+four-step procedure are in
+[`apps/api/migrations/embedding_width.py`](apps/api/migrations/embedding_width.py).
+Without any of this the app still runs - lexical retrieval works and the dense
+arm returns nothing - which is precisely why it is worth checking before a
+deployment rather than after.
+
+**Bootstrap the account first.** The Terraform state bucket and the two ECR
+repositories have to exist before anything that would otherwise own them can
+run - the backend is configured before any provider is, and the image
+repositories are account-scoped rather than per-environment.
+[`scripts/bootstrap-aws.sh`](scripts/bootstrap-aws.sh) creates all three,
+idempotently, and `--dry-run` prints what it would do without doing it.
 
 **Run the migration as its own step, before the services roll.** `alembic
 upgrade heads` applies both branches. The deploy pipeline registers the new task

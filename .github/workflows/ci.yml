@@ -196,6 +196,16 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo hadolint/hadolint:v2.14.0-alpine \
             hadolint infra/docker/api.Dockerfile infra/docker/web.Dockerfile
 
+      # actionlint below runs shellcheck over the workflows' `run:` blocks, but
+      # nothing was checking the scripts that live on their own - including
+      # bootstrap-aws.sh, which creates an account's state bucket and image
+      # repositories and has never been executed against a real account.
+      # shellcheck is preinstalled on the runner image.
+      - name: Lint the shell scripts
+        run: |
+          shellcheck --version
+          shellcheck scripts/bootstrap-aws.sh apps/api/scripts/loadtest_api.sh
+
       # These workflow files are themselves configuration that only fails when
       # it runs. actionlint catches the half of that which is static: an
       # expression that cannot evaluate, a `needs` on a job that is not there,

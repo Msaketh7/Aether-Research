@@ -110,11 +110,13 @@ class ModelRouter:
         role_tiers: dict[AgentName, ModelTier] | None = None,
         mode_shift: dict[ResearchMode, int] | None = None,
         max_fallbacks: int = MAX_FALLBACKS,
+        embedding_model_key: str | None = None,
     ) -> None:
         self._registry = registry
         self._role_tiers = role_tiers or dict(DEFAULT_ROLE_TIERS)
         self._mode_shift = mode_shift or dict(MODE_TIER_SHIFT)
         self._max_fallbacks = max_fallbacks
+        self._embedding_model_key = embedding_model_key
 
     def tier_for(self, role: AgentName, mode: ResearchMode) -> ModelTier:
         """The tier this role gets in this mode, after the shift and the floor."""
@@ -196,11 +198,19 @@ class ModelRouter:
         return None
 
     def embedding_model(self) -> ModelSpec:
-        """The model used for embeddings.
+        """The model used for embeddings, pinned by configuration.
 
-        One choice, not a per-role one: an index whose vectors came from
-        different models is not searchable, so this must not vary by caller.
-        Phase 7 will pin it in configuration alongside the index it builds.
+        One choice, not a per-role one, and deliberately not a fallback chain:
+        an index whose vectors came from two models is not searchable, and it
+        fails *silently* - the cosine distance between vectors from different
+        models is a number, just a meaningless one. So there is no failing over
+        here. Either the declared model answers or ingestion stops.
+
+        Unset, this resolves to the single declared embedding model, and refuses
+        a registry that declares more than one. Picking the first of several -
+        which is what this did until the choice became configuration - makes
+        "which model embeds my index" a property of YAML ordering, and quietly
+        re-embeds against a different model when someone adds one above it.
         """
         models = self._registry.embedding_models()
         if not models:
@@ -208,4 +218,32 @@ class ModelRouter:
                 "No embedding model is declared in the registry.",
                 context={"declared": [spec.key for spec in self._registry]},
             )
-        return models[0]
+
+        declared = [spec.key for spec in models]
+
+        if self._embedding_model_key is None:
+            if len(models) > 1:
+                raise ModelNotConfigured(
+                    "Several embedding models are declared and none is chosen. "
+                    "Set EMBEDDING_MODEL to the one that embeds this index.",
+                    context={"embedding_models": declared},
+                )
+            return models[0]
+
+        for spec in models:
+            if spec.key == self._embedding_model_key:
+                return spec
+
+        # Named but unusable. Separating the two cases matters: a key that is
+        # declared-but-not-an-embedding-model is a different mistake from a
+        # typo, and the operator can only fix the one they made.
+        if self._embedding_model_key in self._registry.specs:
+            raise ModelNotConfigured(
+                f"EMBEDDING_MODEL names {self._embedding_model_key!r}, which is declared "
+                "but does not support embeddings.",
+                context={"requested": self._embedding_model_key, "embedding_models": declared},
+            )
+        raise ModelNotConfigured(
+            f"EMBEDDING_MODEL names {self._embedding_model_key!r}, which is not declared.",
+            context={"requested": self._embedding_model_key, "embedding_models": declared},
+        )

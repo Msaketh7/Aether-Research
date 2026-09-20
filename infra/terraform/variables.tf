@@ -257,6 +257,31 @@ variable "cache" {
 
 # --- application settings carried into the task definitions ------------------
 
+variable "sec_user_agent" {
+  description = <<-EOT
+    The User-Agent the SEC EDGAR tool identifies itself with.
+
+    SEC's access terms require a descriptive agent with a real contact address
+    and block anonymous scrapers. The application's default carries
+    `contact@example.com`, which is fine locally and is a blocked crawler in a
+    deployment - so it is required here rather than defaulted, and the
+    validation below refuses the placeholder. A deployment that does not want
+    the SEC tool should still set this: the same agent is sent on ordinary
+    fetches, because being identifiable is how a crawler keeps its access.
+  EOT
+  type        = string
+
+  validation {
+    condition     = !can(regex("example\\.(com|org|net)", var.sec_user_agent))
+    error_message = "sec_user_agent must carry a real contact address, not an example.com placeholder."
+  }
+
+  validation {
+    condition     = can(regex("@", var.sec_user_agent))
+    error_message = "sec_user_agent must include a contact email address; SEC blocks agents without one."
+  }
+}
+
 variable "app_environment" {
   description = <<-EOT
     Extra plain (non-secret) settings for the api and worker tasks.

@@ -115,7 +115,7 @@ def build_gateway(
     its own concurrency semaphore, which is the same as having none.
     """
     registry = load_registry(settings.model_registry_path)
-    router = ModelRouter(registry)
+    router = ModelRouter(registry, embedding_model_key=settings.embedding_model)
 
     return LLMGateway(
         registry=registry,
