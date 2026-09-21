@@ -103,6 +103,39 @@ export function useRevokeOtherSessions() {
   });
 }
 
+/**
+ * Which sign-in methods the deployment offers.
+ *
+ * `retry: false` and a long `staleTime`: this is configuration, not data. A
+ * deployment does not gain a provider while somebody is looking at the sign-in
+ * page, and a failed fetch must not spin - the page falls back to the password
+ * form, which is the one method that needs no configuration.
+ */
+export function useSsoOptions() {
+  return useQuery({
+    queryKey: queryKeys.auth.ssoOptions(),
+    queryFn: ({ signal }) => authApi.ssoOptions(signal),
+    retry: false,
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function useIdentities() {
+  return useQuery({
+    queryKey: queryKeys.auth.identities(),
+    queryFn: () => authApi.identities(),
+    retry: defaultRetry,
+  });
+}
+
+export function useUnlinkIdentity() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => authApi.unlinkIdentity(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.auth.identities() }),
+  });
+}
+
 export function useResearchList(params: ListRunsParams = {}) {
   return useQuery({
     queryKey: queryKeys.research.list(params),
@@ -180,6 +213,38 @@ export function useResearchReport(id: string, enabled = true) {
     queryFn: ({ signal }) => researchApi.report(id, signal),
     enabled: enabled && Boolean(id),
     retry: (count, error) => !(error instanceof ApiError && error.isNotFound) && count < 2,
+  });
+}
+
+/**
+ * The stored answer.
+ *
+ * Only worth fetching for a run nobody watched arrive: a live run is served the
+ * same text by `answer_delta` events, and re-fetching under a stream would
+ * replace what the reader is watching with a stale copy of it. `useRunAnswer`
+ * in the run context is what decides between the two.
+ */
+export function useResearchAnswer(id: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.research.answer(id),
+    queryFn: ({ signal }) => researchApi.answer(id, signal),
+    enabled: enabled && Boolean(id),
+    retry: defaultRetry,
+  });
+}
+
+/**
+ * Ask a follow-up. The reply is a *new run* that names this one as its parent,
+ * which is what makes a conversation out of a product whose unit of work is a
+ * multi-minute research job.
+ */
+export function useFollowUpResearch(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (question: string) => researchApi.followUp(id, question),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.research.all() });
+    },
   });
 }
 

@@ -37,6 +37,12 @@ const EVENT_STAGE: Record<ResearchEventType, ResearchStage | null> = {
   critic_started: 'contradictions',
   additional_research_requested: 'searching',
   iteration_started: 'planning',
+  answer_started: 'answering',
+  // Not a stage signal. A piece of the answer arriving says nothing the
+  // `answer_started` before it did not already say, and a stage row that
+  // re-derives itself forty times a second is a stage row that flickers.
+  answer_delta: null,
+  answer_completed: 'answering',
   synthesis_started: 'writing',
   citation_check: 'writing',
   report_completed: 'writing',
@@ -51,6 +57,7 @@ const STAGE_AGENT: Record<ResearchStage, AgentName> = {
   extracting: 'evidence_extractor',
   verifying: 'verifier',
   contradictions: 'critic',
+  answering: 'answerer',
   writing: 'synthesizer',
 };
 
@@ -61,6 +68,7 @@ export const STAGE_LABELS: Record<ResearchStage, string> = {
   extracting: 'Extracting evidence',
   verifying: 'Verifying claims',
   contradictions: 'Detecting contradictions',
+  answering: 'Answering',
   writing: 'Writing report',
 };
 
@@ -79,6 +87,8 @@ export interface EventTotals {
   citationsRejected: number;
   iteration: number;
   wordCount: number | null;
+  /** Words in the direct answer, once it is finished. `null` = not written. */
+  answerWords: number | null;
   subtasks: number;
   lastSeq: number;
 }
@@ -97,6 +107,7 @@ export const EMPTY_TOTALS: EventTotals = {
   citationsRejected: 0,
   iteration: 0,
   wordCount: null,
+  answerWords: null,
   subtasks: 0,
   lastSeq: 0,
 };
@@ -144,6 +155,9 @@ export function accumulate(events: readonly ResearchEvent[]): EventTotals {
         totals.citationsChecked = event.payload.checked;
         totals.citationsRejected = event.payload.rejected;
         break;
+      case 'answer_completed':
+        totals.answerWords = event.payload.word_count;
+        break;
       case 'report_completed':
         totals.wordCount = event.payload.word_count;
         break;
@@ -175,6 +189,8 @@ function detailFor(stage: ResearchStage, totals: EventTotals, state: StageState)
       // without its event stream has no counters, and rendering "0 found"
       // there would contradict the run's own contradiction total.
       return totals.contradictions > 0 ? `${totals.contradictions} found` : null;
+    case 'answering':
+      return totals.answerWords !== null ? `${totals.answerWords} words` : null;
     case 'writing':
       if (totals.wordCount !== null) return `${totals.wordCount} words`;
       if (totals.citationsChecked > 0) return `${totals.citationsChecked} citations checked`;

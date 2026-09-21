@@ -35,7 +35,8 @@ from app.auth.passwords import (
     hash_password,
     verify_password,
 )
-from app.auth.sessions import IssuedSession, SessionService
+from app.auth.sessions import SessionService
+from app.auth.tokens import IssuedTokens
 from app.core.config import Settings
 from app.core.errors import RegistrationClosed, Unauthenticated, ValidationFailed
 from app.core.logging import get_logger
@@ -56,10 +57,15 @@ _REFUSAL = "That email and password do not match an account."
 
 @dataclass(frozen=True, slots=True)
 class SignIn:
-    """A successful authentication and the session issued for it."""
+    """A successful authentication and the tokens issued for it.
+
+    The same type single sign-on produces. Password and provider sign-in differ
+    only in how the person was identified; from here on there is one session
+    concept, one token pair and one revocation story.
+    """
 
     user: UserRow
-    session: IssuedSession
+    tokens: IssuedTokens
 
 
 class AuthService:
@@ -96,7 +102,7 @@ class AuthService:
         Signing in as part of registering is what the frontend expects, and it
         also means there is exactly one code path that issues a session.
         """
-        if not self._settings.registration_enabled:
+        if not self._settings.registration_enabled or not self._settings.password_login_enabled:
             raise RegistrationClosed()
 
         normalised = normalise_email(email)
@@ -127,8 +133,16 @@ class AuthService:
             )
 
         await self._users.record_login(user.id, at=now)
-        session = await self._sessions.issue(user_id=user.id, user_agent=user_agent, ip=ip, now=now)
-        return SignIn(user=user, session=session)
+        tokens = await self._sessions.start(
+            user_id=user.id,
+            email=user.email,
+            role=user.role,
+            provider="local",
+            user_agent=user_agent,
+            ip=ip,
+            now=now,
+        )
+        return SignIn(user=user, tokens=tokens)
 
     async def sign_in(
         self,
@@ -140,6 +154,13 @@ class AuthService:
         now: dt.datetime,
     ) -> SignIn:
         """Verify a credential and issue a session, or refuse indistinguishably."""
+        if not self._settings.password_login_enabled:
+            # Refused with the same message as a wrong password. A distinct
+            # one would be harmless here - the setting is not a secret - but
+            # keeping one refusal for the whole endpoint is what stops a later
+            # branch reintroducing a difference that does matter.
+            raise Unauthenticated(_REFUSAL, code="invalid_credentials")
+
         normalised = normalise_email(email)
         user = await self._users.get_by_email(normalised)
 
@@ -164,8 +185,19 @@ class AuthService:
             )
 
         await self._users.record_login(user.id, at=now)
-        session = await self._sessions.issue(user_id=user.id, user_agent=user_agent, ip=ip, now=now)
-        return SignIn(user=user, session=session)
+        tokens = await self._sessions.start(
+            user_id=user.id,
+            email=user.email,
+            role=user.role,
+            # The issuer that admitted this session. `local` means a password
+            # was verified here, which is what distinguishes it in the device
+            # list and in the audit trail from a federated sign-in.
+            provider="local",
+            user_agent=user_agent,
+            ip=ip,
+            now=now,
+        )
+        return SignIn(user=user, tokens=tokens)
 
 
 def normalise_email(email: str) -> str:

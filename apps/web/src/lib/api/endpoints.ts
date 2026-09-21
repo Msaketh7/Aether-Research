@@ -1,10 +1,12 @@
 import type {
   ActivityResponse,
+  AnswerResponse,
   CreateResearchRequest,
   CreateResearchResponse,
   DashboardStats,
   EvaluationsResponse,
   EvidenceResponse,
+  LinkedIdentity,
   LoginRequest,
   LoginResponse,
   Page,
@@ -16,6 +18,7 @@ import type {
   RevokedSessions,
   SessionInfo,
   SourcesResponse,
+  SsoOptions,
   SystemMetrics,
   User,
   UserSettings,
@@ -40,6 +43,11 @@ export const authApi = {
   revokeSession: (id: string) => apiRequest<void>(`/auth/sessions/${id}`, { method: 'DELETE' }),
   /** Sign out every device but this one. */
   revokeOtherSessions: () => apiRequest<RevokedSessions>('/auth/sessions', { method: 'DELETE' }),
+  /** Which sign-in methods this deployment offers. */
+  ssoOptions: (signal?: AbortSignal) => apiRequest<SsoOptions>('/auth/sso/providers', { signal }),
+  /** The upstream identities linked to this account. */
+  identities: () => apiRequest<LinkedIdentity[]>('/auth/identities'),
+  unlinkIdentity: (id: string) => apiRequest<void>(`/auth/identities/${id}`, { method: 'DELETE' }),
 };
 
 export interface ListRunsParams {
@@ -78,6 +86,10 @@ export const researchApi = {
 
   report: (id: string, signal?: AbortSignal) =>
     apiRequest<ReportResponse>(`/research/${id}/report`, { signal }),
+
+  /** `{ answer: null }` while the run is still working - never a 404. */
+  answer: (id: string, signal?: AbortSignal) =>
+    apiRequest<AnswerResponse>(`/research/${id}/answer`, { signal }),
 
   cancel: (id: string) => apiRequest<ResearchRun>(`/research/${id}/cancel`, { method: 'POST' }),
 

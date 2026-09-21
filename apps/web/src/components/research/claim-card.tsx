@@ -37,7 +37,7 @@ function EvidenceRow({ evidence, source }: { evidence: Evidence; source: Source 
       <p className="mt-1 text-xs text-muted-foreground">
         {source ? (
           <SourceLink href={source.url}>
-            {source.title} — {source.publisher}
+            {source.title}, {source.publisher}
           </SourceLink>
         ) : (
           'Source unavailable'
@@ -58,7 +58,11 @@ export function ClaimCard({
   const uncorroborated = claim.corroboration_count <= 1;
 
   return (
-    <Card className="p-4" data-testid="claim-card" data-claim-status={claim.status}>
+    <Card
+      className="p-4 transition-[box-shadow,border-color] duration-[var(--duration-base)] ease-[var(--ease-out-soft)] hover:border-primary/25 hover:shadow-e2"
+      data-testid="claim-card"
+      data-claim-status={claim.status}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="min-w-0 flex-1 text-sm font-medium leading-snug">{claim.text}</p>
         <ClaimStatusBadge status={claim.status} />
@@ -68,7 +72,7 @@ export function ClaimCard({
         <ConfidenceMeter value={claim.confidence} />
         <span className="text-xs text-muted-foreground">
           {claim.corroboration_count} source{claim.corroboration_count === 1 ? '' : 's'}
-          {uncorroborated ? ' — uncorroborated' : ''}
+          {uncorroborated ? ', uncorroborated' : ''}
         </span>
         {claim.task_external_id ? (
           <span className="font-mono text-[11px] text-muted-foreground">

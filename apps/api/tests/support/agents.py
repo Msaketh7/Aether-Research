@@ -83,9 +83,26 @@ class ScriptedModel:
 
     ``prompts`` keeps every request, which is how a test asserts a *negative*:
     that a hostile page's text never appeared outside the delimited block.
+
+    ``streams`` scripts the streaming calls separately, because they are a
+    different shape: a list of pieces per call rather than one value. Scripting
+    them as *pieces* rather than as a string is the point - an agent that only
+    works when the whole answer arrives in one chunk would pass a test that
+    handed it one.
     """
 
     answers: list[BaseModel] = field(default_factory=list)
+    #: One entry per streaming call: the pieces that call yields, in order.
+    streams: list[list[str]] = field(default_factory=list)
+    #: Structured and streamed calls are counted apart, and indexed apart. They
+    #: share ``prompts`` because that is the record of what the model was sent,
+    #: but a streamed call must not advance the structured script: an agent that
+    #: streams between two structured calls would otherwise silently hand the
+    #: second one the third answer.
+    structured_calls: int = 0
+    stream_calls: int = 0
+    #: Raised partway through the matching stream, after that many pieces.
+    stream_failures: dict[int, tuple[int, BaseException]] = field(default_factory=dict)
     prompt_tokens: int = 120
     completion_tokens: int = 60
     prompts: list[CompletionRequest] = field(default_factory=list)
@@ -111,7 +128,8 @@ class ScriptedModel:
     async def generate_structured(
         self, request: CompletionRequest, schema: type[StructuredT]
     ) -> StructuredCompletion[StructuredT]:
-        index = len(self.prompts)
+        index = self.structured_calls
+        self.structured_calls += 1
         self.prompts.append(request)
         if index < len(self.failures) and self.failures[index] is not None:
             raise self.failures[index]  # type: ignore[misc]
@@ -129,8 +147,28 @@ class ScriptedModel:
         return StructuredCompletion(value=value, completion=self._completion(request))
 
     async def stream(self, request: CompletionRequest) -> AsyncIterator[CompletionChunk]:
-        raise CapabilityNotSupported("This scripted model does not stream.")
-        yield  # pragma: no cover - unreachable, present to make this a generator
+        index = self.stream_calls
+        self.stream_calls += 1
+        self.prompts.append(request)
+        if index >= len(self.streams):
+            raise CapabilityNotSupported(
+                f"The script has no stream for call {index + 1}.",
+            )
+        failure = self.stream_failures.get(index)
+        for position, piece in enumerate(self.streams[index]):
+            if failure is not None and position == failure[0]:
+                raise failure[1]
+            yield CompletionChunk(delta=piece)
+        # The terminal chunk, which is where a streamed call reports what it
+        # spent. A provider that omitted it would make every streamed call
+        # invisible to cost accounting, so the double never omits it.
+        yield CompletionChunk(
+            delta="",
+            usage=TokenUsage(
+                prompt_tokens=self.prompt_tokens, completion_tokens=self.completion_tokens
+            ),
+            finish_reason="stop",
+        )
 
     async def embed(self, texts: Sequence[str], *, model: str) -> EmbeddingResult:
         raise CapabilityNotSupported("This scripted model has no embeddings.")
@@ -198,9 +236,14 @@ def gateway(
     *answers: BaseModel,
     priced: bool = True,
     failures: Sequence[BaseException | None] = (),
+    streams: Sequence[Sequence[str]] = (),
 ) -> tuple[LLMGateway, ScriptedModel, CollectingCallRecorder]:
     """A real gateway over a scripted provider, plus the call ledger."""
-    model = ScriptedModel(answers=list(answers), failures=list(failures))
+    model = ScriptedModel(
+        answers=list(answers),
+        failures=list(failures),
+        streams=[list(pieces) for pieces in streams],
+    )
     recorder = CollectingCallRecorder()
     declared = registry(priced=priced)
     return (

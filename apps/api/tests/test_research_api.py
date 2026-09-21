@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import AsyncClient
 
-from app.agents.schemas import CitationCheck, ReportDraft, ReportSectionDraft
+from app.agents.schemas import AnswerDraft, CitationCheck, ReportDraft, ReportSectionDraft
 from app.core.enums import ReportSectionKind
 from app.db.session import Database
 from app.research.recorder import RunRecorder
@@ -396,6 +396,68 @@ async def test_a_projected_report_is_served_with_its_citations(
     assert body["citations"][0]["ordinal"] == 1
     assert body["citations"][0]["quote"] == "Inference costs $4.10 per GPU-hour."
     assert body["validation"]["checked"] == 1
+
+
+async def test_a_stored_answer_is_served_as_the_conversation_reads_it(
+    client: AsyncClient, database: Database, default_user_id: UUID
+):
+    """The path a reader who was not watching takes.
+
+    Someone opening a finished run never saw a single `answer_delta`. This is
+    where their copy comes from, and the text has to be the same text.
+    """
+    run_id = UUID(str((await create_run(client))["run_id"]))
+    source_id, document_id = await seed_source(database, run_id, "a")
+    span = fake.evidence("ev-1").model_copy(
+        update={"source_id": source_id, "document_id": document_id}
+    )
+    claim = fake.claim("claim-1", evidence_ids=(span.id,))
+    await RunRecorder(database).record(
+        fake.state(
+            research_id=run_id,
+            evidence=[span],
+            claims=[claim],
+            sources=[fake.source("source-a").model_copy(update={"source_id": source_id})],
+            answer=AnswerDraft(
+                text="Inference costs $4.10 per GPU-hour [1].",
+                model="test-answerer-v1",
+                claim_ids=(claim.id,),
+            ),
+        )
+    )
+
+    body = (await client.get(f"{API}/research/{run_id}/answer")).json()
+
+    assert body["answer"]["content_md"] == "Inference costs $4.10 per GPU-hour [1]."
+    assert body["answer"]["citation_count"] == 1
+    assert body["answer"]["truncated"] is False
+
+
+async def test_a_run_that_has_not_answered_yet_returns_null_rather_than_404(
+    client: AsyncClient,
+):
+    """Unlike the report, and deliberately.
+
+    "Not yet" is the normal state of a run that started ten seconds ago, and a
+    client polling a 404 could not tell it apart from a run that does not exist.
+    """
+    created = await create_run(client)
+
+    response = await client.get(f"{API}/research/{created['run_id']}/answer")
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": None}
+
+
+async def test_another_users_answer_is_missing_rather_than_forbidden(
+    client: AsyncClient, other_user_id: UUID
+):
+    """A 403 would confirm the run exists. The answer is scoped like everything else."""
+    run_id = UUID(str((await create_run(client))["run_id"]))
+
+    response = await client.get(f"{API}/research/{run_id}/answer", headers=as_user(other_user_id))
+
+    assert response.status_code == 404
 
 
 async def test_the_report_is_not_ready_rather_than_missing(client: AsyncClient):

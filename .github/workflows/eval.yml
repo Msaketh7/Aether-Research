@@ -33,6 +33,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # See the note in test.yml: NLTK refuses to open a hardlinked file, and uv's
+  # default link mode makes every cached package one - which breaks chunking,
+  # and therefore every case in this benchmark. The API image already sets this
+  # (infra/docker/api.Dockerfile); CI has to say it too.
+  UV_LINK_MODE: copy
+
 concurrency:
   # Never two at once. Each run writes evaluation rows and spends money, and a
   # queued second copy of a thing that costs money is not a thing to queue.

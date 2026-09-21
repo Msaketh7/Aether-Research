@@ -18,7 +18,7 @@ What a failure does depends on what the run can still produce::
 
     researcher                        recorded in failed_tasks; the round goes on
     evidence, claims, verification,
-    contradictions                    recorded in errors; the run goes on
+    contradictions, the answer        recorded in errors; the run goes on
     the critic, or a later planning   recorded; discovery ends, synthesis runs
     the first planning round          raised: there is nothing to research
     synthesis, citation validation    raised: there is no report to return
@@ -39,7 +39,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -58,9 +58,15 @@ from app.agents.errors import (
     PlanningFailed,
     SynthesisFailed,
 )
-from app.agents.nodes import NodeResult, ResearchNodes
+from app.agents.nodes import (
+    AnswerStream,
+    DiscardedAnswerStream,
+    NodeResult,
+    ResearchNodes,
+)
 from app.agents.schemas import (
     ERROR_CODE_PATTERN,
+    AnswerDraft,
     CitationCheck,
     ClaimItem,
     ContradictionItem,
@@ -111,6 +117,7 @@ _NORMALIZER = GraphNode.CLAIM_NORMALIZER.value
 _VERIFIER = GraphNode.VERIFIER.value
 _CONTRADICTIONS = GraphNode.CONTRADICTION_CHECKER.value
 _CRITIC = GraphNode.CRITIC.value
+_ANSWERER = GraphNode.ANSWERER.value
 _SYNTHESIZER = GraphNode.SYNTHESIZER.value
 _VALIDATOR = GraphNode.CITATION_VALIDATOR.value
 
@@ -127,9 +134,16 @@ class GraphContext:
     crashed worker's downtime out of the runtime ceiling (see ``RunClock``),
     and it differs on every invocation by definition - so it travels with the
     invocation, not in the state.
+
+    ``answers`` is where the answerer's text goes as it is written. Same
+    argument: it is a connection this process holds, it is different on every
+    invocation, and a checkpoint that contained one would be a checkpoint that
+    could not be read by another worker. The default discards, so a graph run
+    with nobody watching still writes and stores its answer.
     """
 
     resumed_at: datetime
+    answers: AnswerStream = field(default_factory=DiscardedAnswerStream)
 
 
 class CancellationProbe(Protocol):
@@ -173,16 +187,17 @@ def build_research_graph(
     graph.add_node(_RESEARCHER, governed.researcher)
     graph.add_node(_EVIDENCE, governed.evidence_extractor)
     graph.add_node(_NORMALIZER, governed.claim_normalizer)
+    graph.add_node(_ANSWERER, governed.answerer)
     graph.add_node(_SYNTHESIZER, governed.synthesizer)
     graph.add_node(_VALIDATOR, governed.citation_validator)
 
     graph.add_edge(START, _PLANNER)
-    graph.add_conditional_edges(_PLANNER, governed.after_planner, [_RESEARCHER, _SYNTHESIZER, END])
+    graph.add_conditional_edges(_PLANNER, governed.after_planner, [_RESEARCHER, _ANSWERER, END])
     graph.add_edge(_RESEARCHER, _EVIDENCE)
     graph.add_edge(_EVIDENCE, _NORMALIZER)
 
     if mode is ResearchMode.QUICK:
-        graph.add_edge(_NORMALIZER, _SYNTHESIZER)
+        graph.add_edge(_NORMALIZER, _ANSWERER)
     else:
         graph.add_node(_VERIFIER, governed.verifier)
         graph.add_node(_CONTRADICTIONS, governed.contradiction_checker)
@@ -190,8 +205,15 @@ def build_research_graph(
         graph.add_edge(_NORMALIZER, _VERIFIER)
         graph.add_edge(_VERIFIER, _CONTRADICTIONS)
         graph.add_edge(_CONTRADICTIONS, _CRITIC)
-        graph.add_conditional_edges(_CRITIC, governed.after_critic, [_PLANNER, _SYNTHESIZER, END])
+        graph.add_conditional_edges(_CRITIC, governed.after_critic, [_PLANNER, _ANSWERER, END])
 
+    # Discovery ends at the answerer, not at the synthesizer. The answer is what
+    # the reader is waiting for and the report is the expensive step after it, so
+    # every path that stops looking for material goes here first. The repair loop
+    # deliberately does not come back through: a citation that did not resolve is
+    # a defect in the *report*, and re-answering would rewrite, under the reader,
+    # a paragraph they have already read.
+    graph.add_edge(_ANSWERER, _SYNTHESIZER)
     graph.add_edge(_SYNTHESIZER, _VALIDATOR)
     graph.add_conditional_edges(_VALIDATOR, governed.after_validation, [_SYNTHESIZER, END])
     return graph.compile(checkpointer=checkpointer, name=f"research-{mode.value}")
@@ -451,6 +473,91 @@ class _Governed:
 
     # --- writing -------------------------------------------------------------------
 
+    async def answerer(self, state: ResearchState) -> Update:
+        """Write the answer, and let a failure cost the answer rather than the run.
+
+        Unlike synthesis, this does not raise. The report is still ahead of it,
+        and a run that produced a full cited report but lost its opening
+        paragraph to a dropped socket is a worse outcome than one that shows the
+        report without it. The failure is recorded in ``errors``, where the
+        activity trace shows it.
+        """
+        now = self._now()
+        if await self._cancelled(state):
+            return self._cancel(state, now)
+        if state.get("answer") is not None:
+            # A resumed run whose answer was already written and streamed. Doing
+            # it again would pay twice and overwrite, on the reader's screen, an
+            # answer they have already read.
+            return self._accounted(state, now)
+
+        stream = self._answers()
+        try:
+            result = await self._call(
+                GraphNode.ANSWERER,
+                lambda: self._nodes.answerer.answer(state, on_delta=stream.write),
+                research_id=state["research_id"],
+                iteration=state.get("iteration", 0),
+            )
+        except _PROPAGATE:
+            raise
+        except _BUDGET_REFUSED as exc:
+            now = self._now()
+            return {
+                **self._accounted(state, now),
+                **self._stop(state, StopReason.COST, self._used(state, now)),
+                "errors": [self._failure(GraphNode.ANSWERER, state.get("iteration", 0), exc)],
+            }
+        except Exception as exc:
+            return {
+                **self._accounted(state, self._now()),
+                "errors": [self._failure(GraphNode.ANSWERER, state.get("iteration", 0), exc)],
+            }
+        finally:
+            # Whatever was written belongs to the reader, including the tail a
+            # batching stream is still holding and including the half-answer a
+            # dropped connection left behind. Emphatically in a `finally`: the
+            # failure paths are the ones where a lost tail is least acceptable.
+            await self._finish(stream)
+
+        draft = result.value
+        if draft is not None and not isinstance(draft, AnswerDraft):
+            raise NodeContractViolated(
+                context={
+                    "node": _ANSWERER,
+                    "expected": "AnswerDraft | None",
+                    "returned": type(draft).__name__,
+                }
+            )
+        update: Update = self._accounted(state, self._now(), result.usage)
+        if draft is not None:
+            update["answer"] = draft
+        return update
+
+    async def _finish(self, stream: AnswerStream) -> None:
+        """Close the answer stream, and never let closing it fail the node.
+
+        The answer's record is the value the node returns and the row the run is
+        recorded onto. This is how a person watched it arrive, and watching must
+        not be able to break the work.
+        """
+        try:
+            await stream.finish()
+        except Exception:
+            logger.warning("the answer stream could not be flushed", exc_info=True)
+
+    def _answers(self) -> AnswerStream:
+        """This invocation's answer stream, or one that discards.
+
+        ``get_runtime`` is only available inside a running graph, and the graph
+        tests drive nodes directly; a missing runtime means nobody is watching,
+        which is exactly what the discarding stream is for.
+        """
+        try:
+            return get_runtime(GraphContext).context.answers
+        except Exception:  # pragma: no cover - only outside a graph invocation
+            return DiscardedAnswerStream()
+
     async def synthesizer(self, state: ResearchState) -> Update:
         now = self._now()
         if await self._cancelled(state):
@@ -530,7 +637,7 @@ class _Governed:
             return END
         plan = state.get("research_plan")
         if stop is not None or plan is None or not plan.subtasks:
-            return _SYNTHESIZER
+            return _ANSWERER
 
         budget = state["budget"]
         parameters = state["parameters"]
@@ -540,7 +647,7 @@ class _Governed:
         )
         time_left = budget.max_runtime_seconds - used.runtime_seconds
         if not dispatches or time_left <= 0:
-            return _SYNTHESIZER
+            return _ANSWERER
         return [
             Send(
                 _RESEARCHER,
@@ -567,7 +674,7 @@ class _Governed:
             return END
         critique = state.get("critique")
         if stop is not None or critique is None or critique.sufficient:
-            return _SYNTHESIZER
+            return _ANSWERER
         return _PLANNER
 
     def after_validation(self, state: ResearchState) -> str:

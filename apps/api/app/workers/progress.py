@@ -35,6 +35,11 @@ NODE_STATUS: dict[GraphNode, RunStatus] = {
     GraphNode.VERIFIER: RunStatus.VERIFYING,
     GraphNode.CONTRADICTION_CHECKER: RunStatus.VERIFYING,
     GraphNode.CRITIC: RunStatus.VERIFYING,
+    # The answer is written, so it is synthesis as far as a reader's header is
+    # concerned. A status of its own would mean adding a value to a vocabulary
+    # the database, the API and the frontend all constrain, to name a phase that
+    # lasts a few seconds and already has an event stream of its own.
+    GraphNode.ANSWERER: RunStatus.SYNTHESIZING,
     GraphNode.SYNTHESIZER: RunStatus.SYNTHESIZING,
     GraphNode.CITATION_VALIDATOR: RunStatus.VALIDATING,
 }
@@ -58,7 +63,8 @@ DISCOVERY_FLOOR = 0.05
 DISCOVERY_CEILING = 0.70
 
 _WRITING_PROGRESS: dict[GraphNode, float] = {
-    GraphNode.SYNTHESIZER: 0.80,
+    GraphNode.ANSWERER: 0.74,
+    GraphNode.SYNTHESIZER: 0.85,
     GraphNode.CITATION_VALIDATOR: 0.92,
 }
 
@@ -73,6 +79,7 @@ _ORDER: tuple[GraphNode, ...] = (
     GraphNode.VERIFIER,
     GraphNode.CONTRADICTION_CHECKER,
     GraphNode.CRITIC,
+    GraphNode.ANSWERER,
     GraphNode.SYNTHESIZER,
     GraphNode.CITATION_VALIDATOR,
 )

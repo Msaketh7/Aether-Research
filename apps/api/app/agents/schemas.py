@@ -58,6 +58,10 @@ MAX_QUERIES_PER_TASK = 25
 MAX_EVIDENCE_PER_CLAIM = 50
 MAX_REPORT_SECTIONS = 20
 MAX_CLAIMS_PER_SECTION = 500
+#: The direct answer's ceiling. Generous enough for four or five paragraphs and
+#: hard enough that a model which starts writing the report instead is cut off
+#: rather than checkpointed.
+MAX_ANSWER_CHARS = 12_000
 
 #: A planner-assigned slug, as ``research_tasks.external_id`` stores it.
 TASK_KEY_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,79}$"
@@ -79,6 +83,7 @@ class GraphNode(StrEnum):
     VERIFIER = "verifier"
     CONTRADICTION_CHECKER = "contradiction_checker"
     CRITIC = "critic"
+    ANSWERER = "answerer"
     SYNTHESIZER = "synthesizer"
     CITATION_VALIDATOR = "citation_validator"
 
@@ -536,6 +541,35 @@ class ReportDraft(GraphValue):
     #: Set by the graph, not the synthesizer: when a limit ended discovery the
     #: caveat is a fact about the run, and a writer must not be able to drop it.
     coverage_caveat: str | None = Field(default=None, max_length=2000)
+
+
+class AnswerDraft(GraphValue):
+    """The direct answer to the question, as the reader saw it streamed.
+
+    Held in state - and therefore checkpointed - for two reasons. A resumed run
+    must not pay for the answer twice or stream a second one over the first;
+    and the text has to outlive the stream, because the run is recorded from
+    this state and a reader who opens the page an hour later never saw a single
+    delta.
+
+    ``claim_ids`` is derived from the ``[n]`` markers the model actually wrote,
+    exactly as a report section's is, so it cannot list a claim the prose never
+    used (ADR 0015).
+    """
+
+    text: str = Field(min_length=1, max_length=MAX_ANSWER_CHARS)
+    #: The model that answered, as the provider reported it. Not the role's
+    #: configured model: the chain's second entry answers whenever the first
+    #: refused, and a quality question has to name the one that did.
+    model: str = Field(default="", max_length=120)
+    claim_ids: tuple[UUID, ...] = Field(default=(), max_length=MAX_CLAIMS_PER_SECTION)
+    #: True when the model hit its output ceiling mid-sentence. Recorded rather
+    #: than hidden: a reader is entitled to know the answer stops early.
+    truncated: bool = False
+
+    @property
+    def word_count(self) -> int:
+        return len(self.text.split())
 
 
 class RejectionCount(GraphValue):

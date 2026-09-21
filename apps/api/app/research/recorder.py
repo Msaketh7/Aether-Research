@@ -2,7 +2,8 @@
 
 The graph hands its final state here (``ResultRecorder`` in
 ``app.agents.runtime``), and this turns it into every row the product is served
-from: the evidence chain first, then the report that cites it.
+from: the evidence chain first, then the report that cites it, and the answer
+alongside them.
 
 **One session, one transaction.** ``citations`` has foreign keys to ``claims``
 and ``sources`` declared ``ON DELETE RESTRICT`` - the database enforcing the
@@ -13,7 +14,9 @@ finished. Two projectors, one unit of work.
 
 **Order is a constraint, not a preference.** Evidence, then report. Reversing it
 fails on the foreign key, which is the correct failure and an unhelpful place to
-discover the intent.
+discover the intent. The answer has no such dependency - it references nothing -
+so it is written first, where a failure to write the report cannot take it down
+with it. That is the whole reason it is a row of its own.
 """
 
 from __future__ import annotations
@@ -23,7 +26,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.agents.state import ResearchState
+from app.answers.projection import AnswerProjector
 from app.core.logging import get_logger
+from app.db.repositories.answers import SqlAlchemyAnswerRepository
 from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
 from app.db.repositories.reports import SqlAlchemyReportRepository
 from app.db.session import Database
@@ -45,6 +50,9 @@ class Recorded:
     """What one run's projection wrote, for the worker's log line."""
 
     evidence: Projected
+    #: ``None`` when the run never wrote an answer - it was cancelled, or its
+    #: researchers found nothing to answer from.
+    answer_words: int | None
     #: ``None`` when the run produced no validated report - a run that failed
     #: before synthesis, or before the citation check.
     sections: int | None
@@ -64,6 +72,9 @@ class RunRecorder:
         # cites agree about when the run was recorded.
         now = self._now()
         async with self._database.session() as session:
+            answer = await AnswerProjector(SqlAlchemyAnswerRepository(session)).record(
+                state, now=now
+            )
             evidence = await EvidenceProjector(SqlAlchemyEvidenceRepository(session)).record(
                 state, now=now
             )
@@ -74,6 +85,7 @@ class RunRecorder:
 
         recorded = Recorded(
             evidence=evidence,
+            answer_words=None if answer is None else answer.word_count,
             sections=None if report is None else len(report.sections),
             citations=None if report is None else len(report.citations),
         )
@@ -84,6 +96,7 @@ class RunRecorder:
                 "claims": evidence.claims,
                 "evidence": evidence.evidence,
                 "contradictions": evidence.contradictions,
+                "answer_words": recorded.answer_words,
                 "sections": recorded.sections,
                 "citations": recorded.citations,
             },

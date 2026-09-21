@@ -32,6 +32,7 @@ from app.core.enums import ResearchMode, RunStatus, TaskPriority, TaskStatus
 from app.db.base import Base, TimestampMixin, UpdatedAtMixin, fk_uuid, uuid_pk
 
 if TYPE_CHECKING:
+    from app.db.models.answer import RunAnswerRow
     from app.db.models.event import ResearchEventRow
     from app.db.models.evidence import ClaimRow, ContradictionRow
     from app.db.models.report import ReportRow
@@ -166,6 +167,9 @@ class ResearchRunRow(Base, TimestampMixin, UpdatedAtMixin):
         back_populates="run", cascade="all, delete-orphan", passive_deletes=True
     )
     report: Mapped[ReportRow | None] = relationship(
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
+    )
+    answer: Mapped[RunAnswerRow | None] = relationship(
         back_populates="run", cascade="all, delete-orphan", passive_deletes=True
     )
     events: Mapped[list[ResearchEventRow]] = relationship(

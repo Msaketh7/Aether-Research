@@ -20,7 +20,6 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.auth.passwords import HashParameters, hash_password, verify_password
-from app.auth.sessions import hash_token
 from app.db.models.user import SessionRow, UserRow
 from app.db.session import Database
 from tests.conftest import API, TEST_PASSWORD, register_account, sign_in
@@ -31,6 +30,16 @@ def _cookie_header(response) -> str:
 
 
 # --- registration ---------------------------------------------------------
+
+
+def access_cookie(settings) -> str:
+    """The cookie carrying the credential.
+
+    Since ADR 0022 a sign-in sets two: a short-lived access token at `/` and a
+    refresh token scoped to the refresh endpoint. Tests that mean "the thing
+    that authenticates me" mean the first.
+    """
+    return f"{settings.session_cookie_name}_at"
 
 
 async def test_registration_creates_an_account_and_signs_it_in(strict_client: AsyncClient):
@@ -187,19 +196,44 @@ async def test_an_unauthenticated_request_is_refused(strict_client: AsyncClient)
     assert response.json()["error"]["code"] == "unauthenticated"
 
 
-async def test_the_token_is_never_stored_in_the_clear(
+async def test_the_session_row_holds_no_credential_at_all(
     strict_client: AsyncClient, database: Database, strict_settings
 ):
-    """A database leak must not hand over live sessions (threat model 3.7)."""
+    """A database leak must not hand over live sessions (threat model 3.7).
+
+    Stronger than it used to be. The row once held a hash of the session token;
+    since ADR 0022 it holds nothing that can be presented - the access token is
+    verified by signature, and the refresh token's hash lives in its own table.
+    """
     await register_account(strict_client, email="ada@example.com")
-    token = strict_client.cookies[strict_settings.session_cookie_name]
+    token = strict_client.cookies[access_cookie(strict_settings)]
 
     async with database.session() as session:
         rows = list((await session.execute(select(SessionRow))).scalars())
 
     assert len(rows) == 1
-    assert rows[0].token_hash != token
-    assert rows[0].token_hash == hash_token(token)
+    assert not hasattr(rows[0], "token_hash")
+    # Nothing on the row is the token, or any part of it.
+    values = [str(getattr(rows[0], c.name)) for c in SessionRow.__table__.columns]
+    assert token not in values
+
+
+async def test_a_refresh_token_is_hashed_at_rest(
+    strict_client: AsyncClient, database: Database, strict_settings
+):
+    """The one credential that is still stored, and it is stored hashed."""
+    from app.auth.tokens import hash_refresh_token
+    from app.db.models.user import RefreshTokenRow
+
+    await register_account(strict_client, email="ada@example.com")
+    presented = strict_client.cookies[f"{strict_settings.session_cookie_name}_rt"]
+
+    async with database.session() as session:
+        rows = list((await session.execute(select(RefreshTokenRow))).scalars())
+
+    assert len(rows) == 1
+    assert rows[0].token_hash != presented
+    assert rows[0].token_hash == hash_refresh_token(presented)
 
 
 async def test_the_password_is_never_stored_in_the_clear(
@@ -216,7 +250,7 @@ async def test_the_password_is_never_stored_in_the_clear(
 
 
 async def test_a_forged_token_resolves_to_nobody(strict_client: AsyncClient, strict_settings):
-    strict_client.cookies.set(strict_settings.session_cookie_name, "a" * 43)
+    strict_client.cookies.set(access_cookie(strict_settings), "a" * 43)
 
     assert (await strict_client.get(f"{API}/auth/me")).status_code == 401
 
@@ -225,15 +259,14 @@ async def test_an_expired_session_stops_working(
     strict_client: AsyncClient, database: Database, strict_settings
 ):
     await register_account(strict_client, email="ada@example.com")
-    token_hash = hash_token(strict_client.cookies[strict_settings.session_cookie_name])
 
     async with database.session() as session:
-        row = (
-            await session.execute(select(SessionRow).where(SessionRow.token_hash == token_hash))
-        ).scalar_one()
+        row = (await session.execute(select(SessionRow))).scalar_one()
         row.expires_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
 
-    assert (await strict_client.get(f"{API}/auth/me")).status_code == 401
+    # The access token is still within its own lifetime, so this is the
+    # database being consulted rather than the token expiring on its own.
+    assert (await strict_client.post(f"{API}/auth/refresh")).status_code == 401
 
 
 # --- revocation -----------------------------------------------------------
@@ -245,13 +278,13 @@ async def test_logging_out_revokes_the_token_and_not_only_the_cookie(
     """Clearing the cookie alone would leave a working token in whatever else
     holds it - a proxy log, a copied curl command, a second tab's storage."""
     await register_account(strict_client, email="ada@example.com")
-    token = strict_client.cookies[strict_settings.session_cookie_name]
+    token = strict_client.cookies[access_cookie(strict_settings)]
 
     assert (await strict_client.post(f"{API}/auth/logout")).status_code == 204
-    assert strict_settings.session_cookie_name not in strict_client.cookies
+    assert access_cookie(strict_settings) not in strict_client.cookies
 
     # Present the token again, as something that kept a copy would.
-    strict_client.cookies.set(strict_settings.session_cookie_name, token)
+    strict_client.cookies.set(access_cookie(strict_settings), token)
     assert (await strict_client.get(f"{API}/auth/me")).status_code == 401
 
 
@@ -274,7 +307,7 @@ async def test_a_revoked_session_is_not_an_anonymous_one(
     ):
         assert (await http.get(f"{API}/auth/me")).status_code == 200  # the dev principal
 
-        http.cookies.set(settings.session_cookie_name, "a" * 43)
+        http.cookies.set(access_cookie(settings), "a" * 43)
         assert (await http.get(f"{API}/auth/me")).status_code == 401
 
 
@@ -293,7 +326,7 @@ async def test_one_device_can_be_signed_out_from_another(
     strict_client: AsyncClient, strict_settings
 ):
     await register_account(strict_client, email="ada@example.com")
-    first = strict_client.cookies[strict_settings.session_cookie_name]
+    first = strict_client.cookies[access_cookie(strict_settings)]
 
     strict_client.cookies.clear()
     await sign_in(strict_client, email="ada@example.com")
@@ -304,7 +337,7 @@ async def test_one_device_can_be_signed_out_from_another(
 
     assert (await strict_client.delete(f"{API}/auth/sessions/{other['id']}")).status_code == 204
 
-    strict_client.cookies.set(strict_settings.session_cookie_name, first)
+    strict_client.cookies.set(access_cookie(strict_settings), first)
     assert (await strict_client.get(f"{API}/auth/me")).status_code == 401
 
 
@@ -329,10 +362,10 @@ async def test_signing_out_other_devices_keeps_this_one(
     Signing them out as well would mean signing back in with the credential
     they are worried about."""
     await register_account(strict_client, email="ada@example.com")
-    stale = strict_client.cookies[strict_settings.session_cookie_name]
+    stale = strict_client.cookies[access_cookie(strict_settings)]
     strict_client.cookies.clear()
     await sign_in(strict_client, email="ada@example.com")
-    current = strict_client.cookies[strict_settings.session_cookie_name]
+    current = strict_client.cookies[access_cookie(strict_settings)]
 
     response = await strict_client.delete(f"{API}/auth/sessions")
 
@@ -340,9 +373,9 @@ async def test_signing_out_other_devices_keeps_this_one(
     assert response.json()["revoked"] == 1
     assert (await strict_client.get(f"{API}/auth/me")).status_code == 200
 
-    strict_client.cookies.set(strict_settings.session_cookie_name, stale)
+    strict_client.cookies.set(access_cookie(strict_settings), stale)
     assert (await strict_client.get(f"{API}/auth/me")).status_code == 401
-    strict_client.cookies.set(strict_settings.session_cookie_name, current)
+    strict_client.cookies.set(access_cookie(strict_settings), current)
 
 
 async def test_a_user_cannot_hold_more_sessions_than_the_ceiling(

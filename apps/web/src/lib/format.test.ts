@@ -85,6 +85,6 @@ describe('truncate', () => {
   it('adds an ellipsis and respects the limit', () => {
     const result = truncate('a considerably longer sentence than allowed', 20);
     expect(result.length).toBeLessThanOrEqual(20);
-    expect(result.endsWith('…')).toBe(true);
+    expect(result.endsWith('...')).toBe(true);
   });
 });

@@ -86,6 +86,7 @@ export const AGENT_NAMES = [
   'claim_normalizer',
   'verifier',
   'critic',
+  'answerer',
   'synthesizer',
   'citation_validator',
 ] as const;

@@ -21,7 +21,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.deps import RateLimit
-from app.api.v1 import auth, files, health, research, settings, telemetry
+from app.api.v1 import auth, files, health, research, settings, sso, telemetry
 
 #: Unversioned: liveness, readiness, and the Prometheus scrape. A scraper is
 #: not an API client, and the path is pinned by
@@ -33,6 +33,9 @@ probe_router.include_router(telemetry.metrics_router)
 #: Versioned application surface.
 api_v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(RateLimit())])
 api_v1_router.include_router(auth.router)
+# Same `/auth` prefix, separate module: the SSO routes are redirects rather
+# than JSON endpoints and share almost none of the other file's concerns.
+api_v1_router.include_router(sso.router)
 api_v1_router.include_router(research.router)
 api_v1_router.include_router(files.router)
 api_v1_router.include_router(settings.router)

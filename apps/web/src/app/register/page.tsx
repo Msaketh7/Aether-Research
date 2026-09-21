@@ -1,9 +1,13 @@
 'use client';
 
-import { FlaskConical, LoaderCircle } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
+import { AetherMark } from '@/components/layout/brand';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
+import { SsoButtons } from '@/components/auth/sso-buttons';
+import { DEFAULT_DESTINATION } from '@/lib/auth/redirect';
+import { SsoError } from '@/components/auth/sso-error';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -40,20 +44,26 @@ export default function RegisterPage() {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    register.mutate({ email, password, name }, { onSuccess: () => router.push('/dashboard') });
+    register.mutate(
+      { email, password, name },
+      { onSuccess: () => router.push(DEFAULT_DESTINATION) },
+    );
   };
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
+    <main className="relative flex min-h-dvh items-center justify-center px-4 py-12">
+      <div className="mesh pointer-events-none absolute inset-0" aria-hidden />
+      <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <FlaskConical className="size-6 text-primary" aria-hidden />
-          <h1 className="text-lg font-semibold tracking-tight">{APP_NAME}</h1>
+          <AetherMark className="size-8" />
+          <h1 className="text-xl font-semibold tracking-tight">{APP_NAME}</h1>
           <p className="text-sm text-muted-foreground">Create an account to start researching.</p>
         </div>
 
-        <Card>
-          <CardContent className="pt-5">
+        <SsoError />
+
+        <Card className="shadow-e2">
+          <CardContent className="flex flex-col gap-4 pt-5">
             <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="name">Name</Label>
@@ -81,7 +91,7 @@ export default function RegisterPage() {
                   aria-describedby={fieldErrors.email ? 'email-error' : undefined}
                 />
                 {fieldErrors.email ? (
-                  <p id="email-error" className="text-xs text-destructive">
+                  <p id="email-error" className="text-xs text-destructive-strong">
                     {fieldErrors.email.join(' ')}
                   </p>
                 ) : null}
@@ -104,7 +114,7 @@ export default function RegisterPage() {
                   id="password-help"
                   className={
                     fieldErrors.password
-                      ? 'text-xs text-destructive'
+                      ? 'text-xs text-destructive-strong'
                       : 'text-xs text-muted-foreground'
                   }
                 >
@@ -125,6 +135,11 @@ export default function RegisterPage() {
                 Create account
               </Button>
             </form>
+
+            {/* Below the form, matching sign-in. "Continue with" still creates
+                the account on first use; it is the alternative, not the
+                default, and the two pages must not disagree about that. */}
+            <SsoButtons />
           </CardContent>
         </Card>
 

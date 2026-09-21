@@ -72,8 +72,8 @@ function AgentRow({ agent, tools }: { agent: AgentRunRecord; tools: ToolCallReco
       <p className="mt-1.5 text-sm text-muted-foreground">{agent.summary}</p>
 
       {agent.error ? (
-        <p className="mt-2 rounded-md bg-destructive/8 p-2 text-xs text-destructive">
-          <span className="font-medium">{agent.error.code}</span> — {agent.error.message}
+        <p className="mt-2 rounded-md bg-destructive/8 p-2 text-xs text-destructive-strong">
+          <span className="font-medium">{agent.error.code}:</span> {agent.error.message}
         </p>
       ) : null}
 
@@ -102,7 +102,7 @@ function AgentRow({ agent, tools }: { agent: AgentRunRecord; tools: ToolCallReco
       ) : null}
 
       <p className="mt-2.5 font-mono text-[11px] text-muted-foreground/70">
-        trace {agent.trace_id ?? '—'} · started {formatDateTime(agent.started_at)}
+        trace {agent.trace_id ?? 'none'}, started {formatDateTime(agent.started_at)}
       </p>
     </Card>
   );

@@ -51,7 +51,7 @@ function DeltaBadge({ metric }: { metric: MetricValue }) {
     <span
       className={cn(
         'inline-flex items-center gap-0.5 text-xs',
-        improved ? 'text-success' : 'text-warning',
+        improved ? 'text-success-strong' : 'text-warning-strong',
       )}
     >
       <Icon className="size-3" aria-hidden />
@@ -78,8 +78,8 @@ export function MetricGrid({ title, metrics }: { title: string; metrics: MetricV
                         className={cn(
                           'cursor-help rounded-full px-1.5 py-0.5 text-[10px] font-medium',
                           metric.passed
-                            ? 'bg-success/15 text-success'
-                            : 'bg-destructive/15 text-destructive',
+                            ? 'bg-success/15 text-success-strong'
+                            : 'bg-destructive/15 text-destructive-strong',
                         )}
                       >
                         {metric.passed ? 'pass' : 'fail'}

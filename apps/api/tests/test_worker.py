@@ -638,6 +638,20 @@ def test_every_node_has_a_status_and_a_place_on_the_bar():
         assert 0.0 < progress_for(node, iteration=1, max_iterations=4) <= 1.0
 
 
+def test_every_node_is_attributed_to_an_agent_in_the_ledger():
+    """A node missing from ``NODE_AGENT`` leaves no trace of itself at all.
+
+    Worse than the table above, because it fails *quietly*: the KeyError is
+    raised inside the ledger's guarded write, so the step runs, succeeds, and
+    writes neither its span nor the model call that hung from it. The answerer
+    shipped that way until a scenario counted the ledger against the calls the
+    run had actually made.
+    """
+    from app.observability.ledger import NODE_AGENT
+
+    assert set(NODE_AGENT) == set(GraphNode)
+
+
 def test_progress_never_goes_backwards_across_a_four_round_run():
     discovery = [
         GraphNode.PLANNER,

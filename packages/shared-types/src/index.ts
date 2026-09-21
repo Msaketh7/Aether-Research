@@ -13,6 +13,7 @@ export * from './source';
 export * from './files';
 export * from './evidence';
 export * from './report';
+export * from './answer';
 export * from './activity';
 export * from './events';
 export * from './evaluation';

@@ -49,10 +49,14 @@ threat in the system, because ingesting hostile text is the product's core loop.
 - Content is sanitized: scripts, hidden elements, zero-width and bidi control
   characters, and `data:`/`javascript:` URIs are stripped before the model sees
   the text.
-- **Least-privilege tools.** The synthesizer has no network tools at all. A
-  researcher cannot write to the database. No agent has a shell.
+- **Least-privilege tools.** The answerer and the synthesizer have no network
+  tools at all. A researcher cannot write to the database. No agent has a shell.
 - Structured output: agents return schema-validated objects. Free-form prose
-  cannot become an action.
+  cannot become an action. **The answerer is the one exception**, and it is
+  bounded rather than excused: it returns prose because its text is shown to a
+  person as it arrives, it has no tools to act with, and the only structure it
+  is trusted for - which claims it cited - is read back out of the `[n]` markers
+  it wrote rather than taken from what it says about itself (ADR 0023).
 - **A model refers to the run's material by number, never by identifier.** It
   answers with catalogue positions, so injected text asking it to cite, fetch or
   name something produces a number out of range — dropped and counted, not
@@ -62,7 +66,15 @@ threat in the system, because ingesting hostile text is the product's core loop.
   document text, so injected assertions with no supporting span are dropped by
   citation validation.
 
-**Status (Phase 10).** All of these are implemented. The delimiting,
+**A streamed answer is rendered, never injected.** The answer reaches the
+browser as text and is turned into React elements by the same parser the report
+uses (`apps/web/src/lib/research/markdown.ts`), which can express nothing it
+does not recognise. Nothing on that path touches `dangerouslySetInnerHTML`, so a
+prompt injection that survived into the prose is a wrong sentence rather than a
+script tag - and the partial text of a half-arrived answer is parsed the same
+way as the whole.
+
+**Status (Phase 10, extended in Phase 27).** All of these are implemented. The delimiting,
 sanitisation and least-privilege controls live in `apps/api/app/sources` and are
 enforced by the type system rather than by convention — retrieved text is
 `UntrustedText`, whose `__str__` raises, so it cannot be interpolated into a
@@ -218,6 +230,45 @@ password is a compromised account until the owner notices and signs their
 devices out. A session is not bound to an address or a device fingerprint: a
 stolen cookie works from anywhere, which is the trade every cookie session makes
 against breaking every user behind a mobile network.
+
+_Revised in Phase 26 (ADR 0022)._ Single sign-on made the credential a **signed
+access token** rather than a pointer to a row, which changes this section's
+first control and nothing else. The row no longer stores a hash of anything a
+caller can present - there is no session token any more - and revocation is no
+longer a property of the lookup. Three mechanisms replace it: access tokens
+live fifteen minutes, so the window a stolen one works in is bounded; a
+revocation index keyed by the session id is consulted on every verification, so
+signing a device out still lands on that device's next request; and refresh
+tokens are opaque, hashed at rest, rotated on every use, and revoke their whole
+family on reuse - which turns a stolen refresh token from an indefinite
+foothold into a detected event.
+
+_New residual, and it is a real one._ Revocation now depends on a store that
+can be lost. If the revocation index is unreachable or empty, revocation
+degrades to the access token's remaining lifetime - at most fifteen minutes. It
+cannot degrade further, because renewal reads `sessions.revoked_at` from
+Postgres rather than from the index, so a revoked session can never be renewed.
+The index fails **open** on purpose: treating every session as revoked when
+Redis is unreachable would sign out every user of the system over an
+infrastructure blip.
+
+_New threat: federated sign-in._ An attacker who can make a provider assert an
+address they do not own would become whoever holds the local account with that
+address. Controls: identities are keyed on the provider's **subject**, never on
+the email; attaching a provider identity to an existing local account by
+address is off by default and additionally requires the provider to have marked
+the address verified; the token is checked against the provider's published
+keys under an **asymmetric-only** algorithm allowlist, with exact `iss` and
+`aud` comparisons, PKCE S256, a single-use `state` bound to a short-lived
+`HttpOnly` cookie, and a nonce wherever the provider echoes one. The callback's
+redirect target is validated as a path on this application's own origin, so a
+`?next=` value cannot turn our sign-in page into a redirector to somebody
+else's.
+
+_Unverified._ The live provider round trip has never run - there are no Auth0 or
+Supabase credentials on this machine. The controls above are tested against a
+scripted provider; the vendors' exact wire shapes follow published
+documentation and are unconfirmed.
 
 ### 3.7.1 Abuse of the public surface (boundary 2)
 

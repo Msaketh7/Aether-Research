@@ -93,6 +93,17 @@ report where every material claim is cited.
 > hand, so a stale one is a command away from being fixed rather than a chore
 > nobody does.
 
+**A run is a conversation.** The question, the answer written under it, and the
+box for the next question under that. The answer arrives as it is written -
+phrase by phrase, with a caret while it is still going - and it is produced
+before the report, so a reader has it while the report is still being assembled.
+Its `[n]` markers resolve through the report's citations once there is a report,
+and render unresolved until then rather than pointing at something unchecked.
+Everything that produced it - the stage checklist, the live feed, the budget, the
+plan - sits below the composer rather than above the answer.
+
+![A run as a conversation: question, answer, follow-up box](docs/screenshots/answer.png)
+
 **The report, and the thing it is all for.** Every `[n]` opens the source, the
 verbatim quote behind it and the confidence attached to it. The banner above the
 text is the citation validator's verdict - here 18 of 20 resolved, and the two
@@ -124,7 +135,13 @@ of one press release.
 ![Discovered sources with duplicate clusters](docs/screenshots/sources.png)
 
 <details>
-<summary><b>The rest of the product</b> — dashboard, the request form, the evaluation page</summary>
+<summary><b>The rest of the product</b> — home, dashboard, the request form, the evaluation page</summary>
+
+**Home.** One question box. Mode, depth and filters are beside it rather than on
+a screen of their own, so adding a date range never means abandoning a
+half-typed question.
+
+![The home screen](docs/screenshots/home.png)
 
 **Dashboard.** Every run with its status, mode, findings, cost and runtime.
 
@@ -259,7 +276,7 @@ has never run is the kind of claim this repository exists not to make.
 > is in [`docs/load-testing.md`](docs/load-testing.md).
 
 **370 research runs** have been driven through the real pipeline: the real
-queue, the real lease, the real LangGraph graph, all nine agents, the real
+queue, the real lease, the real LangGraph graph, all ten agents, the real
 toolbelt behind its SSRF guard, ingestion, retrieval, the evidence projection
 and report assembly. Only the model provider and the socket are scripted. Plus
 four Locust ladders over the HTTP surface and a worker-concurrency sweep.
@@ -621,7 +638,7 @@ apps/api/app/
 ├── storage/        the ObjectStorage protocol, S3 and filesystem backends
 ├── sources/        the SSRF guard, the guarded client, the six research tools
 ├── retrieval/      ingestion (parse, chunk, embed) and hybrid retrieval
-├── agents/         the research graph and the nine agents that fill it
+├── agents/         the research graph and the ten agents that fill it
 ├── evidence/       source dedup, and the claim/evidence/contradiction projection
 ├── reports/        report assembly and its projection
 ├── cache/          content-hash response cache, TTLs, single-flight
@@ -714,6 +731,7 @@ still run everything else. `alembic upgrade heads` applies both.
 | `GET`    | `/research/{id}/sources`      | what was found, with dedup clusters and credibility   |
 | `GET`    | `/research/{id}/evidence`     | claims, verbatim spans, contradictions                |
 | `GET`    | `/research/{id}/activity`     | the agent trace with its tool and model calls         |
+| `GET`    | `/research/{id}/answer`       | the direct answer, or `null` until the run writes one |
 | `GET`    | `/research/{id}/report`       | the assembled report and the citation check's verdict |
 | `GET`    | `/research/{id}/events`       | **SSE**, resumable with `Last-Event-ID`               |
 | `POST`   | `/research/{id}/cancel`       | stops the run at the next node boundary               |
@@ -979,7 +997,8 @@ is a working product; it talks to a real FastAPI backend that persists to
 PostgreSQL; and behind it are object storage, a provider-neutral model gateway,
 six research tools behind an SSRF guard, a document ingestion pipeline, hybrid
 retrieval, the research graph - bounded, cancellable and checkpointed - and the
-nine agents that run inside it, from planning a question to writing a report
+ten agents that run inside it, from planning a question to answering it and
+writing a report
 whose every citation has been checked back to a source that was really
 retrieved.
 Switching the frontend between fixtures and the live API is one environment
@@ -1101,15 +1120,16 @@ python scripts/dev.py         # no toolchain at all
 It adapts to what you have installed rather than demanding it, and says what
 each choice costs:
 
-| Missing        | What happens instead                                                                                                                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Redis**      | The API and worker cannot share a queue, so the worker's reconciliation sweep picks queued runs out of Postgres. A real mechanism, not a stub - it just costs a few seconds before a run starts.         |
-| **pgvector**   | Only the relational migration branch is applied and retrieval runs its lexical arm. Chunks are stored with vectors pending, which is a declared state rather than an error.                              |
-| **A database** | It tells you the two commands that create the role and the database. A Postgres that has never heard of this application reports itself as an authentication failure, which reads like a wrong password. |
+| Missing               | What happens instead                                                                                                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Redis**             | The API and worker cannot share a queue, so the worker's reconciliation sweep picks queued runs out of Postgres. A real mechanism, not a stub - it just costs a few seconds before a run starts.                                              |
+| **pgvector**          | Only the relational migration branch is applied and retrieval runs its lexical arm. Chunks are stored with vectors pending, which is a declared state rather than an error.                                                                   |
+| **A usable database** | It creates one - `initdb` under `.data/postgres`, trust auth, port 55432, data persisted between runs. No superuser password, because it is our cluster. A `DATABASE_URL` you set yourself is always used as-is; only the default falls back. |
 
 ```bash
 npm run app:api               # the same, without the frontend
 npm run dev                   # only the frontend, on fixtures - no backend needed
+python scripts/dev.py --own-db   # force the managed database, ignoring any other
 ```
 
 `make dev` is still the fastest way to look at the product: it needs no

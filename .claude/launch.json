@@ -6,6 +6,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace", "@aether/web"],
       "port": 3000
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "--workspace", "@aether/web", "--", "-p", "3100"],
+      "port": 3100,
+      "description": "The built app on :3100 (mock fixtures), as the e2e and screenshot harnesses see it"
     }
   ]
 }

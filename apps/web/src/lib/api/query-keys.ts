@@ -10,6 +10,8 @@ export const queryKeys = {
   auth: {
     me: () => ['auth', 'me'] as const,
     sessions: () => ['auth', 'sessions'] as const,
+    ssoOptions: () => ['auth', 'sso-options'] as const,
+    identities: () => ['auth', 'identities'] as const,
   },
   research: {
     all: () => ['research'] as const,
@@ -22,6 +24,7 @@ export const queryKeys = {
       ['research', 'evidence', id, filter ?? 'all'] as const,
     activity: (id: string) => ['research', 'activity', id] as const,
     report: (id: string) => ['research', 'report', id] as const,
+    answer: (id: string) => ['research', 'answer', id] as const,
   },
   evaluations: {
     all: () => ['evaluations'] as const,

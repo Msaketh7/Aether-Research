@@ -63,8 +63,8 @@ Newest first. Only decision versions are listed here.
   architecture including a designed PostgreSQL schema for ~20 tables
   (`users`, `sessions`, `research_projects`, `research_runs`, `research_tasks`,
   `sources`, `documents`, `document_chunks`, `claims`, `evidence`,
-  `contradictions`, `reports`, `report_sections`, `citations`, `agent_runs`,
-  `tool_calls`, `llm_calls`, `evaluations`, `feedback`); the RAG pipeline; the
+  `contradictions`, `run_answers`, `reports`, `report_sections`, `citations`,
+  `agent_runs`, `tool_calls`, `llm_calls`, `evaluations`, `feedback`); the RAG pipeline; the
   web-content pipeline and deduplication; the async execution model and SSE;
   durability / resumability via LangGraph checkpoints; failure handling and the
   error taxonomy; the caching strategy; concurrency and backpressure caps;
@@ -290,6 +290,7 @@ _Plain terms: the website you interact with, plus the live progress feed._
   | `/research/[id]/sources`  | Discovered sources, duplicate clusters, credibility      |
   | `/research/[id]/evidence` | Claims, supporting quotes, confidence, contradictions    |
   | `/research/[id]/activity` | Full step-by-step agent trace                            |
+  | `/research/[id]`          | The conversation: question, streamed answer, follow-up   |
   | `/research/[id]/report`   | Final report with inline `[n]` citations                 |
   | `/settings`               | Profile, sessions, provider/model preferences            |
   | `/evaluations`            | Quality + system dashboards, benchmark history           |
@@ -951,6 +952,25 @@ reason._
 | likely_reason  | `text` | e.g. "different fiscal periods"                                         |
 | resolution     | `text` | `unresolved` \| `resolved_a` \| `resolved_b` \| `both_valid_in_context` |
 | resolved_by    | `text` | agent or user                                                           |
+
+#### `run_answers`
+
+The direct answer, written before the report and streamed as it was written. Its
+own table rather than a column on `reports`, because a run that answered the
+question and then failed at synthesis must still have something to show - which
+is the whole point of producing the answer first (ADR 0023). The rows are a read
+model: every character in `content_md` was also streamed as `answer_delta`
+events, which are themselves durable.
+
+| Column         | Type          | Notes                                                                |
+| -------------- | ------------- | -------------------------------------------------------------------- |
+| run_id         | `uuid`        | → research_runs, unique                                              |
+| content_md     | `text`        | Markdown with `[n]` markers, numbered against the report's citations |
+| model          | `text`        | the model that answered, as the provider reported it                 |
+| word_count     | `int`         |                                                                      |
+| citation_count | `int`         | distinct claims cited, counted from resolved markers                 |
+| truncated      | `boolean`     | the model reached its output ceiling                                 |
+| generated_at   | `timestamptz` |                                                                      |
 
 #### `reports`
 
@@ -1667,6 +1687,7 @@ provider, and is published with its conditions in
 | `GET`    | `/research/{id}/sources`                        | sources + duplicate clusters     |
 | `GET`    | `/research/{id}/evidence`                       | claims, evidence, contradictions |
 | `GET`    | `/research/{id}/activity`                       | the agent / tool / LLM trace     |
+| `GET`    | `/research/{id}/answer`                         | the direct answer, or `null`     |
 | `GET`    | `/research/{id}/report`                         | report + sections + citations    |
 | `POST`   | `/research/{id}/followup`                       | conversational child run         |
 | `POST`   | `/research/{id}/cancel`                         | cooperative cancel               |
@@ -1688,15 +1709,15 @@ All list endpoints are cursor-paginated and scoped to the authenticated user.
 > do the right thing, the full self-grading exam, and an end-to-end test that
 > drives a real browser through the whole product.
 
-| Level                | Targets                                                                                                                                                                |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Unit**             | query parser, source parser, URL validator, citation parser, ranking functions, cost calculator, token budget, state transitions                                       |
-| **Integration**      | API↔DB, API↔Redis, Worker↔LangGraph, Retriever↔pgvector, Search↔evidence DB                                                                                            |
-| **Agent**            | behavioural: "Compare company A and B" then planner creates a competitor task, researcher uses web search, critic verifies evidence, synthesizer produces citations    |
-| **Scenario**         | the whole vertical slice, once per named failure mode: queue → worker → graph → nine agents → tools → ingestion → retrieval → projections → report, over real Postgres |
-| **RAG**              | retrieval recall/precision on a fixed fixture corpus; reranker improves ordering; metadata filters honoured                                                            |
-| **Evaluation**       | `benchmark.json` run against each release                                                                                                                              |
-| **E2E (Playwright)** | login → new research → submit → live activity → wait for completion → open report → click citation → view source                                                       |
+| Level                | Targets                                                                                                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit**             | query parser, source parser, URL validator, citation parser, ranking functions, cost calculator, token budget, state transitions                                                 |
+| **Integration**      | API↔DB, API↔Redis, Worker↔LangGraph, Retriever↔pgvector, Search↔evidence DB                                                                                                      |
+| **Agent**            | behavioural: "Compare company A and B" then planner creates a competitor task, researcher uses web search, critic verifies evidence, synthesizer produces citations              |
+| **Scenario**         | the whole vertical slice, once per named failure mode: queue → worker → graph → ten agents → tools → ingestion → retrieval → projections → answer and report, over real Postgres |
+| **RAG**              | retrieval recall/precision on a fixed fixture corpus; reranker improves ordering; metadata filters honoured                                                                      |
+| **Evaluation**       | `benchmark.json` run against each release                                                                                                                                        |
+| **E2E (Playwright)** | login → new research → submit → live activity → wait for completion → open report → click citation → view source                                                                 |
 
 Fixtures in `data/fixtures/`. External APIs are recorded/replayed (VCR-style) in
 CI; a nightly job runs a small live subset.
@@ -1815,11 +1836,12 @@ aether-research/
 │       │   ├── core/            # settings, logging, error taxonomy, enums
 │       │   ├── auth/            # passwords, sessions, cookies, principal
 │       │   ├── security/        # rate limiting, client address, audit log
-│       │   ├── agents/          # the graph + the nine agents + versioned prompts
+│       │   ├── agents/          # the graph + the ten agents + versioned prompts
 │       │   ├── research/        # run lifecycle, recorder, the progress event bus
 │       │   ├── retrieval/       # ingestion (parse, chunk, embed) + hybrid retrieval
 │       │   ├── sources/         # SSRF guard, guarded client, the six tools, toolbelt
 │       │   ├── evidence/        # dedup, and the claim/evidence/contradiction projection
+│       │   ├── answers/         # the direct answer as a row, and its projection
 │       │   ├── reports/         # report assembly and its projection
 │       │   ├── models/          # LLM Gateway, registry.yaml, routing, providers
 │       │   ├── storage/         # ObjectStorage protocol, S3 + filesystem backends

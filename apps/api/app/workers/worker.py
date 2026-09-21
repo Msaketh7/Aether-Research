@@ -131,7 +131,16 @@ class RunExecutor:
         try:
             brief = await self._brief(run)
             async with self._enrolled(run):
-                state = await self._runner.run(brief, listener=_StepReporter(self, lease, emitter))
+                state = await self._runner.run(
+                    brief,
+                    listener=_StepReporter(self, lease, emitter),
+                    # The one thing a worker streams from *inside* a node rather
+                    # than at its boundary: the answer, as it is written.
+                    answers=emitter.answer_stream(
+                        chunk_chars=self._settings.answer_stream_chunk_chars,
+                        max_delay_seconds=self._settings.answer_stream_max_delay_seconds,
+                    ),
+                )
         except LeaseLost:
             # Cancelled, or taken over. Either way the row already says what it
             # should, and writing to it now would be this worker overwriting a

@@ -25,6 +25,9 @@ export const RESEARCH_EVENT_TYPES = [
   'critic_started',
   'additional_research_requested',
   'iteration_started',
+  'answer_started',
+  'answer_delta',
+  'answer_completed',
   'synthesis_started',
   'citation_check',
   'report_completed',
@@ -108,6 +111,35 @@ export type ResearchEvent =
       { iteration: number; reason: string; new_task_count: number }
     >
   | EventBase<'iteration_started', { iteration: number; max_iterations: number }>
+  /**
+   * A new answer is about to be written. A client resets whatever it has
+   * accumulated: a worker that crashed halfway through an answer leaves a
+   * partial one on screen, and the next attempt writes a different answer that
+   * must replace it rather than continue it.
+   */
+  | EventBase<'answer_started', Record<string, never>>
+  /**
+   * One piece of the answer, to append. `index` is 1-based within the current
+   * answer and resets on `answer_started`; pieces are phrase-sized rather than
+   * per-token because each one is a stored row.
+   */
+  | EventBase<'answer_delta', { index: number; text: string }>
+  /**
+   * The finished answer, in full. Repeats every character already streamed on
+   * purpose: it is what a reader who was not watching is replayed, and what a
+   * client reconciles its accumulated text against so a dropped piece heals.
+   */
+  | EventBase<
+      'answer_completed',
+      {
+        text: string;
+        model: string;
+        word_count: number;
+        citation_count: number;
+        /** The model reached its output ceiling, so the answer stops early. */
+        truncated: boolean;
+      }
+    >
   | EventBase<'synthesis_started', { section_count: number }>
   | EventBase<'citation_check', { checked: number; valid: number; rejected: number }>
   | EventBase<
@@ -138,6 +170,7 @@ export const RESEARCH_STAGES = [
   'extracting',
   'verifying',
   'contradictions',
+  'answering',
   'writing',
 ] as const;
 export type ResearchStage = (typeof RESEARCH_STAGES)[number];

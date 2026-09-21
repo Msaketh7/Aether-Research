@@ -59,9 +59,12 @@ crash.log
 !infra/terraform/environments/*.tfvars
 
 # agent tooling installed into the working tree, not part of the product.
-# `.agents/` carries third-party skills with their own licenses, which is
-# exactly what must not land unannounced in a proprietary repository - see
-# THIRD_PARTY_NOTICES.md for how a genuine dependency gets recorded instead.
-# `skills-lock.json` is the machinery that puts them there.
+# `.agents/` and `.claude/skills/` carry third-party skills with their own
+# licenses, which is exactly what must not land unannounced in a proprietary
+# repository - see THIRD_PARTY_NOTICES.md for how a genuine dependency gets
+# recorded instead. `skills-lock.json` is the machinery that puts them there.
+# Two paths because the installer has used both; the rule is about what the
+# files are, not where a given version of the tool decided to write them.
 .agents/
+.claude/skills/
 skills-lock.json

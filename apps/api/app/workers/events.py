@@ -14,6 +14,16 @@ it exists, and the reason the critic gave is read from the critique rather than
 guessed at. The cost is that an event lags its work by one node; the benefit is
 that the stream never describes something that did not happen.
 
+**The answer is the one exception, and it is not really one.** Its pieces are
+published while the node is still running, because the text arriving is the
+work - an answer announced after it was finished would be a page appearing at
+once, which is the thing streaming it exists to avoid. It keeps the property
+that matters: nothing is *predicted*. A piece is published because those
+characters have already been generated. ``answer_completed`` is still emitted at
+the node boundary from checkpointed state, so it is idempotent and replays
+correctly, and it carries the whole text - which is what a reader who arrives
+after the run has finished is served.
+
 **The cursor is the stream itself.** What has already been announced is
 rebuilt, on the first step, from the events the run has already emitted
 (``EventBroker.history``) - which is also the durable log. That is what makes a
@@ -29,14 +39,16 @@ how a person watches it, and watching must not be able to stop the work.
 from __future__ import annotations
 
 import contextlib
+import time
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from sqlalchemy import select
 
 from app.agents.schemas import (
+    AnswerDraft,
     ClaimItem,
     ContradictionItem,
     EvidenceItem,
@@ -123,6 +135,9 @@ class _Announced:
     plans: set[int] = field(default_factory=set)
     critiques: set[int] = field(default_factory=set)
     verification: bool = False
+    #: The answer is announced complete once per run. Not per revision: the
+    #: repair loop rewrites the report, never the answer.
+    answers: int = 0
     #: Counted rather than flagged: a repaired draft is synthesised and checked
     #: a second time, and the revision number is what says which one this is.
     syntheses: int = 0
@@ -155,6 +170,8 @@ class _Announced:
                     _add_int(seen.critiques, payload.get("iteration"))
                 case ResearchEventType.VERIFICATION_STARTED:
                     seen.verification = True
+                case ResearchEventType.ANSWER_COMPLETED:
+                    seen.answers += 1
                 case ResearchEventType.SYNTHESIS_STARTED:
                     seen.syntheses += 1
                 case ResearchEventType.CITATION_CHECK:
@@ -166,6 +183,105 @@ class _Announced:
         return seen
 
 
+class BrokerAnswerStream:
+    """The answer's text, on its way to whoever is watching the run.
+
+    An ``AnswerStream`` (``app.agents.nodes``) backed by the run's event bus.
+    Two decisions are worth stating, because both are about the fact that these
+    events are *stored*:
+
+    **Pieces are accumulated, not forwarded.** A provider emits a few characters
+    at a time, and publishing each one would be a database row per token - a few
+    thousand inserts to deliver text nobody can read that fast. So text
+    accumulates and is published in phrase-sized pieces, or sooner when a slow
+    model has kept the buffer waiting. ``finish`` publishes the tail, which is
+    what stops a short answer - one that never fills the buffer at all - being
+    streamed as nothing at all.
+
+    **``answer_started`` goes out with the first piece, not before it.** An
+    answer that turns out to have nothing to say never announces itself, so a
+    client is never told to clear its screen for text that is not coming.
+
+    **Nothing here may stop the run.** A publish that fails is logged and
+    dropped: the answer's record is the value the node returns and the row the
+    run is recorded onto, never this. Watching must not be able to break the
+    work - and an answer that reached the database but not the screen is
+    recoverable, while the reverse is not.
+    """
+
+    def __init__(
+        self,
+        *,
+        broker: EventBroker,
+        run_id: uuid.UUID,
+        chunk_chars: int = 48,
+        max_delay_seconds: float = 0.25,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._broker = broker
+        self._run_id = run_id
+        self._chunk_chars = max(1, chunk_chars)
+        self._max_delay = max_delay_seconds
+        self._clock = clock
+        self._buffer: list[str] = []
+        self._pending = 0
+        self._index = 0
+        self._opened = False
+        self._flushed_at = clock()
+
+    async def write(self, text: str) -> None:
+        if not text:
+            return
+        self._buffer.append(text)
+        self._pending += len(text)
+        if (
+            self._pending >= self._chunk_chars
+            or self._clock() - self._flushed_at >= self._max_delay
+        ):
+            await self._flush()
+
+    async def finish(self) -> None:
+        """Publish whatever is still held. Called once, on the way out."""
+        await self._flush()
+
+    async def _flush(self) -> None:
+        if not self._pending:
+            return
+        if not self._opened:
+            # The reader is told to clear whatever is on screen at the moment
+            # there is something to replace it with. That is what makes a second
+            # attempt correct: a worker that crashed halfway leaves a partial
+            # answer behind, and the retry writes a different one over it.
+            self._opened = True
+            await self._publish(ResearchEventType.ANSWER_STARTED, {})
+        piece = "".join(self._buffer)
+        self._buffer.clear()
+        self._pending = 0
+        self._flushed_at = self._clock()
+        self._index += 1
+        await self._publish(ResearchEventType.ANSWER_DELTA, {"index": self._index, "text": piece})
+
+    async def _publish(self, event_type: ResearchEventType, payload: dict[str, Any]) -> None:
+        try:
+            await self._broker.publish(
+                EventDraft(
+                    type=event_type,
+                    run_id=self._run_id,
+                    status=RunStatus.SYNTHESIZING,
+                    payload=payload,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "a piece of the answer could not be published",
+                extra={
+                    "run_id": str(self._run_id),
+                    "type": event_type.value,
+                    "error": str(exc),
+                },
+            )
+
+
 class RunEventEmitter:
     """One run's progress stream. Told what the graph did, it says what happened."""
 
@@ -173,6 +289,22 @@ class RunEventEmitter:
         self._broker = broker
         self._run_id = run_id
         self._seen: _Announced | None = None
+
+    def answer_stream(
+        self, *, chunk_chars: int = 48, max_delay_seconds: float = 0.25
+    ) -> BrokerAnswerStream:
+        """Where this run's answer goes while it is being written.
+
+        Built here rather than by the caller so that the broker and the run id
+        are wired in one place - the same two values every other event on this
+        run is published with.
+        """
+        return BrokerAnswerStream(
+            broker=self._broker,
+            run_id=self._run_id,
+            chunk_chars=chunk_chars,
+            max_delay_seconds=max_delay_seconds,
+        )
 
     async def prime(self) -> None:
         """Load what has already been streamed for this run.
@@ -226,6 +358,8 @@ class RunEventEmitter:
                 await self._contradicted(state)
             case GraphNode.CRITIC:
                 await self._criticised(state)
+            case GraphNode.ANSWERER:
+                await self._answered(state)
             case GraphNode.SYNTHESIZER:
                 await self._synthesised(state)
             case GraphNode.CITATION_VALIDATOR:
@@ -410,6 +544,27 @@ class RunEventEmitter:
             {"iteration": critique.iteration},
         )
 
+    async def _answered(self, state: ResearchState) -> None:
+        """The answer is finished. Said once, with the whole text.
+
+        The text is repeated here even though every character of it has already
+        been streamed, and that is the point: a reader who opens the page after
+        the run finished never saw a delta, and this event is what the replayed
+        stream hands them. It is also what the frontend reconciles its
+        accumulated text against, so a dropped piece heals rather than leaving a
+        gap in the middle of a sentence.
+        """
+        answer = state.get("answer")
+        seen = self._cursor()
+        if answer is None or seen.answers:
+            return
+        seen.answers += 1
+        await self._emit(
+            ResearchEventType.ANSWER_COMPLETED,
+            RunStatus.SYNTHESIZING,
+            _answer_completed(answer),
+        )
+
     async def _synthesised(self, state: ResearchState) -> None:
         draft = state.get("report")
         seen = self._cursor()
@@ -557,6 +712,16 @@ class RunEventEmitter:
 
 
 # --- payload shapes (mirrors ``ResearchEvent`` in @aether/shared-types) --------
+
+
+def _answer_completed(answer: AnswerDraft) -> dict[str, Any]:
+    return {
+        "text": answer.text,
+        "model": answer.model,
+        "word_count": answer.word_count,
+        "citation_count": len(answer.claim_ids),
+        "truncated": answer.truncated,
+    }
 
 
 def _source_found(ref: SourceRef) -> dict[str, Any]:

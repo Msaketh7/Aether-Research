@@ -1,10 +1,25 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+/**
+ * `interactive` is opt-in on purpose.
+ *
+ * A card that lifts under the cursor promises that clicking it does something.
+ * Applying the lift to every card - including the read-only stat tiles and the
+ * report body - would make the whole page look clickable and none of it be.
+ */
+export function Card({
+  className,
+  interactive = false,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean }) {
   return (
     <div
-      className={cn('rounded-lg border border-border bg-card text-card-foreground', className)}
+      className={cn(
+        'rounded-xl border border-border bg-card text-card-foreground shadow-e1',
+        interactive && 'lift hover:border-primary/35',
+        className,
+      )}
       {...props}
     />
   );

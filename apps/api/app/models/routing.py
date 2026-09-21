@@ -22,6 +22,7 @@ Base tier per role, from the build plan and ADR 0007:
 | citation_validator  | medium    | span matching with judgement at the edges       |
 | verifier            | strong    | does this evidence actually support this claim  |
 | critic              | strong    | is the coverage good enough to stop             |
+| answerer            | strong    | the first thing the reader reads, under a watch |
 | synthesizer         | strongest | the artifact the user actually reads            |
 
 Research mode then shifts that: `deep` uses the base tier, `quick` and
@@ -31,6 +32,12 @@ latency and cost, and the tier is where that trade is actually made.
 Two floors keep the shift from doing damage: the synthesizer never drops below
 `strong`, because a cheap final synthesis is the one degradation a reader sees
 directly; and no role drops below `small`, which is the bottom of the ladder.
+
+The answerer sits one tier below the synthesizer deliberately. It is written
+while the reader is watching it appear, so its latency is visible in a way no
+other call's is, and it has a far smaller job: a few paragraphs from claims that
+have already been gathered, verified and numbered. In `quick` mode it steps down
+with everything else, which is exactly what that mode is for.
 
 ## Fallbacks
 
@@ -62,6 +69,7 @@ DEFAULT_ROLE_TIERS: dict[AgentName, ModelTier] = {
     AgentName.CITATION_VALIDATOR: ModelTier.MEDIUM,
     AgentName.VERIFIER: ModelTier.STRONG,
     AgentName.CRITIC: ModelTier.STRONG,
+    AgentName.ANSWERER: ModelTier.STRONG,
     AgentName.SYNTHESIZER: ModelTier.STRONGEST,
 }
 

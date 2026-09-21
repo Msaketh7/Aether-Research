@@ -21,6 +21,17 @@ permissions:
 
 env:
   NODE_VERSION: '22'
+  # Copy packages into the venv instead of hardlinking them out of uv's cache.
+  #
+  # NLTK's path-security check refuses to open a file with `st_nlink > 1`, on the
+  # grounds that a hardlink can point at an inode outside the root it trusts
+  # (CWE-59). uv's default link mode gives every cached package exactly that, so
+  # `llama_index`'s bundled stopwords corpus - which the sentence splitter loads
+  # on its first call - is refused, chunking raises, and a research run reaches
+  # synthesis with no evidence and fails three layers from the cause. Copying
+  # costs a few seconds of install time and makes the venv look like one pip
+  # would have built.
+  UV_LINK_MODE: copy
 
 jobs:
   frontend:

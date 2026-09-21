@@ -14,23 +14,41 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import AsyncIterator
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.cookies import CookiePolicy
+from app.auth.federation import FederationService
 from app.auth.principal import DEV_USER_HEADER, Authenticated, Principal, authenticate
+from app.auth.providers.base import IdentityProvider
+from app.auth.providers.registry import build_providers
+from app.auth.revocation import (
+    InMemoryRevocationStore,
+    RedisRevocationStore,
+    RevocationStore,
+)
 from app.auth.service import AuthService
 from app.auth.sessions import SessionPolicy, SessionService
+from app.auth.tokens import TokenIssuer
+from app.auth.transactions import (
+    InMemoryTransactionStore,
+    RedisTransactionStore,
+    TransactionStore,
+)
 from app.core.config import Settings
 from app.core.errors import Unauthenticated
 from app.core.logging import request_id_var, user_id_var
 from app.core.pagination import PageParams
+from app.db.repositories.answers import SqlAlchemyAnswerRepository
 from app.db.repositories.audit import SqlAlchemyAuditLog
 from app.db.repositories.evaluations import SqlAlchemyEvaluationStore
 from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
+from app.db.repositories.identity import IdentityRepository
 from app.db.repositories.metrics import SqlAlchemySystemMetrics
+from app.db.repositories.refresh_token import DurableRevocation, RefreshTokenRepository
 from app.db.repositories.reports import SqlAlchemyReportRepository
 from app.db.repositories.research import SqlAlchemyResearchRepository
 from app.db.repositories.session import SessionRepository
@@ -140,9 +158,137 @@ def get_user_repository(session: SessionDep) -> UserRepository:
     return UserRepository(session)
 
 
+@lru_cache(maxsize=1)
+def get_token_issuer_cached(pem: str | None, issuer: str, audience: str, ttl: int) -> TokenIssuer:
+    """The signing key, built once per process.
+
+    Cached on its inputs rather than rebuilt per request: importing a PEM costs
+    real work, and - more importantly - when no key is configured the issuer
+    *generates* one, so a per-request issuer would mint a fresh key every time
+    and no token would ever verify.
+    """
+    return TokenIssuer.from_pem(pem, issuer=issuer, audience=audience, access_ttl_seconds=ttl)
+
+
+def get_token_issuer(settings: Annotated[Settings, Depends(get_settings_dep)]) -> TokenIssuer:
+    key = settings.jwt_private_key.get_secret_value() if settings.jwt_private_key else None
+    return get_token_issuer_cached(
+        key,
+        settings.sso_app_base_url,
+        settings.sso_app_base_url,
+        settings.access_token_ttl_seconds,
+    )
+
+
+@lru_cache(maxsize=1)
+def _revocation_store_for(app_env: str, redis_url: str) -> RevocationStore:
+    """One index per process, Redis-backed outside the test suite.
+
+    Chosen exactly as the cache, the queue and the event bus are: in-memory
+    under `APP_ENV=test` to keep the suite hermetic, Redis everywhere else -
+    because a per-process index is not an index at all once there is more than
+    one API instance. A sign-out on one would leave the session working on
+    every other, which is the single behaviour this store exists to prevent.
+    """
+    if app_env == "test":
+        return InMemoryRevocationStore()
+
+    from app.workers.queue import build_redis
+
+    return RedisRevocationStore(build_redis(redis_url))
+
+
+def get_revocation_store(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> RevocationStore:
+    return _revocation_store_for(settings.app_env, str(settings.redis_url))
+
+
+@lru_cache(maxsize=1)
+def _transaction_store_for(app_env: str, redis_url: str) -> TransactionStore:
+    """The pending-authorization store.
+
+    Shared for the same reason, and with a sharper failure if it is not: the
+    browser is redirected by whichever instance started the flow and comes back
+    to whichever instance the load balancer picks, so a per-process store makes
+    every sign-in fail on a mismatched `state` roughly (n-1)/n of the time.
+    """
+    if app_env == "test":
+        return InMemoryTransactionStore()
+
+    from app.workers.queue import build_redis
+
+    return RedisTransactionStore(build_redis(redis_url))
+
+
+def get_transaction_store(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> TransactionStore:
+    return _transaction_store_for(settings.app_env, str(settings.redis_url))
+
+
+#: Providers, memoised per configuration. Not `lru_cache` on the settings
+#: object: Pydantic models are not hashable, so it would raise on the first
+#: call. Keyed on a fingerprint of the values that decide what gets built, so
+#: a test that overrides the settings gets its own providers rather than the
+#: previous test's.
+_PROVIDER_CACHE: dict[str, dict[str, IdentityProvider]] = {}
+
+
+def get_providers(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> dict[str, IdentityProvider]:
+    """The configured providers, built once per configuration.
+
+    Each one owns a JWKS cache, and rebuilding them per request would throw
+    that cache away and fetch the provider's keys on every single sign-in.
+    """
+    key = "|".join(
+        [
+            settings.sso_connections,
+            settings.auth0_domain or "",
+            settings.auth0_client_id or "",
+            settings.supabase_url or "",
+            # Presence only. The value is a secret and must not be part of a
+            # cache key that could be logged.
+            "1" if settings.auth0_client_secret else "0",
+            "1" if settings.supabase_publishable_key else "0",
+        ]
+    )
+    cached = _PROVIDER_CACHE.get(key)
+    if cached is None:
+        # Re-keyed to `str` rather than `dict(...)`: `dict` is invariant in
+        # its key type, so a `dict[ProviderName, ...]` is not a
+        # `dict[str, ...]`. The endpoints look providers up by a path
+        # parameter, which is a `str`.
+        cached = {str(name): provider for name, provider in build_providers(settings).items()}
+        _PROVIDER_CACHE[key] = cached
+    return cached
+
+
+def get_identity_repository(session: SessionDep) -> IdentityRepository:
+    return IdentityRepository(session)
+
+
+def get_federation_service(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    identities: Annotated[IdentityRepository, Depends(get_identity_repository)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> FederationService:
+    return FederationService(
+        users=users,
+        identities=identities,
+        registration_enabled=settings.sso_registration_enabled,
+        link_by_verified_email=settings.sso_link_by_verified_email,
+    )
+
+
 def get_session_service(
     session: SessionDep,
     settings: Annotated[Settings, Depends(get_settings_dep)],
+    issuer: Annotated[TokenIssuer, Depends(get_token_issuer)],
+    revocations: Annotated[RevocationStore, Depends(get_revocation_store)],
+    database: Annotated[Database, Depends(get_database)],
 ) -> SessionService:
     return SessionService(
         SessionRepository(session),
@@ -150,6 +296,13 @@ def get_session_service(
             ttl_seconds=settings.session_ttl_seconds,
             max_per_user=settings.max_sessions_per_user,
         ),
+        refresh_tokens=RefreshTokenRepository(session),
+        issuer=issuer,
+        revocations=revocations,
+        access_ttl_seconds=settings.access_token_ttl_seconds,
+        # Its own transaction, because reuse detection has to survive the
+        # 401 it raises.
+        durable_revocation=DurableRevocation(database),
     )
 
 
@@ -201,7 +354,7 @@ async def get_authenticated(
         settings=settings,
         sessions=sessions,
         users=users,
-        cookie_token=request.cookies.get(settings.session_cookie_name),
+        cookie_token=request.cookies.get(f"{settings.session_cookie_name}_at"),
         user_header=x_aether_user,
         now=dt.datetime.now(dt.UTC),
     )
@@ -316,6 +469,10 @@ def get_report_repository(session: SessionDep) -> SqlAlchemyReportRepository:
     return SqlAlchemyReportRepository(session)
 
 
+def get_answer_repository(session: SessionDep) -> SqlAlchemyAnswerRepository:
+    return SqlAlchemyAnswerRepository(session)
+
+
 def get_trace_store(database: Annotated[Database, Depends(get_database)]) -> SqlAlchemyTraceStore:
     """The trace store takes the engine, not the request's session.
 
@@ -332,6 +489,7 @@ def get_research_service(
     uploads: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
     evidence: Annotated[SqlAlchemyEvidenceRepository, Depends(get_evidence_repository)],
     reports: Annotated[SqlAlchemyReportRepository, Depends(get_report_repository)],
+    answers: Annotated[SqlAlchemyAnswerRepository, Depends(get_answer_repository)],
     activity: Annotated[SqlAlchemyTraceStore, Depends(get_trace_store)],
     queue: Annotated[JobQueue, Depends(get_queue)],
     broker: Annotated[EventBroker, Depends(get_broker)],
@@ -349,6 +507,7 @@ def get_research_service(
         uploads=uploads,
         evidence_store=evidence,
         report_store=reports,
+        answer_store=answers,
         activity_store=activity,
         queue=queue,
         broker=broker,
@@ -399,6 +558,12 @@ PageParamsDep = Annotated[PageParams, Depends(get_page_params)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
+IdentityRepositoryDep = Annotated[IdentityRepository, Depends(get_identity_repository)]
+ProvidersDep = Annotated[dict[str, IdentityProvider], Depends(get_providers)]
+TransactionStoreDep = Annotated[TransactionStore, Depends(get_transaction_store)]
+FederationServiceDep = Annotated[FederationService, Depends(get_federation_service)]
+TokenIssuerDep = Annotated[TokenIssuer, Depends(get_token_issuer)]
+RevocationStoreDep = Annotated[RevocationStore, Depends(get_revocation_store)]
 CookiePolicyDep = Annotated[CookiePolicy, Depends(get_cookie_policy)]
 AuditTrailDep = Annotated[AuditTrail, Depends(get_audit_trail)]
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]

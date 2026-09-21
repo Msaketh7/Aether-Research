@@ -56,6 +56,17 @@ const FLAGSHIP = 'AI inference infrastructure landscape';
  */
 const SHOTS = [
   {
+    file: 'home.png',
+    caption: 'Home: the question box, and what it will do with the question',
+    async prepare(page) {
+      await page.goto(`${baseURL}/`);
+    },
+    async settle(page) {
+      await page.getByTestId('ask-input').waitFor({ state: 'visible' });
+      await page.getByTestId('run-row').first().waitFor({ state: 'visible' });
+    },
+  },
+  {
     file: 'dashboard.png',
     caption: 'Dashboard: every run, its cost, its findings',
     async prepare(page) {
@@ -78,6 +89,21 @@ const SHOTS = [
     },
     async settle(page) {
       await page.getByTestId('start-research').waitFor({ state: 'visible' });
+    },
+  },
+  {
+    file: 'answer.png',
+    caption: 'A run, as a conversation: the question, the answer, and the box for the next one',
+    async prepare(page) {
+      await gotoFlagship(page);
+    },
+    async settle(page) {
+      // The answer read back from the run rather than streamed: nothing
+      // streamed it to *this* browser, and a photograph of a half-arrived
+      // answer would be a photograph of a moment rather than of the page.
+      await page.getByTestId('run-question').waitFor({ state: 'visible' });
+      await page.getByTestId('answer-body').waitFor({ state: 'visible' });
+      await page.getByTestId('follow-up-input').waitFor({ state: 'visible' });
     },
   },
   {
@@ -154,7 +180,12 @@ const SHOTS = [
 
 async function gotoFlagship(page) {
   await page.goto(`${baseURL}/dashboard`);
-  await page.getByRole('link', { name: FLAGSHIP }).click();
+  // Scoped to the history list: the navigation rail lists recent runs too, so
+  // the dashboard holds two links to this run and a bare name matches both.
+  await page
+    .getByRole('region', { name: 'Research history' })
+    .getByRole('link', { name: FLAGSHIP })
+    .click();
   await page.locator('[data-status="completed"]').first().waitFor({ state: 'visible' });
 }
 

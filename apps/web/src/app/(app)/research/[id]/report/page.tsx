@@ -67,15 +67,13 @@ export default function RunReportPage() {
   return (
     <div className="flex flex-col gap-5">
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-5">
+        <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-4 pt-5">
           <div>
             <p className="text-xs text-muted-foreground">Overall confidence</p>
             {/* Null when the report cites no claim, so there was nothing to
                 average. Shown as not computed rather than as a low score. */}
             {meta.overall_confidence === null ? (
-              <p className="mt-1 font-mono text-sm text-muted-foreground">
-                {NOT_MEASURED} not computed
-              </p>
+              <p className="mt-1 font-mono text-sm text-muted-foreground">{NOT_MEASURED}</p>
             ) : (
               <ConfidenceMeter value={meta.overall_confidence} className="mt-1" />
             )}
@@ -101,7 +99,7 @@ export default function RunReportPage() {
                 Citations validated
               </Badge>
             ) : (
-              <Badge variant="warning">Draft — citations not yet validated</Badge>
+              <Badge variant="warning">Draft, citations not yet validated</Badge>
             )}
           </div>
         </CardContent>
@@ -131,22 +129,51 @@ export default function RunReportPage() {
         </Alert>
       ) : null}
 
-      <article className="flex flex-col gap-5">
-        {sections.map((section) => (
-          <Card key={section.id} id={section.kind}>
-            <CardContent className="pt-5">
-              <h2 className="text-base font-semibold tracking-tight">{section.heading}</h2>
-              <div className="mt-3">
-                <ReportSectionBody section={section} citations={citations} />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </article>
+      {/*
+       * On a wide screen the section list becomes a sticky rail. A synthesised
+       * report runs to several screens, and a reader who wants Risks should not
+       * have to scroll past Findings to discover that Risks exists.
+       */}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_13rem]">
+        <article className="stagger flex min-w-0 flex-col gap-5">
+          {sections.map((section) => (
+            <Card key={section.id} id={section.kind} className="scroll-mt-32">
+              <CardContent className="pt-5">
+                <h2 className="text-base font-semibold tracking-tight">{section.heading}</h2>
+                {/* `max-w-[68ch]` is the measure rule: past roughly 75
+                    characters the eye loses the start of the next line. */}
+                <div className="mt-3 max-w-[68ch]">
+                  <ReportSectionBody section={section} citations={citations} />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </article>
+
+        <nav className="hidden xl:block" aria-label="Report sections">
+          <div className="sticky top-32">
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Sections
+            </p>
+            <ul className="flex flex-col gap-0.5">
+              {sections.map((section) => (
+                <li key={section.id}>
+                  <a
+                    href={`#${section.kind}`}
+                    className="block rounded-lg px-3 py-1.5 text-xs leading-snug text-muted-foreground transition-[color,background-color,transform] duration-[var(--duration-fast)] hover:translate-x-0.5 hover:bg-hover hover:text-foreground"
+                  >
+                    {section.heading}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </nav>
+      </div>
 
       <p className="text-xs text-muted-foreground">
         Generated {formatDateTime(meta.generated_at)}. Every bracketed number resolves to a source
-        and the exact quote it rests on — click one to see it.
+        and the exact quote it rests on. Click any bracketed number to see it.
       </p>
     </div>
   );

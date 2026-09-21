@@ -1,7 +1,13 @@
 # ADR 0021: Opaque server-side sessions in a cookie, not JWTs; and a limit that is a bucket, not a window
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0022](0022-federated-identity-and-signed-tokens.md)
 - **Date:** 2026-09-18
+
+> **Superseded.** Single sign-on made the provider's JWT the credential, so
+> the opaque session this ADR chose no longer exists. The reasoning below is
+> still the reason revocation had to be rebuilt rather than dropped - ADR
+> 0022 states what that cost and what replaced it. The rate-limiting half of
+> this ADR is untouched and still current.
 
 ## Context
 

@@ -54,6 +54,7 @@ from app.core.enums import ResearchMode
 from app.db.session import Database
 from app.models.base import (
     Completion,
+    CompletionChunk,
     CompletionRequest,
     StructuredCompletion,
     StructuredT,
@@ -241,6 +242,23 @@ def scripted_dns() -> Iterator[None]:
 Rule = Callable[[CompletionRequest], BaseModel]
 
 
+class StreamedText(BaseModel):
+    """What a *streamed* call is scripted and recorded under.
+
+    The answerer is the one agent that asks for prose rather than a schema, so
+    there is no output type to key a rule on. Rather than give the brain a
+    second, parallel scripting mechanism, streamed calls are recorded under this
+    stand-in: ``on(StreamedText, ...)`` scripts one, ``fails(StreamedText, ...)``
+    breaks one, and ``calls_for``/``prompts_for`` count and read them exactly as
+    they do every other call.
+    """
+
+    text: str
+    #: How many characters each delivered piece carries. A scenario that cares
+    #: about the shape of the stream rather than its content sets it.
+    chunk: int = 40
+
+
 def prompt_text(request: CompletionRequest) -> str:
     """Everything one call was sent, as one string.
 
@@ -390,7 +408,33 @@ class ScriptedBrain:
         )
 
     async def stream(self, request: CompletionRequest) -> Any:
-        raise CapabilityNotSupported("This scripted model does not stream.")
+        """Deliver a scripted answer in pieces, then report what it cost.
+
+        Recorded before anything can fail, like a structured call, so a scenario
+        that scripts a broken stream still sees the call that broke - and the
+        terminal chunk is always yielded on the way out, because a streamed call
+        that reported no usage would be a call cost governance cannot see.
+        """
+        self.prompts.append(request)
+        self.asked.append(StreamedText)
+        self._maybe_fail(StreamedText)
+        value = await self._answer(request, StreamedText)
+        if not isinstance(value, StreamedText):
+            raise StructuredOutputInvalid(
+                "The script's answer to a streamed call is not text.",
+                context={"scripted": type(value).__name__},
+            )
+        for start in range(0, len(value.text), max(1, value.chunk)):
+            if self.latency_seconds:
+                await asyncio.sleep(self.latency_seconds)
+            yield CompletionChunk(delta=value.text[start : start + max(1, value.chunk)])
+        yield CompletionChunk(
+            delta="",
+            usage=TokenUsage(
+                prompt_tokens=self.prompt_tokens, completion_tokens=self.completion_tokens
+            ),
+            finish_reason="stop",
+        )
 
     async def embed(self, texts: Sequence[str], *, model: str) -> Any:
         raise CapabilityNotSupported("This scripted model has no embeddings.")

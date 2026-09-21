@@ -1,16 +1,16 @@
-"""Assembling the nine agents into a ``ResearchNodes`` the graph can run.
+"""Assembling the ten agents into a ``ResearchNodes`` the graph can run.
 
 One place where the wiring lives, so that a question like "which agents can
-reach the network" has one answer to read rather than nine. What it says, in the
+reach the network" has one answer to read rather than ten. What it says, in the
 order the arguments say it:
 
 * Every model call goes through one gateway, so the run's calls share one
   concurrency semaphore and one ledger.
 * Every network call goes through one toolbelt, so they share one SSRF-guarded
-  client and one connection pool. The synthesizer and the citation validator are
-  not given one at all - not a restricted one, not an empty one. An agent that
-  can be told what to write must not also be able to fetch what it is told to
-  fetch (TDD 15.3), and the strongest form of that is having no way to.
+  client and one connection pool. The answerer, the synthesizer and the citation
+  validator are not given one at all - not a restricted one, not an empty one. An
+  agent that can be told what to write must not also be able to fetch what it is
+  told to fetch (TDD 15.3), and the strongest form of that is having no way to.
 * The researchers share one collector, so the fetch-and-ingest bound is one
   number rather than one per channel.
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.agents.answer import AnswerAgent
 from app.agents.citations import CitationValidator
 from app.agents.critic import CriticAgent
 from app.agents.extraction import ClaimNormalizerAgent, EvidenceAgent
@@ -116,7 +117,7 @@ def _measured(retriever: Retriever, metrics: Metrics | None) -> Retriever:
 def build_research_nodes(
     settings: Settings, *, dependencies: ResearchDependencies
 ) -> ResearchNodes:
-    """The nine nodes the graph runs, wired from configuration."""
+    """The ten nodes the graph runs, wired from configuration."""
     gateway = dependencies.gateway
     collector = SourceCollector(
         toolbelt=dependencies.toolbelt,
@@ -159,6 +160,7 @@ def build_research_nodes(
         verifier=VerificationAgent(gateway),
         contradiction_checker=ContradictionAgent(gateway),
         critic=CriticAgent(gateway),
+        answerer=AnswerAgent(gateway),
         synthesizer=SynthesisAgent(gateway),
         citation_validator=CitationValidator(),
     )

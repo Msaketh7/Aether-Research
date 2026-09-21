@@ -48,7 +48,16 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
+from contextlib import aclosing
+from typing import cast
 from uuid import UUID
 
 from app.cache import CacheNamespace, ResponseCache, disabled_cache
@@ -209,18 +218,23 @@ class LLMGateway:
         provider = self._provider_for(spec)
         request = self._request(spec, prompt, max_output_tokens, temperature, (), None)
 
-        text_length = 0
         usage = TokenUsage(prompt_tokens=0, completion_tokens=0)
         status = LlmCallStatus.OK
         error_code: str | None = None
         started = asyncio.get_running_loop().time()
 
+        # Before the semaphore and before the first token, for the reason every
+        # other operation checks here: a run past its ceiling should be refused
+        # rather than queued behind calls it is not allowed to make. Streaming
+        # went without this while nothing called it; the answerer is the first
+        # caller, and without it a budgeted run could stream a paragraph it had
+        # no allowance to pay for.
+        self._budget.authorise(run_id=run_id, spec=spec, operation="stream", role=role)
         async with self._slots.slot():
             try:
                 async for chunk in provider.stream(request):
                     if chunk.usage is not None:
                         usage = chunk.usage
-                    text_length += len(chunk.delta)
                     yield chunk
             except ModelError as exc:
                 status, error_code = LlmCallStatus.ERROR, exc.code
@@ -239,6 +253,87 @@ class LLMGateway:
                     error_code=error_code,
                     run_id=run_id,
                 )
+
+    async def stream_text(
+        self,
+        *,
+        role: AgentName,
+        mode: ResearchMode,
+        prompt: Prompt,
+        on_delta: Callable[[str], Awaitable[None]],
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        run_id: UUID | None = None,
+        max_chars: int | None = None,
+    ) -> Completion:
+        """Stream a response, hand each piece to ``on_delta``, return the whole.
+
+        The shape a streaming *caller* actually wants. ``stream`` yields chunks,
+        which is the right primitive and the wrong ergonomics: a chunk carries
+        neither the model that produced it nor a price, so an agent built
+        directly on it could not report what its call cost - and an uncosted
+        call is what makes a budgeted run stop discovery early. This resolves
+        the same chain, delivers the same chunks, and returns a finished
+        ``Completion`` the caller prices with ``cost_of``, exactly as every
+        non-streaming agent does.
+
+        ``max_chars`` stops reading once the answer is as long as the caller can
+        store. The generator is closed, which cancels the request; what was
+        generated before that is still recorded, because it was still spent.
+        """
+        decision = self._router.resolve(role=role, mode=mode)
+        spec = decision.primary
+
+        parts: list[str] = []
+        length = 0
+        usage = TokenUsage(prompt_tokens=0, completion_tokens=0)
+        finish_reason = "stop"
+        started = asyncio.get_running_loop().time()
+
+        # ``stream`` is declared as the iterator its callers consume and is in
+        # fact an async generator. The difference only matters for closing it,
+        # which is exactly what this does - so the cast is the narrow claim it
+        # looks like, and a change that stopped it being one would fail here.
+        chunks = cast(
+            AsyncGenerator[CompletionChunk, None],
+            self.stream(
+                role=role,
+                mode=mode,
+                prompt=prompt,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                run_id=run_id,
+            ),
+        )
+        async with aclosing(chunks):
+            async for chunk in chunks:
+                if chunk.usage is not None:
+                    usage = chunk.usage
+                if chunk.finish_reason is not None:
+                    finish_reason = chunk.finish_reason
+                if not chunk.delta:
+                    continue
+                delta = chunk.delta
+                if max_chars is not None and length + len(delta) >= max_chars:
+                    delta = delta[: max(0, max_chars - length)]
+                    if delta:
+                        parts.append(delta)
+                        length += len(delta)
+                        await on_delta(delta)
+                    finish_reason = "length"
+                    break
+                length += len(delta)
+                parts.append(delta)
+                await on_delta(delta)
+
+        return Completion(
+            text="".join(parts),
+            provider=spec.provider,
+            model=spec.model_id,
+            usage=usage,
+            finish_reason=finish_reason,
+            latency_ms=int((asyncio.get_running_loop().time() - started) * 1000),
+        )
 
     @property
     def saturation(self) -> Saturation:

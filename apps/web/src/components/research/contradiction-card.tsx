@@ -25,7 +25,7 @@ export function ContradictionCard({
   return (
     <Card className="border-warning/40 p-4" data-testid="contradiction-card">
       <div className="flex flex-wrap items-center gap-2">
-        <GitCompareArrows className="size-4 text-warning" aria-hidden />
+        <GitCompareArrows className="size-4 text-warning-strong" aria-hidden />
         <span className="font-mono text-xs text-muted-foreground">
           {contradiction.normalized_key}
         </span>
@@ -56,7 +56,7 @@ export function ContradictionCard({
       </div>
 
       <div className="mt-3 rounded-md bg-warning/8 p-3">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-warning">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-warning-strong">
           Likely reason (hypothesis)
         </p>
         <p className="mt-1 text-sm leading-relaxed">{contradiction.likely_reason}</p>

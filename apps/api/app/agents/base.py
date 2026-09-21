@@ -27,11 +27,22 @@ import time
 from dataclasses import dataclass
 from uuid import UUID
 
+from app.agents.nodes import DeltaSink
 from app.agents.schemas import CostEstimate, NodeUsage, TokenCount
 from app.core.enums import AgentName, AgentStatus, ResearchMode
 from app.core.logging import get_logger
 from app.models.base import Completion, Prompt, StructuredT
 from app.models.gateway import LLMGateway
+
+__all__ = [
+    "AgentAnswer",
+    "AgentContext",
+    "DeltaSink",
+    "ModelAgent",
+    "total_usage",
+    "usage_of",
+    "with_searches",
+]
 
 logger = get_logger(__name__)
 
@@ -202,6 +213,77 @@ class ModelAgent:
             },
         )
         return AgentAnswer(value=result.value, usage=usage, model=result.completion.model)
+
+    async def ask_stream(
+        self,
+        context: AgentContext,
+        *,
+        prompt: Prompt,
+        on_delta: DeltaSink,
+        max_chars: int | None = None,
+    ) -> AgentAnswer[str]:
+        """One streamed call: the text, what it cost, and which model wrote it.
+
+        Unstructured on purpose. Constrained decoding is how the other agents
+        stop a model returning prose where a list was wanted, but text that is
+        being shown to a person as it arrives cannot also be a JSON document -
+        the reader would watch a schema assemble itself. The shape this call has
+        to hold is enforced afterwards, by reading the markers out of what was
+        written.
+
+        Delivery and accounting are not the same thing here, and the difference
+        matters: the gateway does not retry or fail over a stream once a token
+        has been delivered, so a failure mid-answer raises with a partial answer
+        already on the reader's screen. The node above decides what that costs
+        the run, and for the answerer it costs the answer and not the run.
+        """
+        started = time.perf_counter()
+        logger.debug(
+            "agent stream started",
+            extra={**self._log_fields(context), "status": AgentStatus.RUNNING.value},
+        )
+        try:
+            completion = await self._gateway.stream_text(
+                role=self.role,
+                mode=context.mode,
+                prompt=prompt,
+                on_delta=on_delta,
+                max_output_tokens=self._max_output_tokens,
+                temperature=self._temperature,
+                run_id=context.research_id,
+                max_chars=max_chars,
+            )
+        except Exception as exc:
+            logger.warning(
+                "agent stream failed",
+                extra={
+                    **self._log_fields(context),
+                    "status": AgentStatus.ERROR.value,
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "prompt_version": prompt.version,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
+
+        usage = usage_of(self._gateway, completion)
+        logger.info(
+            "agent stream finished",
+            extra={
+                **self._log_fields(context),
+                "status": AgentStatus.OK.value,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "prompt_version": prompt.version,
+                "model": completion.model,
+                "characters": len(completion.text),
+                "finish_reason": completion.finish_reason,
+                "prompt_tokens": usage.tokens.prompt_tokens,
+                "completion_tokens": usage.tokens.completion_tokens,
+                "cost_usd": usage.cost.usd if usage.cost.measured else None,
+                "cost_known": usage.cost.measured,
+            },
+        )
+        return AgentAnswer(value=completion.text, usage=usage, model=completion.model)
 
     def _log_fields(self, context: AgentContext) -> dict[str, object]:
         return {

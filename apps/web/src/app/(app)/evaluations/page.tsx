@@ -89,7 +89,7 @@ export default function EvaluationsPage() {
       ) : null}
 
       <section aria-label="System metrics" className="mb-6">
-        <h2 className="mb-3 text-sm font-semibold">System — last 24 hours</h2>
+        <h2 className="mb-3 text-sm font-semibold">System over the last 24 hours</h2>
         {system.isPending ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
@@ -155,7 +155,7 @@ export default function EvaluationsPage() {
                 {formatDateTime(evaluations.data.latest.completed_at)}
               </span>
               <span className="ml-auto font-mono text-muted-foreground">
-                judge {evaluations.data.latest.model_config.judge ?? '—'}
+                judge {evaluations.data.latest.model_config.judge ?? 'not recorded'}
               </span>
             </div>
           </Card>
@@ -194,7 +194,7 @@ export default function EvaluationsPage() {
                       {formatDuration(testCase.duration_seconds)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {testCase.failures.length > 0 ? testCase.failures.join(' ') : '—'}
+                      {testCase.failures.length > 0 ? testCase.failures.join(' ') : 'None'}
                     </TableCell>
                   </TableRow>
                 ))}

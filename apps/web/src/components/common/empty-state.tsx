@@ -18,10 +18,12 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-6 py-14 text-center">
-      <Icon className="size-5 text-muted-foreground" aria-hidden />
+    <div className="reveal flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card/40 px-6 py-14 text-center">
+      <span className="mb-1 flex size-11 items-center justify-center rounded-full bg-muted/70 ring-1 ring-border">
+        <Icon className="size-5 text-muted-foreground" aria-hidden />
+      </span>
       <p className="text-sm font-medium">{title}</p>
-      <p className="max-w-md text-sm text-muted-foreground">{description}</p>
+      <p className="max-w-md text-sm leading-relaxed text-muted-foreground">{description}</p>
       {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );

@@ -132,19 +132,14 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
             value={values.question}
             onChange={(event) => update('question', event.target.value)}
             aria-invalid={Boolean(errorFor('question'))}
-            aria-describedby={errorFor('question') ? 'question-error' : 'question-hint'}
+            aria-describedby={errorFor('question') ? 'question-error' : undefined}
             data-testid="question-input"
           />
           {errorFor('question') ? (
-            <p id="question-error" className="text-xs text-destructive">
+            <p id="question-error" className="text-xs text-destructive-strong">
               {errorFor('question')}
             </p>
-          ) : (
-            <p id="question-hint" className="text-xs text-muted-foreground">
-              Complex, multi-part questions work best — the planner decomposes them into subtasks
-              that are researched in parallel.
-            </p>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 
@@ -165,10 +160,12 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
                   data-testid={`mode-${mode.value}`}
                   onClick={() => update('mode', mode.value)}
                   className={cn(
-                    'rounded-lg border p-4 text-left transition-colors',
+                    'relative rounded-xl border p-4 text-left',
+                    'transition-[border-color,background-color,box-shadow,transform] duration-[var(--duration-base)] ease-[var(--ease-out-soft)]',
+                    'hover:-translate-y-0.5 active:translate-y-0',
                     selected
-                      ? 'border-primary bg-accent/60'
-                      : 'border-border hover:border-primary/40',
+                      ? 'border-primary bg-accent/60 shadow-glow'
+                      : 'border-border hover:border-primary/40 hover:shadow-e2',
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -205,10 +202,12 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
                       data-testid={`depth-${depth.value}`}
                       onClick={() => update('depth', depth.value)}
                       className={cn(
-                        'rounded-md border px-3 py-1.5 text-xs transition-colors',
+                        'rounded-full border px-3.5 py-1.5 text-xs',
+                        'transition-[border-color,background-color,color,transform] duration-[var(--duration-fast)] ease-[var(--ease-out-soft)]',
+                        'active:scale-95',
                         selected
-                          ? 'border-primary bg-primary/10 font-medium text-primary'
-                          : 'border-border text-muted-foreground hover:border-primary/40',
+                          ? 'border-primary bg-primary/12 font-medium text-primary'
+                          : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
                       )}
                     >
                       {depth.label}
@@ -252,7 +251,7 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
               </Button>
             </div>
             {errorFor('domains') ? (
-              <p id="domains-error" className="text-xs text-destructive">
+              <p id="domains-error" className="text-xs text-destructive-strong">
                 {errorFor('domains')}
               </p>
             ) : null}
@@ -271,7 +270,7 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
                             values.domains.filter((item) => item !== domain),
                           )
                         }
-                        className="rounded-full p-0.5 hover:bg-muted"
+                        className="rounded-full p-0.5 transition-colors duration-[var(--duration-fast)] hover:bg-destructive/15 hover:text-destructive-strong"
                       >
                         <X className="size-3" aria-hidden />
                       </button>
@@ -303,7 +302,7 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
                 aria-describedby={errorFor('dateRangeEnd') ? 'date-error' : undefined}
               />
               {errorFor('dateRangeEnd') ? (
-                <p id="date-error" className="text-xs text-destructive">
+                <p id="date-error" className="text-xs text-destructive-strong">
                   {errorFor('dateRangeEnd')}
                 </p>
               ) : null}
@@ -325,11 +324,13 @@ export function NewResearchForm({ initialQuestion = '' }: { initialQuestion?: st
 
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={createResearch.isPending} data-testid="start-research">
-          {createResearch.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
+          {createResearch.isPending ? (
+            <LoaderCircle className="animate-spin" data-motion="loop" aria-hidden />
+          ) : null}
           Start research
         </Button>
         <p className="text-xs text-muted-foreground">
-          The run is queued immediately and executed by a worker — you can close this tab.
+          The run is queued immediately and executed by a worker, so you can close this tab.
         </p>
       </div>
     </form>

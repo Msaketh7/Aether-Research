@@ -177,6 +177,17 @@ class Settings(BaseSettings):
     #: read at all, so a round that exceeds them says so in the log.
     evidence_passages_per_call: int = 12
     evidence_max_calls_per_round: int = 3
+    #: How much of the answer accumulates before a piece of it is published.
+    #:
+    #: Every published piece is a durable row - that is what makes a reconnect
+    #: replay the answer exactly - so one row per token would be a few thousand
+    #: inserts per run to deliver text a reader cannot read that fast anyway.
+    #: Forty-eight characters is roughly a phrase: about forty rows for a
+    #: four-paragraph answer, and fast enough that it reads as typing.
+    answer_stream_chunk_chars: int = 48
+    #: Publish a partial piece anyway once it has been held this long, so a slow
+    #: model trickling ten characters a second is not silent for five seconds.
+    answer_stream_max_delay_seconds: float = 0.25
 
     # Per-user guardrails on the API surface itself.
     max_concurrent_runs_per_user: int = 3
@@ -235,6 +246,82 @@ class Settings(BaseSettings):
     #: would let any caller choose their own rate-limit bucket and forge the
     #: address written into the audit log.
     trusted_proxy_hops: int = 0
+
+    # --- single sign-on (Phase 26, FR-1, ADR 0022) ------------------------
+    # Auth0 and Supabase both broker Google and GitHub. Each is built only when
+    # its whole credential set is present, so a deployment that configures
+    # neither simply offers password sign-in and nothing here has any effect.
+
+    #: Which upstream connections the sign-in page offers, in order. Empty
+    #: turns single sign-on off entirely regardless of the credentials below.
+    sso_connections: str = "google,github"
+
+    #: Whether the password form is offered at all. An organisation that
+    #: requires SSO turns this off and the sign-in page stops rendering it.
+    #: Advertised on `/auth/sso/providers` rather than only enforced, so the
+    #: page does not show a form whose submissions will be refused - but it is
+    #: enforced as well, at the credential endpoints, because a setting that
+    #: only hides a form is not a control.
+    password_login_enabled: bool = True
+
+    #: Where a provider sends the browser back. Must exactly match what is
+    #: registered at the provider - OAuth compares it as a string, and this is
+    #: also the value repeated in the token request, so a mismatch fails the
+    #: exchange rather than the redirect and reads as a provider outage.
+    #: Defaults to this API's own base URL when unset.
+    sso_redirect_base_url: str | None = None
+
+    #: Where the browser lands once a session exists. The frontend's origin,
+    #: not this API's.
+    sso_app_base_url: str = "http://localhost:3000"
+
+    #: How long a half-finished authorization may sit before its state, nonce
+    #: and PKCE verifier are discarded. Short: this covers a person completing
+    #: a consent screen, not a session. A long window is a long time in which a
+    #: captured `state` is still worth replaying.
+    sso_transaction_ttl_seconds: int = 600
+
+    sso_request_timeout_seconds: float = 10.0
+
+    #: Whether a first sign-in through a provider may create an account.
+    #: Separate from `registration_enabled`: a deployment that closes password
+    #: registration usually still wants its staff to arrive through SSO.
+    sso_registration_enabled: bool = True
+
+    #: Whether a verified provider address may attach to an existing account
+    #: with the same address. **Off by default, and that default is the safe
+    #: one**: with it on, anybody who can get a provider to assert an address
+    #: can sign in as whoever owns the local account with that address. It is
+    #: only sound because the provider must also have marked the address
+    #: verified - and it is still a decision a deployment should make
+    #: deliberately rather than inherit.
+    sso_link_by_verified_email: bool = False
+
+    auth0_domain: str | None = None
+    auth0_client_id: str | None = None
+    auth0_client_secret: SecretStr | None = None
+
+    supabase_url: str | None = None
+    #: The project's publishable ("anon") key. Not a secret in the sense a
+    #: client secret is - it ships in browsers - but held as one so it cannot
+    #: be logged by the settings dump.
+    supabase_publishable_key: SecretStr | None = None
+    #: What Supabase's tokens carry as their audience is fixed, so this is only
+    #: the value sent as `client_id`; unset falls back to the project URL.
+    supabase_client_id: str | None = None
+
+    # --- first-party tokens (Phase 26, ADR 0022) --------------------------
+    #: Signing key for the tokens this system mints for password sign-in, as a
+    #: PEM private key. Unset in `local` and `test`, where an ephemeral key is
+    #: generated at startup - which means a restart invalidates every token,
+    #: correct for development and unacceptable anywhere else. Refused as unset
+    #: outside those environments by the validator.
+    jwt_private_key: SecretStr | None = None
+    #: How long an access token is good for. Short, because this is the window
+    #: in which a stolen token works before the refresh flow has to re-check
+    #: the revocation index. Fifteen minutes is the usual compromise between
+    #: that window and the cost of refreshing.
+    access_token_ttl_seconds: int = 15 * 60
 
     # --- rate limiting (Phase 20, TDD 3.2) --------------------------------
     #: Token buckets, per user (or per client address when unauthenticated)
@@ -454,6 +541,9 @@ class Settings(BaseSettings):
         "github_token",
         "s3_access_key_id",
         "s3_secret_access_key",
+        "auth0_client_secret",
+        "supabase_publishable_key",
+        "jwt_private_key",
         mode="before",
     )
     @classmethod
@@ -470,6 +560,29 @@ class Settings(BaseSettings):
         Normalised here rather than at each use site, because every one of those
         sites already asks the only question that matters - is there a
         credential - and each would otherwise have to ask it twice.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator(
+        "auth0_domain",
+        "auth0_client_id",
+        "supabase_url",
+        "supabase_client_id",
+        "sso_redirect_base_url",
+        mode="before",
+    )
+    @classmethod
+    def _blank_sso_setting_is_unset(cls, value: object) -> object:
+        """The same rule as the two below, for the SSO endpoints.
+
+        `.env.example` ships these present and blank, so `make env` produces
+        `AUTH0_DOMAIN=`. An empty string is falsy, so the registry would have
+        declined to build the provider anyway - but `sso_redirect_base_url=""`
+        would then be used to build a callback URI of `/auth/sso/.../callback`
+        with no origin, which is not a URL a provider can redirect to. `None`
+        means unconfigured, and every reader already handles it.
         """
         if isinstance(value, str) and not value.strip():
             return None
@@ -596,9 +709,12 @@ class Settings(BaseSettings):
             "researcher_results_per_query",
             "evidence_passages_per_call",
             "evidence_max_calls_per_round",
+            "answer_stream_chunk_chars",
         ):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name.upper()} must be at least 1.")
+        if self.answer_stream_max_delay_seconds <= 0:
+            raise ValueError("ANSWER_STREAM_MAX_DELAY_SECONDS must be positive.")
         if self.max_estimated_cost_usd <= 0:
             raise ValueError("MAX_ESTIMATED_COST_USD must be positive.")
         if self.graph_node_timeout_seconds <= 0:
@@ -670,6 +786,31 @@ class Settings(BaseSettings):
             )
         if self.trusted_proxy_hops < 0:
             raise ValueError("TRUSTED_PROXY_HOPS cannot be negative.")
+        # A deployment that cannot mint tokens cannot authenticate anybody, and
+        # an ephemeral key signs everyone out on every restart and cannot be
+        # shared between the two processes. Refused rather than generated
+        # outside development, where that would look like it worked.
+        if self.jwt_private_key is None and self.app_env not in {"local", "test"}:
+            raise ValueError("JWT_PRIVATE_KEY is required outside local and test.")
+        if self.access_token_ttl_seconds < 60:
+            raise ValueError("ACCESS_TOKEN_TTL_SECONDS must be at least 60.")
+        if self.sso_transaction_ttl_seconds < 60:
+            raise ValueError("SSO_TRANSACTION_TTL_SECONDS must be at least 60.")
+        # Every redirect the callback can emit is built from this, so it is the
+        # one value that must not be relative or another scheme.
+        for label, url in (
+            ("SSO_APP_BASE_URL", self.sso_app_base_url),
+            ("SSO_REDIRECT_BASE_URL", self.sso_redirect_base_url),
+        ):
+            if url and not url.startswith(("http://", "https://")):
+                raise ValueError(f"{label} must be an absolute http(s) URL.")
+        # Scoped to deployments that actually use it. An `http://` app URL in
+        # production means the browser is handed a plaintext destination
+        # carrying a freshly-issued session - but a deployment with no provider
+        # configured never emits that redirect, and failing its startup over an
+        # unused default would be a validator inventing a requirement.
+        if self.is_production and self.sso_enabled and self.sso_app_base_url.startswith("http://"):
+            raise ValueError("SSO_APP_BASE_URL must be HTTPS in production when SSO is enabled.")
         # RFC 9106's low-memory profile, which is what the defaults are. Below
         # any of these, the hash is weaker than the thing it is named after.
         if self.password_hash_time_cost < 2:
@@ -731,6 +872,32 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def sso_connections_tuple(self) -> tuple[str, ...]:
+        """The enabled connections, parsed and validated.
+
+        A comma-separated string rather than a list because it arrives from an
+        environment variable, and unknown names are dropped rather than
+        refused: a deployment naming a connection this build does not know
+        should lose that button, not fail to start.
+        """
+        known = {"google", "github"}
+        seen: list[str] = []
+        for raw in self.sso_connections.split(","):
+            name = raw.strip().casefold()
+            if name in known and name not in seen:
+                seen.append(name)
+        return tuple(seen)
+
+    @property
+    def sso_enabled(self) -> bool:
+        """Whether any provider is configured well enough to be offered."""
+        if not self.sso_connections_tuple:
+            return False
+        auth0 = bool(self.auth0_domain and self.auth0_client_id and self.auth0_client_secret)
+        supabase = bool(self.supabase_url and self.supabase_publishable_key)
+        return auth0 or supabase
 
     @property
     def session_cookie_is_secure(self) -> bool:

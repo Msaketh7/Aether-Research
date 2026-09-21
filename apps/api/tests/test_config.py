@@ -43,6 +43,20 @@ def load_env_example(monkeypatch) -> None:
         monkeypatch.setenv(key.strip(), value.strip().strip('"'))
 
 
+#: A signing key, so that a `production` Settings is constructible in a test.
+#: Generated once per process rather than pinned as a literal: a private key
+#: committed to a repository is a finding whether or not anything uses it, and
+#: `test_licensing`-style scans are right to flag one.
+def production_settings(**overrides: object) -> Settings:
+    from joserfc.jwk import ECKey
+
+    defaults: dict[str, object] = {
+        "app_env": "production",
+        "jwt_private_key": ECKey.generate_key("P-256").as_pem(private=True).decode(),
+    }
+    return Settings(**{**defaults, **overrides})  # type: ignore[arg-type]
+
+
 def test_the_shipped_env_example_parses(monkeypatch):
     """Every non-secret value in .env.example must load."""
     load_env_example(monkeypatch)
@@ -148,8 +162,25 @@ def test_a_credential_set_to_nothing_is_absent_rather_than_empty(monkeypatch, bl
 
 def test_production_hides_the_interactive_docs():
     """Interactive docs are a development convenience, not a public surface."""
-    assert Settings(app_env="production").docs_url is None
+    assert production_settings().docs_url is None
     assert Settings(app_env="local").docs_url == "/docs"
+
+
+def test_production_requires_a_signing_key():
+    """A deployment that cannot mint tokens cannot authenticate anybody.
+
+    An ephemeral key would look like it worked: every process would sign with
+    its own, so a request would authenticate on the instance that issued its
+    token and 401 on every other one. Refused at construction instead.
+    """
+    with pytest.raises(ValidationError, match="JWT_PRIVATE_KEY"):
+        Settings(app_env="production")
+
+
+def test_development_does_not_require_a_signing_key():
+    # Local and test generate an ephemeral one, which is correct there: a
+    # restart signing everybody out costs a developer nothing.
+    assert Settings(app_env="local").jwt_private_key is None
 
 
 def test_run_ceilings_have_defaults_matching_fr8():

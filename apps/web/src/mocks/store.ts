@@ -1,5 +1,6 @@
 import type {
   ActivityResponse,
+  AnswerResponse,
   CreateResearchRequest,
   DashboardStats,
   EvaluationsResponse,
@@ -485,6 +486,26 @@ export function getActivity(entry: RunEntry, now = Date.now()): ActivityResponse
       (call) => call.agent_run_id !== null && visibleAgentIds.has(call.agent_run_id),
     ),
   };
+}
+
+/**
+ * The stored answer, once the run has written it.
+ *
+ * Gated on elapsed time like every other mock read, and on the same fraction
+ * the timeline finishes streaming it at - so a page refreshed at 70% of a run
+ * shows no answer, exactly as the stream had not yet delivered one, and the
+ * REST snapshot and the stream cannot disagree.
+ */
+const ANSWER_READY_FRACTION = 0.825;
+
+export function getAnswer(entry: RunEntry, now = Date.now()): AnswerResponse {
+  const answer = entry.dataset.answer;
+  if (!answer) return { answer: null };
+  const elapsed = elapsedMsFor(entry, now);
+  const status = statusFor(entry, elapsed);
+  if (status === 'cancelled' || status === 'failed') return { answer: null };
+  if (elapsed < entry.dataset.durationMs * ANSWER_READY_FRACTION) return { answer: null };
+  return { answer };
 }
 
 export function getReport(entry: RunEntry, now = Date.now()): ReportResponse | undefined {

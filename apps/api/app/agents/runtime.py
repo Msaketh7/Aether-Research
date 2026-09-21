@@ -61,7 +61,7 @@ from app.agents.graph import (
     build_research_graph,
     utcnow,
 )
-from app.agents.nodes import ResearchNodes
+from app.agents.nodes import AnswerStream, DiscardedAnswerStream, ResearchNodes
 from app.agents.schemas import GraphNode
 from app.agents.state import ResearchState, RunBrief, initial_state
 from app.agents.tracing import AgentTracer, NullTracer
@@ -162,15 +162,24 @@ class ResearchGraphRunner:
             )
         return self._graphs[mode]
 
-    async def run(self, brief: RunBrief, *, listener: StepListener | None = None) -> ResearchState:
+    async def run(
+        self,
+        brief: RunBrief,
+        *,
+        listener: StepListener | None = None,
+        answers: AnswerStream | None = None,
+    ) -> ResearchState:
         """Run to completion, resuming from the last checkpoint if there is one.
 
         Raises a ``GraphError`` when the run cannot produce a report. Calling
         again afterwards resumes at the node that failed.
 
-        The listener is per call rather than per runner: one runner serves every
-        run a worker executes, and what a listener does - renew *this* run's
-        lease, move *this* run's row - belongs to one of them.
+        The listener and the answer stream are both per call rather than per
+        runner, for the same reason: one runner serves every run a worker
+        executes, and renewing *this* run's lease or streaming *this* run's
+        answer belongs to one of them. Omitting the stream is what a graph run
+        with nobody watching does - the answer is still written and still
+        stored, it is just not narrated.
         """
         graph = self.graph(brief.mode)
         config: RunnableConfig = {
@@ -192,7 +201,12 @@ class ResearchGraphRunner:
                 project_name=self._langsmith_project,
             ):
                 final = await self._stream(
-                    graph, payload, config, started=started, listener=listener
+                    graph,
+                    payload,
+                    config,
+                    started=started,
+                    listener=listener,
+                    answers=answers or DiscardedAnswerStream(),
                 )
         except Exception:
             # A run that failed at synthesis still found sources and quoted
@@ -216,6 +230,7 @@ class ResearchGraphRunner:
         *,
         started: datetime,
         listener: StepListener | None,
+        answers: AnswerStream,
     ) -> ResearchState:
         """Run the graph, reporting each superstep, and return the final state.
 
@@ -241,7 +256,7 @@ class ResearchGraphRunner:
             graph.astream(
                 payload,
                 config,
-                context=GraphContext(resumed_at=started),
+                context=GraphContext(resumed_at=started, answers=answers),
                 durability="sync",
                 stream_mode=["updates", "values"],
             ),

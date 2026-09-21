@@ -32,7 +32,7 @@ export default function RunEvidencePage() {
       {contradictions.length > 0 ? (
         <section aria-label="Contradictions" className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
-            <GitCompareArrows className="size-4 text-warning" aria-hidden />
+            <GitCompareArrows className="size-4 text-warning-strong" aria-hidden />
             <h2 className="text-sm font-semibold">
               {contradictions.length} contradiction{contradictions.length === 1 ? '' : 's'}
             </h2>

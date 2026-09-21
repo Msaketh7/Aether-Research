@@ -1,8 +1,10 @@
-"""Session rows: the server-side half of a login.
+"""Session rows: one device's login.
 
-The table holds a *hash* of each session token and never the token itself, so a
-database leak hands over no live sessions (threat model 3.7). Every query here
-is by that hash or by user, and every one of them is bounded.
+Since ADR 0022 the row holds no credential at all. The access token carries
+this row's *id* as `sid`, and renewal runs through `refresh_tokens`; what
+remains here is the record a person sees in their device list and the
+`revoked_at` that stops a session being renewed. Every query is by id or by
+user, and every one of them is bounded.
 
 A session is never deleted on logout - it is marked revoked, with the time.
 Deleting it would erase the record that the session existed, which is the
@@ -45,17 +47,17 @@ class SessionRepository:
         self,
         *,
         user_id: uuid.UUID,
-        token_hash: str,
         expires_at: dt.datetime,
         user_agent: str,
         ip: str | None,
+        provider: str = "local",
     ) -> SessionRow:
         row = SessionRow(
             user_id=user_id,
-            token_hash=token_hash,
             expires_at=expires_at,
             user_agent=user_agent,
             ip=ip,
+            provider=provider,
         )
         self._session.add(row)
         # Flushed rather than left pending: the caller needs the generated id
@@ -64,18 +66,21 @@ class SessionRepository:
         await self._session.refresh(row)
         return row
 
-    async def find_active(self, token_hash: str, *, now: dt.datetime) -> SessionRow | None:
-        """The live session for this token hash, or nothing.
+    async def find_active(self, session_id: uuid.UUID, *, now: dt.datetime) -> SessionRow | None:
+        """The live session with this id, or nothing.
 
-        "Live" is checked in SQL rather than in Python so that an expired or
-        revoked session cannot be resolved by a caller that forgets to look.
+        Looked up by id rather than by a token hash: the id is what the access
+        token carries, and it is not a secret - the signature is what proves
+        the caller may present it. Expired and revoked are both "nothing",
+        because the caller's correct response to either is identical.
         """
         statement = select(SessionRow).where(
-            SessionRow.token_hash == token_hash,
+            SessionRow.id == session_id,
             SessionRow.revoked_at.is_(None),
             SessionRow.expires_at > now,
         )
-        return (await self._session.execute(statement)).scalar_one_or_none()
+        result = await self._session.execute(statement)
+        return result.scalar_one_or_none()
 
     async def list_active(
         self, user_id: uuid.UUID, *, now: dt.datetime, limit: int = MAX_LISTED_SESSIONS
@@ -108,6 +113,25 @@ class SessionRepository:
             .values(revoked_at=now)
         )
         return bool(await self._affected(statement))
+
+    async def revoke_unscoped(self, session_id: uuid.UUID, *, now: dt.datetime) -> bool:
+        """Revoke a session without knowing whose it is.
+
+        Every other revocation here is scoped by `user_id`, because it is
+        acting on a request from a person and must not let them touch anybody
+        else's row. This one is not acting on a request: it is the reuse
+        detector in `SessionService.refresh`, which has a refresh token and
+        therefore a session id, but no authenticated caller to scope against -
+        the whole point is that the presenter cannot be trusted to be the
+        owner. Scoping it would mean a stolen token could not be used to shut
+        down the session it was stolen from.
+        """
+        statement = (
+            update(SessionRow)
+            .where(SessionRow.id == session_id, SessionRow.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        return await self._affected(statement) > 0
 
     async def revoke_all(
         self, user_id: uuid.UUID, *, now: dt.datetime, keep: uuid.UUID | None = None

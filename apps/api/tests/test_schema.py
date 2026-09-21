@@ -108,12 +108,27 @@ async def test_every_table_from_the_design_exists(engine: AsyncEngine):
     assert names >= EXPECTED_TABLES, f"missing: {sorted(EXPECTED_TABLES - names)}"
 
 
+#: The one index a model cannot declare.
+#:
+#: ``USING hnsw (embedding vector_cosine_ops)`` has no SQLAlchemy spelling
+#: without pgvector's own dialect types, and the column it covers is added by a
+#: migration on a separate branch - so ``DocumentChunkRow`` documents both as
+#: migration-owned rather than describing them. Named here for the same reason
+#: the checkpoint tables are: excluded deliberately and by name, so that drift
+#: in any *other* index still fails this test.
+MIGRATION_OWNED_INDEXES = {"ix_document_chunks_embedding_hnsw"}
+
+
 def _modelled_only(name: str | None, type_: str, parent_names: dict[str, str | None]) -> bool:
     """The drift check covers what the ORM models.
 
     The checkpoint tables are LangGraph's: Alembic creates them, no model
-    describes them, and ``app.db.external`` names them (ADR 0014).
+    describes them, and ``app.db.external`` names them (ADR 0014). The HNSW
+    index is the same arrangement one level down - see
+    ``MIGRATION_OWNED_INDEXES``.
     """
+    if type_ == "index" and name in MIGRATION_OWNED_INDEXES:
+        return False
     if type_ == "table":
         return name not in EXTERNALLY_OWNED_TABLES
     return parent_names.get("table_name") not in EXTERNALLY_OWNED_TABLES
