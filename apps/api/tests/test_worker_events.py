@@ -344,7 +344,7 @@ async def test_a_run_paused_for_a_retry_is_not_reported_as_failed(
 
 
 async def test_the_answer_arrives_in_pieces_that_reassemble_into_the_whole(
-    database, artifact_store, worker_config
+    database, artifact_store, settings
 ):
     """The claim this feature makes: a reader watches the answer appear.
 
@@ -352,21 +352,64 @@ async def test_the_answer_arrives_in_pieces_that_reassemble_into_the_whole(
     ship. More than one delta proves it was streamed rather than posted at the
     end; the pieces joining back into `answer_completed`'s text proves the
     reader was watching the real answer rather than a summary of it.
+
+    The chunk size is pinned rather than left at its default, and that is the
+    whole point of this version of the test. The first one left it alone and
+    asserted more than one delta - which held on a slow developer machine,
+    where the quarter-second staleness flush fired *between* two writes of a
+    scripted answer too short to fill the buffer, and failed on CI, where the
+    same two writes land instantly. It was asserting that the machine was slow.
+    Eight characters makes every write its own piece, so what is under test is
+    the batching rule rather than the speed of the runner.
     """
-    run = await seed_run(database, worker_config)
-    harness = build_worker(database, artifact_store, worker_config)
+    config = worker_settings(settings, answer_stream_chunk_chars=8)
+    run = await seed_run(database, config)
+    harness = build_worker(database, artifact_store, config)
 
     await run_one(harness, database, run.id)
 
     events = await streamed(database, run.id)
     deltas = [event for event in events if event.type is E.ANSWER_DELTA]
-    assert len(deltas) > 1
+    assert len(deltas) > 1, "an answer delivered in one piece was not streamed"
+
     assert [event.payload["index"] for event in deltas] == list(range(1, len(deltas) + 1))
 
     completed = first(events, E.ANSWER_COMPLETED)
     assert "".join(event.payload["text"] for event in deltas) == completed.payload["text"]
     assert completed.payload["word_count"] > 0
     assert completed.payload["truncated"] is False
+
+
+async def test_an_answer_too_short_to_fill_the_buffer_is_still_delivered(
+    database, artifact_store, settings
+):
+    """The other half of the batching rule, and the one CI caught.
+
+    With a chunk size the whole answer never reaches and a staleness window that
+    will not fire inside the run, nothing flushes until the node closes the
+    stream. The answer still arrives - in one piece, at `finish` - which is what
+    stops a short answer being streamed as nothing at all.
+
+    This is the exact condition that made the sibling test above fail on CI and
+    pass here: two scripted writes landing inside the staleness window on a fast
+    runner. Pinned deliberately so the behaviour is a decision rather than a
+    property of whichever machine ran the suite.
+    """
+    config = worker_settings(
+        settings, answer_stream_chunk_chars=100_000, answer_stream_max_delay_seconds=3600.0
+    )
+    run = await seed_run(database, config)
+    harness = build_worker(database, artifact_store, config)
+
+    await run_one(harness, database, run.id)
+
+    events = await streamed(database, run.id)
+    deltas = [event for event in events if event.type is E.ANSWER_DELTA]
+    assert len(deltas) == 1
+    completed = first(events, E.ANSWER_COMPLETED)
+    assert deltas[0].payload["text"] == completed.payload["text"]
+    # And the reader was told an answer was starting, exactly once, with it.
+    assert types(events).count(E.ANSWER_STARTED) == 1
 
 
 async def test_the_answer_is_announced_complete_exactly_once(
