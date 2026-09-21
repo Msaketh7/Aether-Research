@@ -20,7 +20,11 @@ export function DropdownMenuContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          'z-50 min-w-48 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
+          'z-50 min-w-48 overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-e3',
+          'data-[state=open]:animate-[scale-in_var(--duration-base)_var(--ease-out-quick)_both]',
+          'data-[state=closed]:animate-[fade-out_var(--duration-fast)_var(--ease-in-quick)_both]',
+          'data-[side=bottom]:origin-top data-[side=top]:origin-bottom',
+          'data-[side=left]:origin-right data-[side=right]:origin-left',
           className,
         )}
         {...props}
@@ -36,8 +40,10 @@ export function DropdownMenuItem({
   return (
     <DropdownMenuPrimitive.Item
       className={cn(
-        'relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none',
+        'relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none',
+        'transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out-soft)]',
         'focus:bg-accent focus:text-accent-foreground',
+        '[&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
         className,
       )}
       {...props}

@@ -5,6 +5,7 @@ import { ShieldAlert } from 'lucide-react';
 import { ConfidenceMeter } from '@/components/common/confidence-meter';
 import { SourceLink } from '@/components/common/external-link';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 
 /**
  * An inline `[n]` marker.
@@ -25,7 +26,7 @@ export function CitationMarker({
   if (!citation) {
     return (
       <span
-        className="ml-0.5 inline-flex items-center gap-0.5 align-super text-[10px] font-medium text-destructive"
+        className="ml-0.5 inline-flex items-center gap-0.5 align-super text-[10px] font-medium text-destructive-strong"
         title="This citation could not be resolved to evidence."
         data-testid="citation-unresolved"
       >
@@ -42,12 +43,21 @@ export function CitationMarker({
           data-testid="citation-marker"
           data-ordinal={ordinal}
           aria-label={`Citation ${ordinal}: ${citation.source_title}`}
-          className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-primary/12 px-1 align-super font-mono text-[10px] font-medium text-primary hover:bg-primary/20"
+          className={cn(
+            'mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-[5px] px-1 align-super',
+            'bg-primary/12 font-mono text-[10px] font-medium text-primary',
+            'transition-[background-color,transform,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-soft)]',
+            'hover:-translate-y-px hover:bg-primary/22 hover:shadow-e1 active:translate-y-0',
+            'data-[state=open]:bg-primary data-[state=open]:text-primary-foreground',
+          )}
         >
           {ordinal}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-96" data-testid="citation-popover">
+      <PopoverContent
+        className="w-96 animate-[scale-in_var(--duration-base)_var(--ease-out-quick)_both]"
+        data-testid="citation-popover"
+      >
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Source [{ordinal}]
         </p>

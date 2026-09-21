@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * Structural accessibility and responsive checks.
@@ -8,7 +8,18 @@ import { expect, test } from '@playwright/test';
  * controls, and no horizontal scroll on a phone.
  */
 
-const PAGES = ['/dashboard', '/research/new', '/evaluations', '/settings'] as const;
+/**
+ * A run link in the dashboard's history list.
+ *
+ * The navigation rail also lists recent runs, so the page holds two links to
+ * the same run on purpose. A bare `getByRole('link', { name })` matches both;
+ * these tests are about opening a run from the history list, so they say so.
+ */
+function historyLink(page: Page, name: string) {
+  return page.getByRole('region', { name: 'Research history' }).getByRole('link', { name });
+}
+
+const PAGES = ['/', '/dashboard', '/research/new', '/evaluations', '/settings'] as const;
 
 for (const path of PAGES) {
   test(`${path} has exactly one level-1 heading`, async ({ page }) => {
@@ -36,21 +47,23 @@ test('the form is operable by keyboard alone', async ({ page }) => {
   await expect(page.getByTestId('mode-quick')).toHaveAttribute('aria-checked', 'true');
 });
 
-test('mobile layout does not scroll horizontally', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto('/dashboard');
-  await expect(page.getByTestId('run-row').first()).toBeVisible();
+for (const path of ['/', '/dashboard'] as const) {
+  test(`${path} does not scroll horizontally on a phone`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(path);
+    await expect(page.getByTestId('run-row').first()).toBeVisible();
 
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  // A couple of pixels of rounding is tolerable; a scrolling page is not.
-  expect(overflow).toBeLessThanOrEqual(2);
-});
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    // A couple of pixels of rounding is tolerable; a scrolling page is not.
+    expect(overflow).toBeLessThanOrEqual(2);
+  });
+}
 
 test('the progress checklist is a named list with one entry per stage', async ({ page }) => {
   await page.goto('/dashboard');
-  await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();
+  await historyLink(page, 'AI inference infrastructure landscape').click();
 
   const checklist = page.getByRole('list', { name: 'Research progress' }).first();
   await expect(checklist).toBeVisible();
@@ -61,7 +74,7 @@ test('a finished run explains an empty feed instead of showing a stale live regi
   page,
 }) => {
   await page.goto('/dashboard');
-  await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();
+  await historyLink(page, 'AI inference infrastructure landscape').click();
 
   await expect(page.getByText(/This run has finished/)).toBeVisible();
   await expect(page.getByRole('log', { name: 'Research activity' })).toHaveCount(0);

@@ -18,7 +18,15 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { API_MODE, API_BASE_URL } from '@/lib/api/config';
-import { useCurrentUser, useSessions, useSettings, useUpdateSettings } from '@/lib/api/queries';
+import {
+  useCurrentUser,
+  useIdentities,
+  useRevokeSession,
+  useSessions,
+  useSettings,
+  useUnlinkIdentity,
+  useUpdateSettings,
+} from '@/lib/api/queries';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 
 /**
@@ -30,6 +38,9 @@ import { formatDateTime, formatRelativeTime } from '@/lib/format';
 export default function SettingsPage() {
   const user = useCurrentUser();
   const sessions = useSessions();
+  const revokeSession = useRevokeSession();
+  const identities = useIdentities();
+  const unlinkIdentity = useUnlinkIdentity();
   const settings = useSettings();
   const updateSettings = useUpdateSettings();
 
@@ -137,7 +148,7 @@ export default function SettingsPage() {
             {updateSettings.isPending ? (
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <LoaderCircle className="size-3 animate-spin" aria-hidden />
-                Saving…
+                Saving
               </p>
             ) : null}
           </div>
@@ -167,13 +178,68 @@ export default function SettingsPage() {
                     {formatDateTime(session.expires_at)}
                   </p>
                 </div>
-                <Button variant="outline" size="sm" disabled={session.current}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  // Disabled for the current device rather than hidden: the row
+                  // is what tells you which device you are on, and removing the
+                  // control would make that row look like it was missing one.
+                  // Signing yourself out belongs on the account menu.
+                  disabled={session.current || revokeSession.isPending}
+                  onClick={() => revokeSession.mutate(session.id)}
+                >
                   Sign out
                 </Button>
               </li>
             ))}
           </ul>
         )}
+      </SectionCard>
+
+      <SectionCard title="Linked accounts">
+        {identities.isPending ? (
+          <Skeleton className="h-16" />
+        ) : identities.isError ? (
+          <ErrorState error={identities.error} onRetry={() => void identities.refetch()} />
+        ) : identities.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No sign-in providers are linked to this account. You sign in with your password.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {identities.data.map((identity) => (
+              <li
+                key={identity.id}
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 last:border-0 last:pb-0"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm capitalize">
+                    {identity.connection ?? identity.provider}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      via {identity.provider}
+                    </span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {identity.email ?? 'no address reported'} · linked{' '}
+                    {formatRelativeTime(identity.created_at)}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={unlinkIdentity.isPending}
+                  onClick={() => unlinkIdentity.mutate(identity.id)}
+                >
+                  Unlink
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          The API refuses to unlink your only way of signing in. If this is the only one and you
+          have no password, set one first.
+        </p>
       </SectionCard>
 
       <SectionCard title="Connection">

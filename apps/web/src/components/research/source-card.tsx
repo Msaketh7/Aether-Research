@@ -24,7 +24,10 @@ export function SourceCard({
   const duplicates = cluster?.duplicate_source_ids.length ?? 0;
 
   return (
-    <Card className="p-4" data-testid="source-card">
+    <Card
+      className="p-4 transition-[box-shadow,border-color] duration-[var(--duration-base)] ease-[var(--ease-out-soft)] hover:border-primary/25 hover:shadow-e2"
+      data-testid="source-card"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <SourceTypeBadge type={source.source_type} />
         {source.credibility_metadata.is_primary ? (

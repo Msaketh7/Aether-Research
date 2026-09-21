@@ -14,9 +14,9 @@ export function confidenceBand(value: number): ConfidenceBand {
 }
 
 const BAND_STYLES: Record<ConfidenceBand, { bar: string; text: string; label: string }> = {
-  high: { bar: 'bg-success', text: 'text-success', label: 'High' },
-  moderate: { bar: 'bg-warning', text: 'text-warning', label: 'Moderate' },
-  low: { bar: 'bg-destructive', text: 'text-destructive', label: 'Low' },
+  high: { bar: 'bg-success', text: 'text-success-strong', label: 'High' },
+  moderate: { bar: 'bg-warning', text: 'text-warning-strong', label: 'Moderate' },
+  low: { bar: 'bg-destructive', text: 'text-destructive-strong', label: 'Low' },
 };
 
 export function ConfidenceMeter({

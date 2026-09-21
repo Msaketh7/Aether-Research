@@ -69,7 +69,7 @@ export default function RunOverviewPage() {
               emptyMessage={
                 run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled'
                   ? 'This run has finished. Its full step-by-step trace is on the Activity tab.'
-                  : 'Waiting for the first event…'
+                  : 'Waiting for the first event'
               }
             />
           </SectionCard>

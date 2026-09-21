@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { fontVariables } from './fonts';
 import { Providers } from './providers';
 import './globals.css';
 
@@ -38,7 +39,15 @@ try {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    // `data-scroll-behavior` tells the router that the smooth scrolling set in
+    // globals.css is deliberate: without it Next warns, and a route change
+    // animates the scroll to the top instead of jumping there.
+    <html
+      lang="en"
+      data-scroll-behavior="smooth"
+      className={fontVariables}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>

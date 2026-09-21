@@ -7,51 +7,41 @@ import { EmptyState } from '@/components/common/empty-state';
 import { ErrorState } from '@/components/common/error-state';
 import { PageHeader } from '@/components/common/page-header';
 import { StatTile } from '@/components/common/stat-tile';
-import { RunTable } from '@/components/research/run-table';
+import { RunList } from '@/components/research/run-list';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCost, formatCount, formatDuration } from '@/lib/format';
 import { useDashboardStats, useResearchList } from '@/lib/api/queries';
 
-/** Suggested starting points, so an empty product is not a blank page. */
-const QUICK_STARTS = [
-  {
-    label: 'Competitive landscape',
-    question:
-      'Compare the major AI inference infrastructure companies. Analyze their products, technology, pricing, funding, financial performance, recent announcements, risks, competitive advantages, and market opportunities.',
-  },
-  {
-    label: 'Technology assessment',
-    question:
-      'What are the current state-of-the-art approaches to retrieval-augmented generation, and what measurable trade-offs distinguish them?',
-  },
-  {
-    label: 'Regulatory scan',
-    question:
-      'What obligations do recent AI regulations place on providers of general-purpose models, and how do they differ by jurisdiction?',
-  },
-] as const;
-
+/**
+ * The record of what has been asked: totals, and every run with its findings.
+ *
+ * The question box lives on the home screen, not here. Two places to start a
+ * run is one too many, and a dashboard that also asks you a question is not a
+ * dashboard.
+ */
 export default function DashboardPage() {
   const [query, setQuery] = useState('');
   const stats = useDashboardStats();
   const runs = useResearchList(query ? { q: query } : {});
 
   return (
-    <>
+    <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Dashboard"
         description="Every research run you have started, with its sources, evidence and report."
         actions={
           <Button asChild>
-            <Link href="/research/new">Start research</Link>
+            <Link href="/">Ask a question</Link>
           </Button>
         }
       />
 
-      <section aria-label="Summary" className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section
+        aria-label="Summary"
+        className="stagger mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      >
         {stats.isPending ? (
           Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-24" />)
         ) : stats.isError ? (
@@ -92,77 +82,58 @@ export default function DashboardPage() {
         )}
       </section>
 
-      <section aria-label="Quick start" className="mb-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Start from a template</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {QUICK_STARTS.map((item) => (
-              <Button key={item.label} asChild variant="outline" size="sm">
-                <Link href={`/research/new?q=${encodeURIComponent(item.question)}`}>
-                  {item.label}
-                </Link>
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
-      </section>
-
       <section aria-label="Research history">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">Research history</h2>
           <div className="relative w-full max-w-xs">
             <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
               aria-hidden
             />
             <Input
               type="search"
               placeholder="Search runs"
               aria-label="Search research runs"
-              className="pl-8"
+              className="pl-9"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
         </div>
 
-        <Card>
-          {runs.isPending ? (
-            <div className="flex flex-col gap-2 p-4">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <Skeleton key={index} className="h-14" />
-              ))}
-            </div>
-          ) : runs.isError ? (
-            <div className="p-4">
-              <ErrorState error={runs.error} onRetry={() => void runs.refetch()} />
-            </div>
-          ) : runs.data.items.length === 0 ? (
-            <div className="p-4">
-              <EmptyState
-                icon={Quote}
-                title={query ? 'No runs match that search' : 'No research yet'}
-                description={
-                  query
-                    ? 'Try a different term, or clear the search to see every run.'
-                    : 'Start a research run and its sources, evidence and report will appear here.'
-                }
-                action={
-                  query ? null : (
-                    <Button asChild size="sm">
-                      <Link href="/research/new">Start research</Link>
-                    </Button>
-                  )
-                }
-              />
-            </div>
-          ) : (
-            <RunTable runs={runs.data.items} />
-          )}
-        </Card>
+        {runs.isPending ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-28" />
+            ))}
+          </div>
+        ) : runs.isError ? (
+          <ErrorState error={runs.error} onRetry={() => void runs.refetch()} />
+        ) : runs.data.items.length === 0 ? (
+          <EmptyState
+            icon={Quote}
+            title={query ? 'No runs match that search' : 'No research yet'}
+            description={
+              query
+                ? 'Try a different term, or clear the search to see every run.'
+                : 'Ask a question and its sources, evidence and report will appear here.'
+            }
+            action={
+              query ? (
+                <Button size="sm" variant="outline" onClick={() => setQuery('')}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button asChild size="sm">
+                  <Link href="/">Ask a question</Link>
+                </Button>
+              )
+            }
+          />
+        ) : (
+          <RunList runs={runs.data.items} />
+        )}
       </section>
-    </>
+    </div>
   );
 }

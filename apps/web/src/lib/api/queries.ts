@@ -103,6 +103,39 @@ export function useRevokeOtherSessions() {
   });
 }
 
+/**
+ * Which sign-in methods the deployment offers.
+ *
+ * `retry: false` and a long `staleTime`: this is configuration, not data. A
+ * deployment does not gain a provider while somebody is looking at the sign-in
+ * page, and a failed fetch must not spin - the page falls back to the password
+ * form, which is the one method that needs no configuration.
+ */
+export function useSsoOptions() {
+  return useQuery({
+    queryKey: queryKeys.auth.ssoOptions(),
+    queryFn: ({ signal }) => authApi.ssoOptions(signal),
+    retry: false,
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function useIdentities() {
+  return useQuery({
+    queryKey: queryKeys.auth.identities(),
+    queryFn: () => authApi.identities(),
+    retry: defaultRetry,
+  });
+}
+
+export function useUnlinkIdentity() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => authApi.unlinkIdentity(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.auth.identities() }),
+  });
+}
+
 export function useResearchList(params: ListRunsParams = {}) {
   return useQuery({
     queryKey: queryKeys.research.list(params),

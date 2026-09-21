@@ -1,6 +1,6 @@
 'use client';
 
-import { FlaskConical, LogOut, Plus, User as UserIcon } from 'lucide-react';
+import { LogOut, Plus, Settings as SettingsIcon, User as UserIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCurrentUser, useLogout } from '@/lib/api/queries';
-import { APP_NAME } from '@/lib/api/config';
+import { Brand } from './brand';
+import { MobileNav } from './mobile-nav';
 import { ThemeToggle } from './theme-toggle';
 
 export function Topbar() {
@@ -29,17 +30,18 @@ export function Topbar() {
   };
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 sm:px-6">
-      <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
-        <FlaskConical className="size-4 text-primary" aria-hidden />
-        <span className="text-sm font-semibold">{APP_NAME}</span>
-      </Link>
+    // Sticky and translucent: the page scrolling under the chrome is what tells
+    // you the chrome is fixed. `z-30` sits under the mobile drawer's `z-50`.
+    <header className="glass sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-6">
+      <MobileNav />
+
+      <Brand href="/" className="lg:hidden" />
 
       <div className="flex-1" />
 
-      <Button asChild size="sm" variant="outline" className="lg:hidden">
-        <Link href="/research/new">
-          <Plus aria-hidden />
+      <Button asChild size="sm" variant="outline" className="group lg:hidden">
+        <Link href="/">
+          <Plus className="group-hover:rotate-90" aria-hidden />
           New
         </Link>
       </Button>
@@ -53,10 +55,15 @@ export function Topbar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
-          <DropdownMenuLabel>{user?.email ?? 'Signed in'}</DropdownMenuLabel>
+          <DropdownMenuLabel className="max-w-56 truncate">
+            {user?.email ?? 'Signed in'}
+          </DropdownMenuLabel>
           <DropdownMenuSeparator className="my-1 h-px bg-border" />
           <DropdownMenuItem asChild>
-            <Link href="/settings">Settings</Link>
+            <Link href="/settings">
+              <SettingsIcon aria-hidden />
+              Settings
+            </Link>
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={signOut} data-testid="sign-out">
             <LogOut aria-hidden />

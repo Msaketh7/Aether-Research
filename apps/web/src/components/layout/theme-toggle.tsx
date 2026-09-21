@@ -12,6 +12,10 @@ const STORAGE_KEY = 'aether-theme';
  * shows is decided by CSS. Mirroring it into React state would mean reading the
  * DOM in an effect, which produces a hydration flash and a cascading render for
  * no benefit.
+ *
+ * The two icons are stacked in one box and cross-rotate, so the control shows
+ * a change of state rather than swapping one glyph for another - which at this
+ * size is indistinguishable from the icon flickering.
  */
 export function ThemeToggle() {
   const toggle = () => {
@@ -25,9 +29,21 @@ export function ThemeToggle() {
   };
 
   return (
-    <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle colour theme">
-      <Sun className="dark:hidden" aria-hidden />
-      <Moon className="hidden dark:block" aria-hidden />
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={toggle}
+      aria-label="Toggle colour theme"
+      className="relative overflow-hidden"
+    >
+      <Sun
+        className="absolute rotate-0 scale-100 transition-[transform,opacity] duration-[var(--duration-slow)] ease-[var(--ease-spring)] dark:-rotate-90 dark:scale-0 dark:opacity-0"
+        aria-hidden
+      />
+      <Moon
+        className="absolute rotate-90 scale-0 opacity-0 transition-[transform,opacity] duration-[var(--duration-slow)] ease-[var(--ease-spring)] dark:rotate-0 dark:scale-100 dark:opacity-100"
+        aria-hidden
+      />
     </Button>
   );
 }

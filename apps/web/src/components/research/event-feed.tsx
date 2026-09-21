@@ -13,6 +13,12 @@ import { cn } from '@/lib/utils';
  * Auto-scroll follows the tail only while the user is already at the bottom;
  * yanking the viewport away from something the user is reading is a bug, not a
  * feature.
+ *
+ * Each row fades up as it arrives. The animation is declared on the row itself
+ * rather than run on mount, so a row that scrolls in from the buffer is not
+ * re-animated and React can keep reusing the element - and because arrival is
+ * the only thing being expressed, the row is at its final position within one
+ * frame of the stream delivering it.
  */
 
 const TONE_DOT: Record<EventTone, string> = {
@@ -21,6 +27,14 @@ const TONE_DOT: Record<EventTone, string> = {
   positive: 'bg-success',
   warning: 'bg-warning',
   danger: 'bg-destructive',
+};
+
+const TONE_RING: Record<EventTone, string> = {
+  neutral: 'ring-muted-foreground/15',
+  progress: 'ring-info/25',
+  positive: 'ring-success/25',
+  warning: 'ring-warning/30',
+  danger: 'ring-destructive/25',
 };
 
 function timeOf(iso: string): string {
@@ -32,7 +46,7 @@ function timeOf(iso: string): string {
 
 export function EventFeed({
   events,
-  emptyMessage = 'Waiting for the first event…',
+  emptyMessage = 'Waiting for the first event',
   className,
   maxHeight = 'max-h-[26rem]',
 }: {
@@ -57,7 +71,9 @@ export function EventFeed({
 
   if (events.length === 0) {
     return (
-      <p className={cn('px-2 py-8 text-center text-sm text-muted-foreground', className)}>
+      <p
+        className={cn('reveal', 'px-2 py-10 text-center text-sm text-muted-foreground', className)}
+      >
         {emptyMessage}
       </p>
     );
@@ -73,18 +89,26 @@ export function EventFeed({
         aria-live="polite"
         aria-label="Research activity"
       >
-        <ol className="flex flex-col">
+        <ol className="relative flex flex-col">
           {events.map((event) => {
             const described = describeEvent(event);
             return (
               <li
                 key={event.seq}
                 data-event-type={event.type}
-                className="flex gap-3 border-b border-border/60 px-1 py-2 last:border-0"
+                className={cn(
+                  'group relative flex gap-3 rounded-lg px-2 py-2',
+                  'reveal',
+                  'transition-colors duration-[var(--duration-fast)] hover:bg-hover',
+                )}
               >
-                <span className="pt-1.5">
+                <span className="pt-[7px]">
                   <span
-                    className={cn('block size-1.5 rounded-full', TONE_DOT[described.tone])}
+                    className={cn(
+                      'block size-1.5 rounded-full ring-4 transition-transform duration-[var(--duration-base)] ease-[var(--ease-spring)] group-hover:scale-125',
+                      TONE_DOT[described.tone],
+                      TONE_RING[described.tone],
+                    )}
                     aria-hidden
                   />
                 </span>

@@ -124,7 +124,13 @@ of one press release.
 ![Discovered sources with duplicate clusters](docs/screenshots/sources.png)
 
 <details>
-<summary><b>The rest of the product</b> — dashboard, the request form, the evaluation page</summary>
+<summary><b>The rest of the product</b> — home, dashboard, the request form, the evaluation page</summary>
+
+**Home.** One question box. Mode, depth and filters are beside it rather than on
+a screen of their own, so adding a date range never means abandoning a
+half-typed question.
+
+![The home screen](docs/screenshots/home.png)
 
 **Dashboard.** Every run with its status, mode, findings, cost and runtime.
 

@@ -1,6 +1,17 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /** The run's own tab bar, so a source link named "Report" cannot match. */
+
+/**
+ * A run link in the dashboard's history list.
+ *
+ * The navigation rail also lists recent runs, so the page holds two links to
+ * the same run on purpose. A bare `getByRole('link', { name })` matches both;
+ * these tests are about opening a run from the history list, so they say so.
+ */
+function historyLink(page: Page, name: string) {
+  return page.getByRole('region', { name: 'Research history' }).getByRole('link', { name });
+}
 function runTab(page: import('@playwright/test').Page, name: string) {
   return page.getByRole('navigation', { name: 'Research sections' }).getByRole('link', { name });
 }
@@ -15,12 +26,15 @@ function runTab(page: import('@playwright/test').Page, name: string) {
  * backend in Phase 2 by changing NEXT_PUBLIC_API_MODE.
  */
 
-test('a user can sign in and reach the dashboard', async ({ page }) => {
+test('a user can sign in and reach the question box', async ({ page }) => {
   await page.goto('/login');
   await page.getByTestId('login-submit').click();
 
-  await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
+  // Signing in lands on the home screen, which is the question box - not the
+  // dashboard. Starting a piece of research is what someone came here to do.
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('heading', { name: /What would you like researched/ })).toBeVisible();
+  await expect(page.getByTestId('ask-input')).toBeVisible();
   // Fixture data must always announce itself.
   await expect(page.getByTestId('demo-banner')).toBeVisible();
 });
@@ -38,7 +52,7 @@ test('a new user can register, arrive signed in, and sign out again', async ({ p
   await page.getByLabel('Password').fill('correct-horse-battery-staple');
   await page.getByTestId('register-submit').click();
 
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/$/);
 
   const logout = page.waitForResponse(
     (response) => response.url().includes('/auth/logout') && response.request().method() === 'POST',
@@ -73,6 +87,55 @@ test('the dashboard lists research history with measured totals', async ({ page 
 
   const rows = await page.getByTestId('run-row').count();
   expect(rows).toBeGreaterThan(3);
+});
+
+test('the home question box starts a run without leaving the page', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+
+  // Depth and filters open in a card over the question, not on another screen:
+  // leaving the page to add a date filter means abandoning a half-typed
+  // question, which is the whole reason this control is not a link.
+  await page.getByRole('button', { name: /Filters and depth/ }).click();
+  const filters = page.getByTestId('composer-filters');
+  await expect(filters).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+
+  // Each setting is a collapsed row that states its own value; opening one is
+  // a deliberate act, and only one is open at a time.
+  await expect(filters.getByTestId('depth-4')).toBeHidden();
+  await filters.getByRole('button', { name: /^Depth/ }).click();
+  await filters.getByTestId('depth-4').click();
+
+  await filters.getByRole('button', { name: /^Domains/ }).click();
+  await expect(filters.getByTestId('depth-4')).toBeHidden();
+  await filters.getByTestId('composer-domain-input').fill('sec.gov');
+  await filters.getByRole('button', { name: 'Add', exact: true }).click();
+  // The chip's own remove control, not the text: "sec.gov" now appears in the
+  // collapsed row's summary and in the input's placeholder as well.
+  await expect(filters.getByRole('button', { name: 'Remove sec.gov' })).toBeVisible();
+
+  // The count on the trigger is how a filter you have scrolled past stays
+  // visible; a run that quietly searched one domain looks like a run that
+  // found nothing.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /Filters and depth, 2 applied/ })).toBeVisible();
+
+  await page
+    .getByTestId('ask-input')
+    .fill('Compare the major AI inference providers on pricing, latency and funding.');
+  await page.getByTestId('ask-submit').click();
+
+  await expect(page).toHaveURL(/\/research\/[0-9a-f-]{36}$/);
+});
+
+test('a suggestion fills the question box instead of navigating away', async ({ page }) => {
+  await page.goto('/');
+
+  await page.getByRole('button', { name: /Competitive landscape/ }).click();
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId('ask-input')).toHaveValue(/inference infrastructure companies/);
 });
 
 test('validation blocks an unusable research question', async ({ page }) => {
@@ -130,7 +193,7 @@ test('a new run streams progress and produces a validated report', async ({ page
 
 test('a completed run exposes sources, evidence and citations', async ({ page }) => {
   await page.goto('/dashboard');
-  await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();
+  await historyLink(page, 'AI inference infrastructure landscape').click();
 
   await expect(page.locator('[data-status="completed"]').first()).toBeVisible();
 
@@ -162,7 +225,7 @@ test('a completed run exposes sources, evidence and citations', async ({ page })
 
 test('a failed run explains itself instead of showing an empty report', async ({ page }) => {
   await page.goto('/dashboard');
-  await page.getByRole('link', { name: 'Retrieval chunking strategies' }).click();
+  await historyLink(page, 'Retrieval chunking strategies').click();
 
   await expect(page.locator('[data-status="failed"]').first()).toBeVisible();
   await expect(page.getByText(/search_provider_unavailable/)).toBeVisible();
@@ -205,7 +268,7 @@ test('a user can cancel a running research job and the run says so', async ({ pa
 
 test('the activity trace shows agents, tool calls and model calls', async ({ page }) => {
   await page.goto('/dashboard');
-  await page.getByRole('link', { name: 'AI inference infrastructure landscape' }).click();
+  await historyLink(page, 'AI inference infrastructure landscape').click();
   await runTab(page, 'Activity').click();
 
   await expect(page.getByTestId('agent-run').first()).toBeVisible();

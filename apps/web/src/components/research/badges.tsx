@@ -71,10 +71,10 @@ export function ModeBadge({ mode }: { mode: ResearchMode }) {
 
 const SOURCE_TYPE: Record<SourceType, { label: string; className: string }> = {
   web: { label: 'Web', className: 'text-muted-foreground' },
-  sec: { label: 'SEC', className: 'text-info' },
-  arxiv: { label: 'arXiv', className: 'text-primary' },
+  sec: { label: 'SEC', className: 'text-info-strong' },
+  arxiv: { label: 'arXiv', className: 'text-primary-strong' },
   github: { label: 'GitHub', className: 'text-foreground' },
-  upload: { label: 'Upload', className: 'text-warning' },
+  upload: { label: 'Upload', className: 'text-warning-strong' },
 };
 
 export function SourceTypeBadge({ type }: { type: SourceType }) {
@@ -99,9 +99,9 @@ export function ClaimStatusBadge({ status }: { status: ClaimStatus }) {
 }
 
 const STANCE: Record<EvidenceStance, { label: string; className: string }> = {
-  supports: { label: 'Supports', className: 'text-supports' },
-  refutes: { label: 'Refutes', className: 'text-refutes' },
-  neutral: { label: 'Neutral', className: 'text-neutral' },
+  supports: { label: 'Supports', className: 'text-success-strong' },
+  refutes: { label: 'Refutes', className: 'text-destructive-strong' },
+  neutral: { label: 'Neutral', className: 'text-muted-foreground' },
 };
 
 export function StanceLabel({ stance }: { stance: EvidenceStance }) {
@@ -115,8 +115,8 @@ export function StanceLabel({ stance }: { stance: EvidenceStance }) {
 
 const RESOLUTION: Record<ContradictionResolution, { label: string; variant: Variant }> = {
   unresolved: { label: 'Unresolved', variant: 'warning' },
-  resolved_a: { label: 'Resolved — source A', variant: 'success' },
-  resolved_b: { label: 'Resolved — source B', variant: 'success' },
+  resolved_a: { label: 'Resolved to source A', variant: 'success' },
+  resolved_b: { label: 'Resolved to source B', variant: 'success' },
   both_valid_in_context: { label: 'Both valid in context', variant: 'info' },
 };
 

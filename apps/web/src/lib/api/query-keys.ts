@@ -10,6 +10,8 @@ export const queryKeys = {
   auth: {
     me: () => ['auth', 'me'] as const,
     sessions: () => ['auth', 'sessions'] as const,
+    ssoOptions: () => ['auth', 'sso-options'] as const,
+    identities: () => ['auth', 'identities'] as const,
   },
   research: {
     all: () => ['research'] as const,

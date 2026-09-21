@@ -5,7 +5,14 @@ import { renderWithProviders } from '@/test/render';
 import RegisterPage from './page';
 
 const push = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
+// `useSearchParams` as well as `useRouter`: the page renders the SSO
+// failure banner, which reads the `?error=` the OAuth callback redirects
+// back with. An empty set is the ordinary case - somebody arriving at the
+// page directly rather than bouncing off a failed provider sign-in.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 /**
  * The password policy lives on the server (Phase 20), so what this page owes
@@ -32,7 +39,7 @@ afterEach(() => {
 });
 
 describe('RegisterPage', () => {
-  it('signs the new account in and goes to the dashboard', async () => {
+  it('signs the new account in and goes to the question box', async () => {
     const fetchMock = respond(201, {
       user: {
         id: 'u1',
@@ -51,7 +58,7 @@ describe('RegisterPage', () => {
     await user.type(screen.getByLabelText('Password'), 'correct-horse-battery-staple');
     await user.click(screen.getByTestId('register-submit'));
 
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/dashboard'));
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     // The session arrives as a cookie the browser must be allowed to store.

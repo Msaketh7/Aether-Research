@@ -7,11 +7,18 @@
  *
  * Colours are declared in oklch so that light and dark stay perceptually
  * matched. Semantic names only - no component may reference a raw colour, so a
- * palette change is a single-file edit. Fonts are system stacks: the build must
- * never depend on fetching a webfont.
+ * palette change is a single-file edit. The faces are named in `fonts.ts` and
+ * reach this file as `--font-*-family`; they are fetched once at build time and
+ * then served from this origin, so a running deployment asks nobody for a font.
+ *
+ * Motion, elevation and radius are tokens for the same reason. A product whose
+ * durations are decided per component ends up with a different rhythm on every
+ * page; these five durations and four easings are the whole vocabulary.
  */
 :root {
-  --radius: 0.625rem;
+  color-scheme: light;
+
+  --radius: 0.75rem;
 
   --background: oklch(0.99 0.002 250);
   --foreground: oklch(0.21 0.02 260);
@@ -48,28 +55,87 @@
   --refutes: oklch(0.58 0.21 27);
   --neutral: oklch(0.6 0.02 258);
 
+  /*
+   * The same semantics again, at the lightness text needs.
+   *
+   * A status chip paints its hue at about 15% over the surface and then writes
+   * on top in that same hue. That works as a fill and fails as text: measured,
+   * "Completed" came out at 3.3:1 in light and "Deep" at 3.1:1 in dark, both
+   * under the 4.5:1 a 12px label needs. So the fill keeps the base colour and
+   * the label takes one of these, which is the hue carried to a lightness that
+   * can be read. Two tokens, because the direction is opposite per theme.
+   */
+  --primary-strong: oklch(0.44 0.2 275);
+  --success-strong: oklch(0.44 0.13 152);
+  --warning-strong: oklch(0.42 0.12 72);
+  --destructive-strong: oklch(0.48 0.21 27);
+  --info-strong: oklch(0.45 0.13 235);
+
+  /* The wash a surface takes under the cursor. */
+  --hover: oklch(0.955 0.012 275);
+  --hover-strong: oklch(0.93 0.02 275);
+
   --sidebar: oklch(0.975 0.004 258);
   --sidebar-foreground: oklch(0.3 0.02 260);
   --sidebar-border: oklch(0.91 0.006 258);
+
+  /*
+   * Elevation. Two-layer shadows - a tight contact shadow plus a diffuse one -
+   * because a single blur reads as a sticker rather than a raised surface.
+   */
+  --elevation-1: 0 1px 2px -1px oklch(0.21 0.02 260 / 0.08), 0 1px 3px oklch(0.21 0.02 260 / 0.06);
+  --elevation-2:
+    0 2px 4px -2px oklch(0.21 0.02 260 / 0.09), 0 6px 16px -4px oklch(0.21 0.02 260 / 0.09);
+  --elevation-3:
+    0 4px 8px -4px oklch(0.21 0.02 260 / 0.11), 0 16px 36px -8px oklch(0.21 0.02 260 / 0.13);
+  --elevation-glow:
+    0 0 0 1px oklch(0.52 0.19 275 / 0.16), 0 8px 28px -8px oklch(0.52 0.19 275 / 0.3);
+
+  /* A faint tint laid behind the app shell so large surfaces are not flat white. */
+  --mesh-a: oklch(0.52 0.19 275 / 0.06);
+  --mesh-b: oklch(0.58 0.12 235 / 0.05);
 }
 
 .dark {
-  --background: oklch(0.17 0.015 265);
-  --foreground: oklch(0.95 0.004 255);
-  --card: oklch(0.21 0.017 265);
-  --card-foreground: oklch(0.95 0.004 255);
-  --popover: oklch(0.22 0.017 265);
-  --popover-foreground: oklch(0.95 0.004 255);
+  /*
+   * `color-scheme: dark` is not cosmetic. Native controls - the date input's
+   * calendar button, its picker panel, scrollbars - are drawn by the browser
+   * from this, and without it the calendar glyph stayed near-black on a
+   * near-black field and effectively disappeared.
+   */
+  color-scheme: dark;
 
-  --primary: oklch(0.7 0.16 278);
-  --primary-foreground: oklch(0.16 0.02 268);
-  --secondary: oklch(0.26 0.016 265);
-  --secondary-foreground: oklch(0.93 0.005 258);
+  /*
+   * Dark is designed, not inverted.
+   *
+   * Two things were wrong before. The surfaces sat within 0.04 lightness of
+   * each other, so a card on the background was a guess rather than a step;
+   * and the border was so close to both that the edge of a card effectively
+   * vanished - which is why hover and elevation read fine in light and flat
+   * here. Shadows cannot fix it, because a shadow on a dark surface is the
+   * absence of light and there is none to take away.
+   *
+   * So the steps are widened and the edge is carried by a border plus a one
+   * pixel highlight along the top of each raised surface, which is how a real
+   * material catches light from above. Colour is slightly cooler as it gets
+   * darker, because a neutral grey on a screen at night reads brown.
+   */
+  --background: oklch(0.155 0.012 266);
+  --foreground: oklch(0.96 0.004 255);
+  --card: oklch(0.213 0.016 266);
+  --card-foreground: oklch(0.96 0.004 255);
+  --popover: oklch(0.235 0.017 266);
+  --popover-foreground: oklch(0.96 0.004 255);
 
-  --muted: oklch(0.24 0.015 265);
-  --muted-foreground: oklch(0.69 0.015 258);
-  --accent: oklch(0.28 0.03 275);
-  --accent-foreground: oklch(0.92 0.02 278);
+  --primary: oklch(0.72 0.17 278);
+  --primary-foreground: oklch(0.15 0.02 268);
+  --secondary: oklch(0.27 0.018 266);
+  --secondary-foreground: oklch(0.94 0.005 258);
+
+  --muted: oklch(0.25 0.016 266);
+  --muted-foreground: oklch(0.73 0.016 258);
+  --accent: oklch(0.32 0.042 276);
+  --accent-foreground: oklch(0.95 0.02 278);
 
   --destructive: oklch(0.65 0.19 25);
   --destructive-foreground: oklch(0.16 0.02 268);
@@ -80,17 +146,50 @@
   --info: oklch(0.7 0.12 235);
   --info-foreground: oklch(0.16 0.02 268);
 
-  --border: oklch(0.3 0.015 265);
-  --input: oklch(0.32 0.015 265);
-  --ring: oklch(0.7 0.16 278);
+  /* Raised from 0.30 so a card actually has an edge, and the input a step
+     further so a field is distinguishable from the card it sits on. */
+  --border: oklch(0.345 0.017 266);
+  --input: oklch(0.39 0.018 266);
+  --ring: oklch(0.74 0.17 278);
 
   --supports: oklch(0.7 0.15 152);
   --refutes: oklch(0.68 0.18 25);
   --neutral: oklch(0.68 0.015 258);
 
-  --sidebar: oklch(0.15 0.015 265);
-  --sidebar-foreground: oklch(0.88 0.005 258);
-  --sidebar-border: oklch(0.27 0.015 265);
+  --primary-strong: oklch(0.83 0.13 278);
+  --success-strong: oklch(0.84 0.15 152);
+  --warning-strong: oklch(0.88 0.14 80);
+  --destructive-strong: oklch(0.78 0.16 25);
+  --info-strong: oklch(0.84 0.12 235);
+
+  --hover: oklch(0.275 0.028 272);
+  --hover-strong: oklch(0.33 0.042 274);
+
+  --sidebar: oklch(0.128 0.012 266);
+  --sidebar-foreground: oklch(0.89 0.005 258);
+  --sidebar-border: oklch(0.29 0.016 266);
+
+  /*
+   * Each level leads with an inset hairline along the top edge. That rim is
+   * what a raised surface in a dark room actually looks like - lit from above,
+   * darker underneath - and it is the only elevation cue that survives when a
+   * surface and its shadow are both nearly black.
+   */
+  --elevation-1:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.045), 0 1px 2px -1px oklch(0 0 0 / 0.6),
+    0 1px 3px oklch(0 0 0 / 0.4);
+  --elevation-2:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.07), 0 2px 6px -2px oklch(0 0 0 / 0.65),
+    0 10px 24px -8px oklch(0 0 0 / 0.55);
+  --elevation-3:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.09), 0 8px 16px -8px oklch(0 0 0 / 0.7),
+    0 24px 52px -12px oklch(0 0 0 / 0.65);
+  --elevation-glow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.07), 0 0 0 1px oklch(0.74 0.17 278 / 0.4),
+    0 0 20px -4px oklch(0.74 0.17 278 / 0.3), 0 10px 32px -10px oklch(0.74 0.17 278 / 0.45);
+
+  --mesh-a: oklch(0.72 0.17 278 / 0.14);
+  --mesh-b: oklch(0.72 0.13 235 / 0.1);
 }
 
 @theme inline {
@@ -122,19 +221,166 @@
   --color-supports: var(--supports);
   --color-refutes: var(--refutes);
   --color-neutral: var(--neutral);
+  --color-primary-strong: var(--primary-strong);
+  --color-success-strong: var(--success-strong);
+  --color-warning-strong: var(--warning-strong);
+  --color-destructive-strong: var(--destructive-strong);
+  --color-info-strong: var(--info-strong);
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 5px);
+  --radius-md: calc(var(--radius) - 3px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --shadow-e1: var(--elevation-1);
+  --shadow-e2: var(--elevation-2);
+  --shadow-e3: var(--elevation-3);
+  --shadow-glow: var(--elevation-glow);
+
+  /*
+   * Motion vocabulary. Duration is chosen by how far a thing travels, not by
+   * habit: a colour swap is `fast`, a card lifting is `base`, a panel entering
+   * is `slow`. Exits use `fast` so dismissing never feels like waiting.
+   */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-quick: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-quick: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --duration-instant: 90ms;
+  --duration-fast: 150ms;
+  --duration-base: 240ms;
+  --duration-slow: 380ms;
+  --duration-slower: 560ms;
+
+  --animate-fade-in: fade-in var(--duration-base) var(--ease-out-soft) both;
+  --animate-fade-up: fade-up var(--duration-slow) var(--ease-out-soft) both;
+  --animate-scale-in: scale-in var(--duration-base) var(--ease-out-quick) both;
+  --animate-slide-down: slide-down var(--duration-base) var(--ease-out-quick) both;
+  --animate-shimmer: shimmer 1.8s linear infinite;
+  --animate-breathe: breathe 2.4s var(--ease-out-soft) infinite;
+  --animate-indeterminate: indeterminate 1.4s var(--ease-out-soft) infinite;
+  --animate-sweep: sweep 2.6s linear infinite;
 
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+    var(--font-sans-family), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: var(--font-display-family), ui-serif, Georgia, 'Times New Roman', serif;
+  --font-mono: var(--font-mono-family), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Skeletons sweep rather than blink: a pulse reads as a broken element. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* The live dot. Opacity and scale only - never width, which would reflow. */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+/* Progress of unknown length. Linear, because the rate really is constant. */
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%) scaleX(0.35);
+  }
+  50% {
+    transform: translateX(20%) scaleX(0.6);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.35);
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }
 
 @layer base {
@@ -142,29 +388,301 @@
     border-color: var(--border);
   }
 
+  html {
+    scroll-behavior: smooth;
+    /*
+     * WCAG 2.2 "focus not obscured": the topbar is sticky, and a run page
+     * stacks its tab strip under it. Without this reserve, tabbing to a control
+     * just below the fold scrolls it to y=0 - underneath the chrome - and the
+     * focus ring is invisible. 7rem clears both bars; it also gives the report's
+     * section anchors somewhere to land.
+     */
+    scroll-padding-top: 7rem;
+  }
+
   body {
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
+    /*
+     * Tracking is negative because Plus Jakarta Sans is drawn wide, and at the
+     * sizes this interface uses - 11 to 14px for almost everything - its
+     * default spacing reads loose and unset. `cv` features are off by default
+     * and left that way; the point of choosing a face with character is to use
+     * the character it has.
+     */
+    letter-spacing: -0.006em;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /*
+   * Optical sizing is the whole reason a variable display face is worth the
+   * bytes: at 30px Fraunces wants thinner hairlines and tighter spacing than it
+   * does at 16px, and this lets the file supply both instead of one compromise.
+   */
+  .font-display {
+    font-family: var(--font-display);
+    font-variation-settings:
+      'SOFT' 28,
+      'WONK' 1,
+      'opsz' 40;
+    letter-spacing: -0.018em;
+  }
+
+  /* Headings tighten as they grow; body text does not. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.021em;
+  }
+
+  /* Numbers never reflow their column as they tick. */
+  .font-mono,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+  }
+
+  /*
+   * The date input's calendar button. `color-scheme: dark` already repaints it,
+   * but the browser's default glyph is still a low-contrast grey against the
+   * field; lifting it on hover makes it a control rather than a decoration.
+   */
+  input[type='date']::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 2px;
+    opacity: 0.55;
+    transition:
+      opacity var(--duration-fast) var(--ease-out-soft),
+      background-color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  input[type='date']::-webkit-calendar-picker-indicator:hover,
+  input[type='date']:focus-visible::-webkit-calendar-picker-indicator {
+    opacity: 1;
+    background-color: color-mix(in oklch, var(--primary) 18%, transparent);
   }
 
   /* Focus is always visible: this product is used with a keyboard. */
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Anything that responds to a click says so before it is clicked. */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  [role='radio']:not([aria-disabled='true']),
+  a[href],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 26%, transparent);
+  }
+
+  /* A scrollbar that does not repaint the page dark grey on Windows. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 28%, transparent);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+  }
+}
+
+@layer components {
+  /*
+   * Entrance, for content that arrives *after* the page has loaded.
+   *
+   * Two rules, both learned by photographing the result rather than reading it.
+   *
+   * First, this is a transition out of `@starting-style`, not a keyframe
+   * animation with `fill-mode: both`. A filled keyframe holds its `from` state
+   * whenever the motion is cancelled - under `prefers-reduced-motion`, in a
+   * print stylesheet, in a capture harness - so the content stays at
+   * `opacity: 0` and the page renders blank while looking correct in a normal
+   * browser. Here the resting state is the visible one; anything that stops the
+   * motion degrades to content that is simply there.
+   *
+   * Second, and the reason for the name: never put this on markup that is
+   * present at first paint. A browser does not run transitions during a
+   * document's initial style resolution, so a server-rendered element sits at
+   * its starting style with nothing to move it, and it is invisible. The
+   * dashboard's heading and question box were captured blank exactly that way
+   * while the stat tiles beside them - inserted later, when their query
+   * resolved - animated correctly. Use these classes only for what a query, an
+   * event, an error or an interaction puts on the page.
+   */
+  .reveal,
+  .stagger > * {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--duration-slow) var(--ease-out-soft) var(--reveal-delay, 0ms),
+      transform var(--duration-slow) var(--ease-out-soft) var(--reveal-delay, 0ms);
+  }
+
+  @starting-style {
+    .reveal,
+    .stagger > * {
+      opacity: 0;
+      transform: translate3d(0, 10px, 0);
+    }
+  }
+
+  /* The stagger itself: 45ms between neighbours, capped so a long list does not
+     end up with a last item that arrives a second after the first. */
+  .stagger > *:nth-child(2) {
+    --reveal-delay: 45ms;
+  }
+  .stagger > *:nth-child(3) {
+    --reveal-delay: 90ms;
+  }
+  .stagger > *:nth-child(4) {
+    --reveal-delay: 135ms;
+  }
+  .stagger > *:nth-child(5) {
+    --reveal-delay: 180ms;
+  }
+  .stagger > *:nth-child(6) {
+    --reveal-delay: 225ms;
+  }
+  .stagger > *:nth-child(n + 7) {
+    --reveal-delay: 260ms;
+  }
+
+  /*
+   * The lift. Transform and shadow only, so a grid of cards never reflows on
+   * hover - `translateY` on a bordered card is the single cheapest way to make
+   * a surface feel physical.
+   */
+  .lift {
+    transition:
+      transform var(--duration-base) var(--ease-out-soft),
+      box-shadow var(--duration-base) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .lift:hover {
+    transform: translate3d(0, -2px, 0);
+    box-shadow: var(--elevation-2);
+  }
+
+  .lift:active {
+    transform: translate3d(0, 0, 0);
+    transition-duration: var(--duration-instant);
+  }
+
+  /* Sticky chrome that lets the page show through it. */
+  .glass {
+    /*
+     * 88%, not the 78% this started at. Both sticky bars sit over running body
+     * text, and at 78% the words underneath read straight through the tab
+     * labels. Translucency is meant to say "the page continues under here", not
+     * to make two pieces of text compete.
+     */
+    background-color: color-mix(in oklch, var(--background) 88%, transparent);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+  }
+
+  @supports not (backdrop-filter: blur(1px)) {
+    .glass {
+      background-color: var(--background);
+    }
+  }
+
+  /* The ambient tint behind the shell. Purely decorative, never interactive. */
+  .mesh {
+    background-image:
+      radial-gradient(60rem 30rem at 12% -8%, var(--mesh-a), transparent 60%),
+      radial-gradient(48rem 26rem at 92% 4%, var(--mesh-b), transparent 58%);
+  }
+
+  /* A skeleton that sweeps. The gradient is 200% wide so the sweep can travel. */
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklch, var(--foreground) 6%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: shimmer 1.8s linear infinite;
+  }
+
+  /* Underline that grows from the left rather than appearing all at once. */
+  .underline-grow {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    background-size: 0% 1px;
+    transition: background-size var(--duration-base) var(--ease-out-soft);
+  }
+
+  .underline-grow:hover {
+    background-size: 100% 1px;
   }
 }
 
 @layer utilities {
-  /* Live regions that update every few hundred ms would otherwise animate on
-     every tick for users who asked the OS not to. */
+  /*
+   * Reduced motion. Durations collapse rather than animations being removed:
+   * an entrance that starts at opacity 0 must still finish, or the content
+   * never appears. Infinite loops are cancelled outright, since a 0.01ms loop
+   * still schedules work on every frame.
+   */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
+      transition-delay: 0ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    .shimmer,
+    [data-motion='loop'] {
+      animation: none !important;
+    }
+
+    .lift:hover {
+      transform: none;
+    }
+
+    /* The entrance is a transition out of @starting-style, so collapsing its
+       duration above already lands the element in its resting, visible state. */
+    .reveal,
+    .stagger > * {
+      --reveal-delay: 0ms;
     }
   }
 }

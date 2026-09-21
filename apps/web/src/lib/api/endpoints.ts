@@ -5,6 +5,7 @@ import type {
   DashboardStats,
   EvaluationsResponse,
   EvidenceResponse,
+  LinkedIdentity,
   LoginRequest,
   LoginResponse,
   Page,
@@ -16,6 +17,7 @@ import type {
   RevokedSessions,
   SessionInfo,
   SourcesResponse,
+  SsoOptions,
   SystemMetrics,
   User,
   UserSettings,
@@ -40,6 +42,11 @@ export const authApi = {
   revokeSession: (id: string) => apiRequest<void>(`/auth/sessions/${id}`, { method: 'DELETE' }),
   /** Sign out every device but this one. */
   revokeOtherSessions: () => apiRequest<RevokedSessions>('/auth/sessions', { method: 'DELETE' }),
+  /** Which sign-in methods this deployment offers. */
+  ssoOptions: (signal?: AbortSignal) => apiRequest<SsoOptions>('/auth/sso/providers', { signal }),
+  /** The upstream identities linked to this account. */
+  identities: () => apiRequest<LinkedIdentity[]>('/auth/identities'),
+  unlinkIdentity: (id: string) => apiRequest<void>(`/auth/identities/${id}`, { method: 'DELETE' }),
 };
 
 export interface ListRunsParams {
