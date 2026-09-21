@@ -18,6 +18,7 @@ branch protection rule is a check that is optional and looks required.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,36 @@ def test_every_action_is_pinned(name: str):
         reference = uses.rsplit("@", 1)[1]
         assert reference not in {"main", "master", "latest", "HEAD"}, (
             f"{name}.yml/{job} pins {uses} to a moving reference"
+        )
+
+
+#: A 40-character hex commit, which is the other legitimate way to pin.
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED))
+def test_every_action_version_is_shaped_like_one_that_exists(name: str):
+    """`0.28.0` and `v0.28.0` are not the same tag, and only one of them is real.
+
+    Pinning is checked above; this checks the *shape* of the pin. Every action
+    this repository uses tags its releases `vN.N.N`, so a bare semver is a
+    reference to something that was never published - and GitHub does not find
+    out until a runner does. It fails at `Set up job`, before a single step
+    runs, which means no amount of testing the workflow's logic catches it.
+
+    That is exactly how `aquasecurity/trivy-action@0.28.0` reached main: the
+    upstream project re-tagged with a `v` prefix, the old tag stopped resolving,
+    and nothing offline could tell. Resolving each reference against the network
+    would catch more, and would make this suite depend on GitHub being up.
+    """
+    for job, step in _steps(_workflows()[name]):
+        uses = step.get("uses")
+        if not uses or uses.startswith("./"):
+            continue
+        reference = uses.rsplit("@", 1)[1]
+        assert reference.startswith("v") or _SHA.match(reference), (
+            f"{name}.yml/{job} pins {uses}; every action used here tags releases "
+            "'vN.N.N', so this names a tag that probably does not exist"
         )
 
 
