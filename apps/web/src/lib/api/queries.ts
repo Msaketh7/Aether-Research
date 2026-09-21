@@ -216,6 +216,38 @@ export function useResearchReport(id: string, enabled = true) {
   });
 }
 
+/**
+ * The stored answer.
+ *
+ * Only worth fetching for a run nobody watched arrive: a live run is served the
+ * same text by `answer_delta` events, and re-fetching under a stream would
+ * replace what the reader is watching with a stale copy of it. `useRunAnswer`
+ * in the run context is what decides between the two.
+ */
+export function useResearchAnswer(id: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.research.answer(id),
+    queryFn: ({ signal }) => researchApi.answer(id, signal),
+    enabled: enabled && Boolean(id),
+    retry: defaultRetry,
+  });
+}
+
+/**
+ * Ask a follow-up. The reply is a *new run* that names this one as its parent,
+ * which is what makes a conversation out of a product whose unit of work is a
+ * multi-minute research job.
+ */
+export function useFollowUpResearch(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (question: string) => researchApi.followUp(id, question),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.research.all() });
+    },
+  });
+}
+
 export function useCreateResearch() {
   const queryClient = useQueryClient();
   return useMutation({

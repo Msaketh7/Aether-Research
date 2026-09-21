@@ -498,9 +498,21 @@ information back to the planner, which issues new targeted searches.
 When any limit is hit, the run proceeds to synthesis with an explicit coverage
 caveat in the report.
 
-### FR-9: Final synthesis
+### FR-9: The answer, then the report
 
-The report contains, in order:
+A run produces two pieces of prose, for two different moments.
+
+**The answer** comes first, and is what the person who asked reads. Four
+paragraphs at most, no headings, the answer in the opening sentence, written
+only from the claims the run gathered and citing them inline. It is **streamed
+as it is written**, so a reader sees it arriving rather than watching a bar, and
+it is produced before the report so that a run which fails while writing the
+report has still answered the question. Where the claims disagree, it gives both
+sides and says they disagree; where the question could not be answered from what
+was found, it says so in the first sentence.
+
+**The report** is the document behind it, for a reader who wants the whole
+thing. It contains, in order:
 
 1. Executive Summary
 2. Key Findings

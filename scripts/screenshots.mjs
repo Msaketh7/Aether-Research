@@ -92,6 +92,21 @@ const SHOTS = [
     },
   },
   {
+    file: 'answer.png',
+    caption: 'A run, as a conversation: the question, the answer, and the box for the next one',
+    async prepare(page) {
+      await gotoFlagship(page);
+    },
+    async settle(page) {
+      // The answer read back from the run rather than streamed: nothing
+      // streamed it to *this* browser, and a photograph of a half-arrived
+      // answer would be a photograph of a moment rather than of the page.
+      await page.getByTestId('run-question').waitFor({ state: 'visible' });
+      await page.getByTestId('answer-body').waitFor({ state: 'visible' });
+      await page.getByTestId('follow-up-input').waitFor({ state: 'visible' });
+    },
+  },
+  {
     file: 'activity.png',
     caption: 'The agent trace: every node execution with the tool and model calls it made',
     async prepare(page) {

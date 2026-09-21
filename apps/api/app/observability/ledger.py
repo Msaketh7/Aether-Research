@@ -62,8 +62,14 @@ def _utcnow() -> dt.datetime:
 
 #: Which agent each node is, for the `agent_runs.agent_name` vocabulary. The
 #: contradiction checker is the critic's work by another name - the enum is the
-#: closed list the column constrains, and inventing a tenth value to match the
-#: graph's tenth node would change a contract the frontend reads.
+#: closed list the column constrains, and inventing a value to match a node that
+#: is not its own agent would change a contract the frontend reads.
+#:
+#: **It has to be total.** A node missing from here raises a ``KeyError`` inside
+#: a guarded write, so the step runs, succeeds, and leaves no trace row - and
+#: the model call it made hangs from nothing and is dropped too. The answerer
+#: shipped that way for exactly as long as it took a scenario to count the
+#: ledger's rows against the calls the run actually made.
 NODE_AGENT: dict[GraphNode, AgentName] = {
     GraphNode.PLANNER: AgentName.PLANNER,
     GraphNode.RESEARCHER: AgentName.RESEARCHER,
@@ -72,6 +78,7 @@ NODE_AGENT: dict[GraphNode, AgentName] = {
     GraphNode.VERIFIER: AgentName.VERIFIER,
     GraphNode.CONTRADICTION_CHECKER: AgentName.CRITIC,
     GraphNode.CRITIC: AgentName.CRITIC,
+    GraphNode.ANSWERER: AgentName.ANSWERER,
     GraphNode.SYNTHESIZER: AgentName.SYNTHESIZER,
     GraphNode.CITATION_VALIDATOR: AgentName.CITATION_VALIDATOR,
 }

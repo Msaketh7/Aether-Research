@@ -22,10 +22,12 @@ them and cannot check them all:
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from app.agents.schemas import (
+    AnswerDraft,
     CitationCheck,
     ClaimItem,
     ContradictionItem,
@@ -86,6 +88,61 @@ class Critic(Protocol):
         ...
 
 
+#: What a streaming agent hands each piece of its output to as it arrives.
+#: Awaitable because every real destination is I/O - the run's event bus, in the
+#: one case there is.
+type DeltaSink = Callable[[str], Awaitable[None]]
+
+
+async def discard(_text: str) -> None:
+    """A sink that goes nowhere. What an answer written with nobody watching uses."""
+
+
+class AnswerStream(Protocol):
+    """Where a run's answer goes while it is being written.
+
+    Per invocation, not per run and not per process: it belongs to the worker
+    executing *this* attempt, which is why it travels in ``GraphContext``
+    alongside ``resumed_at`` rather than in the checkpointed state. A resumed
+    run gets a new one, pointed at the same client.
+
+    ``finish`` is not optional, and it is not a close. An implementation is free
+    to hold text back - the one that exists batches it, because every piece it
+    publishes is a stored row - and without a final call there is no moment at
+    which the last, short piece is known to be the last. The node calls it on
+    the way out of the answerer whether the agent returned an answer, returned
+    nothing, or raised: what has already been written belongs to the reader
+    either way.
+    """
+
+    async def write(self, text: str) -> None: ...
+
+    async def finish(self) -> None: ...
+
+
+class DiscardedAnswerStream:
+    """The default: an answer nobody is watching is still written and stored."""
+
+    async def write(self, text: str) -> None:
+        return None
+
+    async def finish(self) -> None:
+        return None
+
+
+class Answerer(Protocol):
+    async def answer(
+        self, state: ResearchState, *, on_delta: DeltaSink
+    ) -> NodeResult[AnswerDraft | None]:
+        """The direct answer, or ``None`` when there was nothing to answer from.
+
+        Pieces are handed to ``on_delta`` as they arrive. Whatever it does with
+        them is not this node's business and must not be able to stop it: the
+        answer's record is the value returned, not the stream.
+        """
+        ...
+
+
 class Synthesizer(Protocol):
     async def synthesize(self, state: ResearchState) -> NodeResult[ReportDraft]: ...
 
@@ -107,5 +164,6 @@ class ResearchNodes:
     verifier: Verifier
     contradiction_checker: ContradictionChecker
     critic: Critic
+    answerer: Answerer
     synthesizer: Synthesizer
     citation_validator: CitationValidator

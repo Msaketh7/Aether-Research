@@ -177,6 +177,17 @@ class Settings(BaseSettings):
     #: read at all, so a round that exceeds them says so in the log.
     evidence_passages_per_call: int = 12
     evidence_max_calls_per_round: int = 3
+    #: How much of the answer accumulates before a piece of it is published.
+    #:
+    #: Every published piece is a durable row - that is what makes a reconnect
+    #: replay the answer exactly - so one row per token would be a few thousand
+    #: inserts per run to deliver text a reader cannot read that fast anyway.
+    #: Forty-eight characters is roughly a phrase: about forty rows for a
+    #: four-paragraph answer, and fast enough that it reads as typing.
+    answer_stream_chunk_chars: int = 48
+    #: Publish a partial piece anyway once it has been held this long, so a slow
+    #: model trickling ten characters a second is not silent for five seconds.
+    answer_stream_max_delay_seconds: float = 0.25
 
     # Per-user guardrails on the API surface itself.
     max_concurrent_runs_per_user: int = 3
@@ -698,9 +709,12 @@ class Settings(BaseSettings):
             "researcher_results_per_query",
             "evidence_passages_per_call",
             "evidence_max_calls_per_round",
+            "answer_stream_chunk_chars",
         ):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name.upper()} must be at least 1.")
+        if self.answer_stream_max_delay_seconds <= 0:
+            raise ValueError("ANSWER_STREAM_MAX_DELAY_SECONDS must be positive.")
         if self.max_estimated_cost_usd <= 0:
             raise ValueError("MAX_ESTIMATED_COST_USD must be positive.")
         if self.graph_node_timeout_seconds <= 0:

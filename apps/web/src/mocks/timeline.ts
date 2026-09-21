@@ -54,8 +54,26 @@ function spread(from: number, to: number, count: number): number[] {
   return Array.from({ length: count }, (_, i) => from + step * i);
 }
 
+/**
+ * How much of the answer one `answer_delta` carries.
+ *
+ * The same 48 characters the worker's `ANSWER_STREAM_CHUNK_CHARS` defaults to,
+ * so the mock exercises the number of events a real run produces rather than a
+ * convenient handful: a client that only works when the answer arrives in three
+ * pieces is a client that breaks against the real thing.
+ */
+const ANSWER_CHUNK_CHARS = 48;
+
+function answerChunks(text: string): string[] {
+  const pieces: string[] = [];
+  for (let index = 0; index < text.length; index += ANSWER_CHUNK_CHARS) {
+    pieces.push(text.slice(index, index + ANSWER_CHUNK_CHARS));
+  }
+  return pieces;
+}
+
 export function buildTimeline(dataset: RunDataset): TimelineEntry[] {
-  const { spec, run, plan, sources, claims, contradictions, report } = dataset;
+  const { spec, run, plan, sources, claims, contradictions, report, answer } = dataset;
   const startedAt = (spec.startedAt ?? spec.createdAt).getTime();
   const cursor: Cursor = {
     seq: 0,
@@ -244,6 +262,28 @@ export function buildTimeline(dataset: RunDataset): TimelineEntry[] {
           });
         });
     }
+  }
+
+  // --- the answer ----------------------------------------------------------
+  // Before synthesis, exactly as the graph orders them: the reader has their
+  // answer while the report is still being assembled.
+  if (answer) {
+    emit(cursor, 0.74, 'answer_started', 'synthesizing', {});
+    const pieces = answerChunks(answer.content_md);
+    const spots = spread(0.745, 0.82, pieces.length);
+    pieces.forEach((text, index) => {
+      emit(cursor, spots[index] ?? 0.8, 'answer_delta', 'synthesizing', {
+        index: index + 1,
+        text,
+      });
+    });
+    emit(cursor, 0.825, 'answer_completed', 'synthesizing', {
+      text: answer.content_md,
+      model: answer.model,
+      word_count: answer.word_count,
+      citation_count: answer.citation_count,
+      truncated: answer.truncated,
+    });
   }
 
   // --- synthesis and validation -------------------------------------------

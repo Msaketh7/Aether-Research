@@ -1946,6 +1946,71 @@ benchmark and the deployment as work that is built and has never been run.
 
 ---
 
+## Phase 27 — The answer, streamed · **Done**
+
+The product could research a question and produce a report. It could not answer
+one, and nothing it produced arrived incrementally: a person asked something and
+watched a progress bar until a document appeared. Requested in those terms - an
+LLM answer to the question, grounded in the sources and evidence the run
+gathered, streaming into the page above the box it was asked in.
+[ADR 0023](ADRs/0023-the-streamed-answer.md) records the three decisions that
+shape it: the answer is its own agent, its text is the ordinary event stream
+rather than a second channel, and it is stored as its own row.
+
+_Landed, backend:_ a tenth agent, `AnswerAgent`, with its own role, prompt,
+output ceiling and routing tier, between the critic and the synthesizer - so the
+reader has an answer while the report is still being assembled, and a run that
+dies at synthesis has still answered the question. It is the only agent that
+streams. Three event types carry its text (`answer_started`, `answer_delta`,
+`answer_completed`), published through the transport ADR 0018 already built, in
+phrase-sized pieces because every piece is a stored row. `run_answers` is the
+read model a reader who was not watching is served, written by the projection
+beside the evidence and the report; `GET /research/{id}/answer` returns
+`{"answer": null}` rather than a 404, because "not yet" is the normal state of a
+run that started ten seconds ago.
+
+_Frontend:_ a run's page is now a conversation. The question, the answer arriving
+under it with a caret while it is still being written, and the box for the next
+question under that; the stat tiles, the checklist, the live feed and the plan
+moved below it rather than above. A follow-up starts a new run that names this
+one as its parent, so a conversation is a chain of durable jobs rather than
+messages on a socket. While nothing has arrived, the page says what the run is
+doing in words with the count it has reached, because a bare spinner is
+indistinguishable from a hung page.
+
+_Defects found by verifying:_
+
+- **The answerer left no trace of itself.** `NODE_AGENT` in the ledger is an
+  exhaustive `dict[GraphNode, AgentName]`, and a node missing from it raises a
+  `KeyError` inside a _guarded_ write - so the step ran, succeeded, and wrote
+  neither its span nor the model call that hung from it. It shipped that way
+  until a scenario counted the ledger's rows against the calls the run had
+  actually made. `test_every_node_is_attributed_to_an_agent_in_the_ledger` now
+  fails the build for the next node that forgets.
+- **A short answer streamed as nothing at all.** The first cut published a piece
+  once the buffer filled and had no final flush, so an answer that never reached
+  the chunk size produced no `answer_delta` at all. `AnswerStream.finish` is now
+  part of the contract and the node calls it in a `finally` - including on the
+  path where the agent raised, because a half-answer belongs to the reader too.
+- **`LLMGateway.stream` never asked the budget guard.** It had been there since
+  Phase 6 with nothing calling it, and the per-call cost check that every other
+  operation makes was simply absent - so a budgeted run could have streamed a
+  paragraph it had no allowance to pay for. The answerer is exempt from the
+  ceiling for the same reason the synthesizer is, and the check is now there for
+  every other caller.
+- **A migration cannot name a constraint off the model.** Alembic applies the
+  metadata's naming convention to `op.create_table`, so 0010's already-prefixed
+  name became `ck_research_events_ck_research_events_research_events_type` in the
+  database while the model says something shorter. The widening migration reads
+  the name out of `pg_constraint` and wraps both halves in `op.f`.
+
+_Not verified:_ a live streamed answer from a real provider. The gateway's
+streaming path is driven end to end by the scenario suite over a scripted
+provider, and `tests/scenarios/test_live_model.py` still uses the structured
+path; pointing it at the answerer needs a key and about three cents a run.
+
+---
+
 ## Implementation rules
 
 1. Do not use mocked data once a real implementation exists.

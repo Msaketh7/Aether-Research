@@ -1,5 +1,6 @@
 import type {
   ActivityResponse,
+  AnswerResponse,
   CreateResearchRequest,
   CreateResearchResponse,
   DashboardStats,
@@ -85,6 +86,10 @@ export const researchApi = {
 
   report: (id: string, signal?: AbortSignal) =>
     apiRequest<ReportResponse>(`/research/${id}/report`, { signal }),
+
+  /** `{ answer: null }` while the run is still working - never a 404. */
+  answer: (id: string, signal?: AbortSignal) =>
+    apiRequest<AnswerResponse>(`/research/${id}/answer`, { signal }),
 
   cancel: (id: string) => apiRequest<ResearchRun>(`/research/${id}/cancel`, { method: 'POST' }),
 

@@ -1,4 +1,9 @@
-import type { ResearchEvent, ResearchEventType, RunStatus } from '@aether/shared-types';
+import {
+  RESEARCH_STAGES,
+  type ResearchEvent,
+  type ResearchEventType,
+  type RunStatus,
+} from '@aether/shared-types';
 import { describe, expect, it } from 'vitest';
 import { accumulate, deriveStages, stageProgressRatio } from './stages';
 
@@ -33,8 +38,35 @@ function stageState(stages: ReturnType<typeof deriveStages>, name: string) {
 describe('deriveStages', () => {
   it('marks everything pending before any event arrives', () => {
     const stages = deriveStages([], 'queued');
-    expect(stages).toHaveLength(7);
+    // One row per declared stage. Asserted against the vocabulary rather than a
+    // literal, so adding a stage is a change to the contract and not a test to
+    // renumber.
+    expect(stages).toHaveLength(RESEARCH_STAGES.length);
+    expect(stages.map((stage) => stage.stage)).toEqual([...RESEARCH_STAGES]);
     expect(stages.every((stage) => stage.state === 'pending')).toBe(true);
+  });
+
+  it('reaches the answering stage before the writing stage', () => {
+    const stages = deriveStages(
+      [
+        event('answer_started', 'synthesizing'),
+        event('answer_completed', 'synthesizing', {
+          text: 'An answer [1].',
+          model: 'scripted',
+          word_count: 3,
+          citation_count: 1,
+          truncated: false,
+        }),
+      ],
+      'synthesizing',
+    );
+
+    // The answer is the furthest the run has demonstrably got. Writing the
+    // report comes after it, and claiming otherwise would tell a reader the
+    // report exists while they are still watching the answer arrive.
+    expect(stageState(stages, 'answering')).toBe('active');
+    expect(stageState(stages, 'writing')).toBe('pending');
+    expect(stages.find((stage) => stage.stage === 'answering')?.detail).toBe('3 words');
   });
 
   it('marks earlier stages done and the current stage active', () => {

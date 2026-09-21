@@ -90,6 +90,28 @@ describe('buildDataset', () => {
     }
   });
 
+  it('numbers the answer against the same citations the report uses', () => {
+    const dataset = buildDataset(spec(), true);
+    const ordinals = new Set(dataset.report!.citations.map((citation) => citation.ordinal));
+
+    expect(dataset.answer).not.toBeNull();
+    const markers = [...dataset.answer!.content_md.matchAll(/\[(\d+)\]/g)];
+    expect(markers.length).toBeGreaterThan(0);
+    // The whole reason the answer is worth citing: its `[n]` resolves through
+    // the report's citation list. Numbered against anything else it would point
+    // at the wrong source while still looking correct.
+    for (const match of markers) {
+      expect(ordinals.has(Number(match[1]))).toBe(true);
+    }
+  });
+
+  it('writes no answer for a run that never reached the answerer', () => {
+    // A failed run stops during discovery and a cancelled one before the
+    // answerer, which is what the real graph does with both.
+    expect(buildDataset(spec({ status: 'failed' }), true).answer).toBeNull();
+    expect(buildDataset(spec({ status: 'cancelled' }), true).answer).toBeNull();
+  });
+
   it('produces no report for a failed run', () => {
     const dataset = buildDataset(spec({ status: 'failed' }), true);
     expect(dataset.report).toBeNull();
@@ -136,6 +158,31 @@ describe('buildTimeline', () => {
     const timeline = buildTimeline(buildDataset(spec({ status: 'failed' }), true));
     expect(timeline.at(-1)?.event.type).toBe('research_failed');
     expect(timeline.some((entry) => entry.event.type === 'synthesis_started')).toBe(false);
+  });
+
+  it('streams the answer in pieces that reassemble into the stored one', () => {
+    const dataset = buildDataset(spec(), true);
+    const timeline = buildTimeline(dataset);
+    const deltas = timeline.filter((entry) => entry.event.type === 'answer_delta');
+
+    // More than one, or the mock would let a client ship that only works when
+    // the whole answer arrives at once.
+    expect(deltas.length).toBeGreaterThan(1);
+    const assembled = deltas
+      .map((entry) => (entry.event as { payload: { text: string } }).payload.text)
+      .join('');
+    expect(assembled).toBe(dataset.answer!.content_md);
+  });
+
+  it('finishes the answer before it starts writing the report', () => {
+    const timeline = buildTimeline(buildDataset(spec(), true));
+    const at = (type: string) => timeline.findIndex((entry) => entry.event.type === type);
+
+    // The order the graph runs them in, and the reason the answer is worth
+    // streaming: the reader has it while the report is still being assembled.
+    expect(at('answer_started')).toBeGreaterThan(-1);
+    expect(at('answer_started')).toBeLessThan(at('answer_completed'));
+    expect(at('answer_completed')).toBeLessThan(at('synthesis_started'));
   });
 
   it('only announces sources that exist in the dataset', () => {

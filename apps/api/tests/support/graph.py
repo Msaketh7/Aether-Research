@@ -21,9 +21,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agents.checkpoint import build_serializer
 from app.agents.graph import CancellationProbe, GraphBounds
-from app.agents.nodes import NodeResult, ResearchNodes
+from app.agents.nodes import DeltaSink, NodeResult, ResearchNodes
 from app.agents.runtime import ResearchGraphRunner
 from app.agents.schemas import (
+    AnswerDraft,
     CitationCheck,
     ClaimItem,
     ContradictionItem,
@@ -134,6 +135,8 @@ class Script:
     contradictions_on_round: int | None = None
     #: How many drafts the citation validator rejects before passing one.
     citation_failures: int = 0
+    #: The answerer returns no answer, as it does for a run with no claims.
+    answer_is_empty: bool = False
     research_delay_seconds: float = 0.0
     priorities: tuple[TaskPriority, ...] = ()
     #: Node name -> the call numbers (1-based) that raise.
@@ -160,6 +163,8 @@ class ScriptedNodes:
         self.plan_states: list[ResearchState] = []
         self.peak_concurrent_research = 0
         self._active_research = 0
+        #: Every piece the answerer handed to its sink, in order.
+        self.streamed: list[str] = []
 
     def bundle(self) -> ResearchNodes:
         return ResearchNodes(
@@ -170,6 +175,7 @@ class ScriptedNodes:
             verifier=self,
             contradiction_checker=self,
             critic=self,
+            answerer=self,
             synthesizer=self,
             citation_validator=self,
         )
@@ -358,6 +364,33 @@ class ScriptedNodes:
         )
         result = NodeResult(critique, self._usage())
         await self._end("critic")
+        return result
+
+    async def answer(
+        self, state: ResearchState, *, on_delta: DeltaSink
+    ) -> NodeResult[AnswerDraft | None]:
+        await self._begin("answerer")
+        claims = list(state.get("claims") or ())
+        if self.script.answer_is_empty or not claims:
+            result: NodeResult[AnswerDraft | None] = NodeResult(None, self._usage())
+            await self._end("answerer")
+            return result
+        text = f"Scripted answer from {len(claims)} claims [1]."
+        # Delivered in pieces, because a test of the stream has to see more than
+        # one: an implementation that published the whole answer once would pass
+        # every assertion about the final text.
+        for piece in (text[: len(text) // 2], text[len(text) // 2 :]):
+            await on_delta(piece)
+            self.streamed.append(piece)
+        result = NodeResult(
+            AnswerDraft(
+                text=text,
+                model="scripted-model",
+                claim_ids=(claims[0].id,),
+            ),
+            self._usage(),
+        )
+        await self._end("answerer")
         return result
 
     async def synthesize(self, state: ResearchState) -> NodeResult[ReportDraft]:

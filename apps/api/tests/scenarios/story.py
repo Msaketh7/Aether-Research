@@ -44,7 +44,7 @@ from app.core.enums import (
     ReportSectionKind,
     TaskPriority,
 )
-from tests.scenarios.world import Page, ScriptedBrain, Web, prompt_text
+from tests.scenarios.world import Page, ScriptedBrain, StreamedText, Web, prompt_text
 
 QUESTION = "How do AI inference providers price hosted H100 capacity?"
 
@@ -315,6 +315,24 @@ def citing_every_claim(prefix: str = "Published H100 pricing is consistent acros
     return rule
 
 
+def answering_every_claim(prefix: str = "Published H100 pricing is consistent"):
+    """A streamed answer that cites every claim the prompt catalogued.
+
+    The same derivation the report's rule uses, and for the same reason: the
+    answer is numbered against the *same* catalogue, so a scenario with two
+    claims whose answer cited one would be a scenario that could not tell a
+    renumbering bug from a scripted sentence.
+    """
+
+    def rule(request) -> StreamedText:
+        prompt = prompt_text(request)
+        numbers = [int(n) for n in re.findall(r"^--- claim (\d+) \|", prompt, re.MULTILINE)]
+        markers = " ".join(f"[{number}]" for number in numbers) or ""
+        return StreamedText(text=f"{prefix} {markers}.".strip())
+
+    return rule
+
+
 # --- the whole script ---------------------------------------------------------------
 
 
@@ -339,5 +357,6 @@ def ordinary_run(
     brain.on(VerificationOutput, verifying())
     brain.on(ContradictionOutput, no_contradictions())
     brain.on(CritiqueOutput, critique(sufficient=sufficient))
+    brain.on(StreamedText, answering_every_claim())
     brain.on(ReportOutput, citing_every_claim())
     return brain

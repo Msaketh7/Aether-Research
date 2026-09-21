@@ -49,10 +49,14 @@ threat in the system, because ingesting hostile text is the product's core loop.
 - Content is sanitized: scripts, hidden elements, zero-width and bidi control
   characters, and `data:`/`javascript:` URIs are stripped before the model sees
   the text.
-- **Least-privilege tools.** The synthesizer has no network tools at all. A
-  researcher cannot write to the database. No agent has a shell.
+- **Least-privilege tools.** The answerer and the synthesizer have no network
+  tools at all. A researcher cannot write to the database. No agent has a shell.
 - Structured output: agents return schema-validated objects. Free-form prose
-  cannot become an action.
+  cannot become an action. **The answerer is the one exception**, and it is
+  bounded rather than excused: it returns prose because its text is shown to a
+  person as it arrives, it has no tools to act with, and the only structure it
+  is trusted for - which claims it cited - is read back out of the `[n]` markers
+  it wrote rather than taken from what it says about itself (ADR 0023).
 - **A model refers to the run's material by number, never by identifier.** It
   answers with catalogue positions, so injected text asking it to cite, fetch or
   name something produces a number out of range — dropped and counted, not
@@ -62,7 +66,15 @@ threat in the system, because ingesting hostile text is the product's core loop.
   document text, so injected assertions with no supporting span are dropped by
   citation validation.
 
-**Status (Phase 10).** All of these are implemented. The delimiting,
+**A streamed answer is rendered, never injected.** The answer reaches the
+browser as text and is turned into React elements by the same parser the report
+uses (`apps/web/src/lib/research/markdown.ts`), which can express nothing it
+does not recognise. Nothing on that path touches `dangerouslySetInnerHTML`, so a
+prompt injection that survived into the prose is a wrong sentence rather than a
+script tag - and the partial text of a half-arrived answer is parsed the same
+way as the whole.
+
+**Status (Phase 10, extended in Phase 27).** All of these are implemented. The delimiting,
 sanitisation and least-privilege controls live in `apps/api/app/sources` and are
 enforced by the type system rather than by convention — retrieved text is
 `UntrustedText`, whose `__str__` raises, so it cannot be interpolated into a

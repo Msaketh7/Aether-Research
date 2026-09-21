@@ -68,6 +68,9 @@ class ResearchEventType(StrEnum):
     CRITIC_STARTED = "critic_started"
     ADDITIONAL_RESEARCH_REQUESTED = "additional_research_requested"
     ITERATION_STARTED = "iteration_started"
+    ANSWER_STARTED = "answer_started"
+    ANSWER_DELTA = "answer_delta"
+    ANSWER_COMPLETED = "answer_completed"
     SYNTHESIS_STARTED = "synthesis_started"
     CITATION_CHECK = "citation_check"
     REPORT_COMPLETED = "report_completed"
@@ -177,6 +180,12 @@ class AgentName(StrEnum):
     CLAIM_NORMALIZER = "claim_normalizer"
     VERIFIER = "verifier"
     CRITIC = "critic"
+    #: Writes the direct answer a reader sees first, streamed as it is written.
+    #: A role of its own rather than a second use of the synthesizer, because
+    #: the two are routed, priced and evaluated separately: one writes a
+    #: paragraph under a latency the reader is watching, the other writes the
+    #: whole report.
+    ANSWERER = "answerer"
     SYNTHESIZER = "synthesizer"
     CITATION_VALIDATOR = "citation_validator"
 

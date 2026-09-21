@@ -5,6 +5,7 @@ autogenerates a migration. A model that is not imported is a table that
 silently never gets created.
 """
 
+from app.db.models.answer import RunAnswerRow
 from app.db.models.audit import AuditLogRow
 from app.db.models.evaluation import EvaluationRow, FeedbackRow
 from app.db.models.event import ResearchEventRow
@@ -35,6 +36,7 @@ __all__ = [
     "ResearchRunRow",
     "ResearchRunUploadRow",
     "ResearchTaskRow",
+    "RunAnswerRow",
     "SessionRow",
     "SourceRow",
     "ToolCallRow",

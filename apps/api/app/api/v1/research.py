@@ -20,6 +20,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
+from app.answers.schemas import AnswerResponse
 from app.api.deps import (
     AuditTrailDep,
     BrokerDep,
@@ -154,6 +155,21 @@ async def get_report(
     Distinct from `run_not_found`: the frontend renders the two differently.
     """
     return await service.report(user.id, run_id)
+
+
+@router.get("/{run_id}/answer", response_model=AnswerResponse, summary="The direct answer")
+async def get_answer(
+    run_id: UUID, user: CurrentUser, service: ResearchServiceDep
+) -> AnswerResponse:
+    """The plain-prose answer, or `answer: null` while the run is still working.
+
+    Not a 404 when there is none: unlike the report, this is the body of a
+    conversation the client is already rendering, and "not yet" is the normal
+    state of a run that started ten seconds ago. A client watching the run is
+    served the same text by `answer_delta` events as it is written; this is what
+    a reader who was not watching gets.
+    """
+    return await service.answer(user.id, run_id)
 
 
 @router.post("/{run_id}/cancel", response_model=ResearchRun, summary="Cancel a run")

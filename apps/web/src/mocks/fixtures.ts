@@ -2,6 +2,7 @@ import type {
   ActivityResponse,
   AgentRunRecord,
   Citation,
+  RunAnswer,
   ClaimWithEvidence,
   Contradiction,
   Evidence,
@@ -68,6 +69,9 @@ export interface RunDataset {
   claims: ClaimWithEvidence[];
   contradictions: Contradiction[];
   report: ReportResponse | null;
+  /** The direct answer, written before the report. `null` when the run never
+   *  got far enough to write one - cancelled, or failed during discovery. */
+  answer: RunAnswer | null;
   activity: ActivityResponse;
   /** Wall-clock milliseconds the simulated run takes end to end. */
   durationMs: number;
@@ -471,6 +475,84 @@ function buildReport(
 // Activity trace
 // --------------------------------------------------------------------------
 
+/**
+ * The direct answer, built from the same claims the report cites.
+ *
+ * Its `[n]` markers are the *report's* ordinals, resolved through the citation
+ * list the report endpoint returns - exactly as the real answerer's are. That
+ * is what makes the mock exercise the real failure: a marker numbered against a
+ * different catalogue would resolve to the wrong source while still looking
+ * correct, and the renderer cannot tell the difference.
+ *
+ * `null` unless the run reached the answerer. A cancelled run is stopped before
+ * it, and a failed one never got past discovery, so neither has an answer - the
+ * same two cases the real graph produces.
+ */
+function buildAnswer(
+  spec: RunSpec,
+  claims: ClaimWithEvidence[],
+  contradictions: Contradiction[],
+  report: ReportResponse | null,
+): RunAnswer | null {
+  if (spec.status !== 'completed' || claims.length === 0 || report === null) return null;
+
+  const cited = [...report.citations].sort((a, b) => a.ordinal - b.ordinal).slice(0, 4);
+  if (cited.length === 0) return null;
+
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]));
+  const sentence = (citation: Citation): string => {
+    const text = claimById.get(citation.claim_id)?.text ?? citation.quote;
+    const trimmed = text.replace(/\s+/g, ' ').trim().replace(/\.$/, '');
+    return `${trimmed} [${citation.ordinal}].`;
+  };
+
+  const [lead, ...rest] = cited;
+  const paragraphs: string[] = [
+    // The answer, first sentence. Everything after it qualifies or bounds it.
+    `${sentence(lead as Citation)} ${rest
+      .slice(0, 2)
+      .map((citation) => sentence(citation))
+      .join(' ')}`.trim(),
+  ];
+
+  if (rest.length > 2) {
+    paragraphs.push(
+      rest
+        .slice(2)
+        .map((citation) => sentence(citation))
+        .join(' '),
+    );
+  }
+
+  if (contradictions.length > 0) {
+    const first = contradictions[0];
+    paragraphs.push(
+      `Sources disagree on ${first?.normalized_key ?? 'one figure'}: ` +
+        `${first?.value_a ?? 'one value'} against ${first?.value_b ?? 'another'}. ` +
+        'Both are reported above rather than reconciled, because nothing in the ' +
+        'retrieved material settles which is right.',
+    );
+  }
+
+  paragraphs.push(
+    `Drawn from ${claims.length} claims across ${report.citations.length} cited sources. ` +
+      'The full report has the analysis, the evidence spans and the reference list.',
+  );
+
+  const content = paragraphs.join('\n\n');
+  const anchor = spec.startedAt ?? spec.createdAt;
+  return {
+    id: stableUuid(`${spec.id}:answer`),
+    run_id: spec.id,
+    content_md: content,
+    model: 'claude-opus-4-6',
+    word_count: content.split(/\s+/).filter(Boolean).length,
+    citation_count: cited.length,
+    truncated: false,
+    generated_at: iso(shift(anchor, runDurationMs(spec.mode) - 14_000)),
+  };
+}
+
 function buildActivity(
   spec: RunSpec,
   plan: ResearchPlan,
@@ -644,6 +726,7 @@ export function buildDataset(spec: RunSpec, flagship: boolean): RunDataset {
   };
 
   const report = buildReport(spec, claims, sources, flagship);
+  const answer = buildAnswer(spec, claims, contradictions, report);
   const activity = buildActivity(spec, plan, sources, claims);
 
   const totalTokens = activity.llm_calls.reduce((sum, call) => sum + call.total_tokens, 0);
@@ -698,6 +781,7 @@ export function buildDataset(spec: RunSpec, flagship: boolean): RunDataset {
     claims,
     contradictions,
     report,
+    answer,
     activity,
     durationMs,
   };

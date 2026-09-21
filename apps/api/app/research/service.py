@@ -14,6 +14,8 @@ from __future__ import annotations
 import statistics
 from uuid import UUID
 
+from app.answers.repository import AnswerStore
+from app.answers.schemas import AnswerResponse
 from app.core.config import Settings
 from app.core.enums import ClaimStatus, ResearchMode, RunStatus, SourceType
 from app.core.errors import (
@@ -62,6 +64,7 @@ class ResearchService:
         uploads: UploadAttachments,
         evidence_store: EvidenceStore,
         report_store: ReportStore,
+        answer_store: AnswerStore,
         activity_store: ActivityStore,
         queue: JobQueue,
         broker: EventBroker,
@@ -71,6 +74,7 @@ class ResearchService:
         self._uploads = uploads
         self._evidence = evidence_store
         self._reports = report_store
+        self._answers = answer_store
         self._activity = activity_store
         self._queue = queue
         self._broker = broker
@@ -348,6 +352,19 @@ class ResearchService:
                 context={"run_status": run.status.value},
             )
         return stored
+
+    async def answer(self, user_id: UUID, run_id: UUID) -> AnswerResponse:
+        """The run's direct answer, or ``None`` when it has not written one.
+
+        Null rather than a 404, unlike ``report``. The difference is what the
+        caller does with it: a report is a page you navigate to, and "there is
+        no report" is a thing to render instead of one. The answer is the body
+        of a conversation the frontend is already showing, and a run that is
+        still researching has no answer *yet* - which is a state, not an error,
+        and polling a 404 cannot tell it apart from a run that never existed.
+        """
+        await self._require_run(user_id, run_id)
+        return AnswerResponse(answer=await self._answers.answer_for(run_id, user_id=user_id))
 
     # --- events -----------------------------------------------------------
 

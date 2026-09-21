@@ -28,3 +28,4 @@ accepted; a changed mind means a new ADR that supersedes the old one.
 | [0020](0020-the-ledger-and-the-gate.md)              | A node execution is the ledger's unit; a run's ceiling is enforced at the gateway | Accepted                                                           |
 | [0021](0021-sessions-not-tokens.md)                  | Opaque server-side sessions in a cookie; a rate limit that is a bucket            | Superseded by [0022](0022-federated-identity-and-signed-tokens.md) |
 | [0022](0022-federated-identity-and-signed-tokens.md) | Federated identity behind one interface; signed tokens with a revocation index    | Accepted                                                           |
+| [0023](0023-the-streamed-answer.md)                  | The answer is its own agent, streamed as durable events, stored as its own row    | Accepted                                                           |

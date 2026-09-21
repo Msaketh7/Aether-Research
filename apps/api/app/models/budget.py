@@ -31,13 +31,13 @@ evaluation judge, a one-off script - have no per-run ceiling, and inventing one
 here would make the gateway unusable for them. The enrolment is explicit
 (``for_run``) and belongs to whoever owns the run, which is the worker.
 
-**The step that writes the report is never refused, and that is the whole
-point.** FR-8 says a run that hits a limit stops safely and returns a *partial
-result*; the partial result is a report, and a report costs a model call. A
-guard that refused it would turn every budget stop into a run with nothing to
-show - the exact outcome the requirement exists to prevent. So the synthesizer
-is exempt, the overshoot is one call wide, and the report says in its own
-caveat that discovery stopped at a limit.
+**The steps that write are never refused, and that is the whole point.** FR-8
+says a run that hits a limit stops safely and returns a *partial result*; the
+partial result is the answer and the report, and each costs a model call. A
+guard that refused them would turn every budget stop into a run with nothing to
+show - the exact outcome the requirement exists to prevent. So the answerer and
+the synthesizer are exempt, the overshoot is two calls wide, and the report says
+in its own caveat that discovery stopped at a limit.
 """
 
 from __future__ import annotations
@@ -57,8 +57,11 @@ from app.models.registry import ModelSpec
 logger = get_logger(__name__)
 
 #: Roles whose calls finish a run rather than extend it. Always authorised -
-#: see the module docstring.
-FINISHING_ROLES: frozenset[AgentName] = frozenset({AgentName.SYNTHESIZER})
+#: see the module docstring. The answerer is here for the same reason the
+#: synthesizer is, and with more force: it writes the paragraph the reader
+#: actually reads, and a run stopped by its ceiling that shows nothing at all is
+#: the failure FR-8 names.
+FINISHING_ROLES: frozenset[AgentName] = frozenset({AgentName.ANSWERER, AgentName.SYNTHESIZER})
 
 
 class BudgetExhausted(ModelError):

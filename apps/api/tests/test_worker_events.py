@@ -101,6 +101,9 @@ async def test_a_run_streams_the_vocabulary_the_frontend_renders(
         E.VERIFICATION_STARTED,
         E.CONTRADICTION_FOUND,
         E.CRITIC_STARTED,
+        E.ANSWER_STARTED,
+        E.ANSWER_DELTA,
+        E.ANSWER_COMPLETED,
         E.SYNTHESIS_STARTED,
         E.CITATION_CHECK,
         E.REPORT_COMPLETED,
@@ -109,7 +112,10 @@ async def test_a_run_streams_the_vocabulary_the_frontend_renders(
     assert emitted.index(E.PLANNER_COMPLETED) < emitted.index(E.SOURCE_FOUND)
     assert emitted.index(E.SOURCE_FOUND) < emitted.index(E.CLAIM_EXTRACTED)
     assert emitted.index(E.CLAIM_EXTRACTED) < emitted.index(E.VERIFICATION_STARTED)
-    assert emitted.index(E.CRITIC_STARTED) < emitted.index(E.SYNTHESIS_STARTED)
+    assert emitted.index(E.CRITIC_STARTED) < emitted.index(E.ANSWER_STARTED)
+    # The answer before the report, which is the point of where the node sits.
+    assert emitted.index(E.ANSWER_COMPLETED) < emitted.index(E.SYNTHESIS_STARTED)
+    assert emitted.index(E.ANSWER_STARTED) < emitted.index(E.ANSWER_DELTA)
     assert emitted[-1] is E.REPORT_COMPLETED
     # Monotonic and gapless: this is the `id:` a browser echoes back.
     assert [event.seq for event in events] == list(range(1, len(events) + 1))
@@ -128,6 +134,7 @@ async def test_every_event_carries_the_status_the_run_was_in(
     assert first(events, E.PLANNER_STARTED).status is RunStatus.PLANNING
     assert first(events, E.SOURCE_FOUND).status is RunStatus.RESEARCHING
     assert first(events, E.VERIFICATION_STARTED).status is RunStatus.VERIFYING
+    assert first(events, E.ANSWER_STARTED).status is RunStatus.SYNTHESIZING
     assert first(events, E.SYNTHESIS_STARTED).status is RunStatus.SYNTHESIZING
     assert first(events, E.CITATION_CHECK).status is RunStatus.VALIDATING
     assert first(events, E.REPORT_COMPLETED).status is RunStatus.COMPLETED
@@ -331,3 +338,70 @@ async def test_a_run_paused_for_a_retry_is_not_reported_as_failed(
     await run_one(harness, database, run.id, RunStatus.PAUSED)
 
     assert E.RESEARCH_FAILED not in types(await streamed(database, run.id))
+
+
+# --- the answer, as it is written -----------------------------------------
+
+
+async def test_the_answer_arrives_in_pieces_that_reassemble_into_the_whole(
+    database, artifact_store, worker_config
+):
+    """The claim this feature makes: a reader watches the answer appear.
+
+    Both halves are asserted, because either alone would let the wrong thing
+    ship. More than one delta proves it was streamed rather than posted at the
+    end; the pieces joining back into `answer_completed`'s text proves the
+    reader was watching the real answer rather than a summary of it.
+    """
+    run = await seed_run(database, worker_config)
+    harness = build_worker(database, artifact_store, worker_config)
+
+    await run_one(harness, database, run.id)
+
+    events = await streamed(database, run.id)
+    deltas = [event for event in events if event.type is E.ANSWER_DELTA]
+    assert len(deltas) > 1
+    assert [event.payload["index"] for event in deltas] == list(range(1, len(deltas) + 1))
+
+    completed = first(events, E.ANSWER_COMPLETED)
+    assert "".join(event.payload["text"] for event in deltas) == completed.payload["text"]
+    assert completed.payload["word_count"] > 0
+    assert completed.payload["truncated"] is False
+
+
+async def test_the_answer_is_announced_complete_exactly_once(
+    database, artifact_store, worker_config
+):
+    """Even across a repaired report, which is synthesised and checked twice.
+
+    The repair loop rewrites the report, never the answer, so a second
+    `answer_completed` would tell a client to replace text that did not change.
+    """
+    run = await seed_run(database, worker_config)
+    harness = build_worker(
+        database, artifact_store, worker_config, script=Script(citation_failures=1)
+    )
+
+    await run_one(harness, database, run.id)
+
+    emitted = types(await streamed(database, run.id))
+    assert emitted.count(E.ANSWER_COMPLETED) == 1
+    assert emitted.count(E.ANSWER_STARTED) == 1
+    # The report really was written twice - otherwise this proves nothing.
+    assert emitted.count(E.SYNTHESIS_STARTED) == 2
+
+
+async def test_a_run_with_nothing_to_answer_from_streams_no_answer(
+    database, artifact_store, worker_config
+):
+    """No claims, no answer, and no event claiming otherwise."""
+    run = await seed_run(database, worker_config)
+    harness = build_worker(
+        database, artifact_store, worker_config, script=Script(answer_is_empty=True)
+    )
+
+    await run_one(harness, database, run.id)
+
+    emitted = types(await streamed(database, run.id))
+    assert E.ANSWER_COMPLETED not in emitted
+    assert E.ANSWER_DELTA not in emitted

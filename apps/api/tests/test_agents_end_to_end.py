@@ -21,6 +21,7 @@ from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.agents.answer import AnswerAgent
 from app.agents.checkpoint import build_serializer
 from app.agents.citations import CitationValidator
 from app.agents.critic import CriticAgent
@@ -53,6 +54,7 @@ from app.agents.state import RunBrief
 from app.agents.synthesis import SynthesisAgent
 from app.agents.verification import ContradictionAgent, VerificationAgent
 from app.core.enums import (
+    AgentName,
     ClaimStatus,
     ClaimType,
     EvidenceStance,
@@ -163,9 +165,21 @@ def a_report(content: str = "Provider A charges $4.10 per GPU-hour [1]."):
     )
 
 
-def build(*answers: Any, width: int = 4):
-    """A runner over the real agents, answering from ``answers`` in order."""
-    gateway, model, recorder = fake.gateway(*answers)
+#: What the scripted answerer streams. One piece per call, cited against the
+#: one claim every round in this module produces - so the answer is subject to
+#: the same numbering the report is, and a wrong catalogue would show up here.
+ANSWER_PIECES = ("Provider A charges $4.10 per H100 GPU-hour [1].",)
+
+
+def build(*answers: Any, width: int = 4, answer_rounds: int = 4):
+    """A runner over the real agents, answering from ``answers`` in order.
+
+    ``answer_rounds`` scripts more streamed answers than any test needs, because
+    the answerer runs at most once per run and scripting it per test would put a
+    second sequence to keep in step beside the structured one. An unused entry
+    costs nothing; a missing one fails the node rather than the assertion.
+    """
+    gateway, model, recorder = fake.gateway(*answers, streams=[ANSWER_PIECES] * answer_rounds)
     toolbelt = FakeToolbelt(results=[result(url, title="Pricing") for url in PAGES])
     collector = FakeCollector()
     # The collector derives a source id from the URL; the retriever returns the
@@ -188,6 +202,7 @@ def build(*answers: Any, width: int = 4):
         verifier=VerificationAgent(gateway),
         contradiction_checker=ContradictionAgent(gateway),
         critic=CriticAgent(gateway),
+        answerer=AnswerAgent(gateway),
         synthesizer=SynthesisAgent(gateway),
         citation_validator=CitationValidator(),
     )
@@ -233,7 +248,11 @@ async def test_a_question_becomes_a_report_whose_every_citation_resolves():
     assert state["report"] is not None
     assert state["report"].revision == 0
     assert collector.limits == [20], "its whole share of the source ceiling"
-    assert len(recorder.calls) == 8, "one ledger row per model call, and the validator makes none"
+    assert len(recorder.calls) == 9, "one ledger row per model call, and the validator makes none"
+    # Including the streamed one. A streamed call that left no ledger row would
+    # make the answer free as far as cost governance is concerned.
+    assert [call.role for call in recorder.calls].count(AgentName.ANSWERER) == 1
+    assert state["answer"] is not None and state["answer"].claim_ids == (state["claims"][0].id,)
 
 
 async def test_the_chain_from_the_report_back_to_a_retrieved_source_holds():
@@ -257,15 +276,20 @@ async def test_the_chain_from_the_report_back_to_a_retrieved_source_holds():
 
 
 async def test_the_runs_cost_is_the_sum_of_what_its_agents_actually_spent():
-    """Not an estimate. Eight calls at 180 tokens each, priced from the registry."""
+    """Not an estimate. Nine calls at 180 tokens each, priced from the registry.
+
+    The ninth is the answer. It is streamed rather than structured and it is
+    counted exactly like the rest: a streamed call the ledger could not price
+    would read as *not measured* and stop a budgeted run's discovery early.
+    """
     runner, model, recorder, _, _ = build(
         plan("What does provider A charge per GPU-hour?"), *a_round(), a_report()
     )
 
     state = await runner.run(brief())
 
-    assert model.calls == 8
-    assert state["token_usage"].total == 8 * 180
+    assert model.calls == 9
+    assert state["token_usage"].total == 9 * 180
     assert state["estimated_cost"].measured
     assert state["estimated_cost"].usd == round(sum(c.cost_usd or 0 for c in recorder.calls), 6)
     assert state["search_queries"] == 1
@@ -331,8 +355,9 @@ async def test_a_run_that_can_never_cite_anything_does_not_pretend_otherwise():
         raise AssertionError("a run with no claims must not produce a report")
 
     # Extraction, normalization, verification and the contradiction check each
-    # had nothing to work from, so none of them called a model: the planner, the
-    # researcher's two calls and the critic are the whole run.
+    # had nothing to work from, so none of them called a model - and neither did
+    # the answerer, which has nothing to cite: the planner, the researcher's two
+    # calls and the critic are the whole run.
     assert model.calls == 4
 
 
@@ -364,10 +389,14 @@ async def test_a_quick_run_skips_the_critic_and_still_produces_a_cited_report():
 
     assert state["critique"] is None
     assert state["citation_check"].passed
-    assert model.calls == 6, "no verifier, no contradiction check, no critic"
+    assert model.calls == 7, "no verifier, no contradiction check, no critic"
     # Quick steps every role down a tier, with the synthesizer floored at strong.
+    # The answerer has no floor and lands on medium, which is the trade that mode
+    # exists to make: the answer is short, and its latency is the one a reader
+    # watches.
     assert {request.model for request in model.prompts} == {
         "scripted-small",
+        "scripted-medium",
         "scripted-strong",
     }
 
@@ -441,7 +470,6 @@ async def test_every_agent_reaches_a_model_only_by_its_role(settings, database, 
     roles are the ones the routing table knows.
     """
     from app.agents.factory import build_dependencies, build_research_nodes
-    from app.core.enums import AgentName
 
     gateway, _, _ = fake.gateway()
     dependencies = build_dependencies(
@@ -461,6 +489,7 @@ async def test_every_agent_reaches_a_model_only_by_its_role(settings, database, 
             nodes.verifier,
             nodes.contradiction_checker,
             nodes.critic,
+            nodes.answerer,
             nodes.synthesizer,
         )
     }
@@ -470,6 +499,7 @@ async def test_every_agent_reaches_a_model_only_by_its_role(settings, database, 
         AgentName.CLAIM_NORMALIZER,
         AgentName.VERIFIER,
         AgentName.CRITIC,
+        AgentName.ANSWERER,
         AgentName.SYNTHESIZER,
     }
     # The validator calls no model, so it has no role to route.

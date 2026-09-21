@@ -35,6 +35,7 @@ from pydantic import Field
 
 from app.agents.budget import Consumption
 from app.agents.schemas import (
+    AnswerDraft,
     CitationCheck,
     ClaimItem,
     ContradictionItem,
@@ -153,6 +154,10 @@ class ResearchState(TypedDict, total=False):
     claims: Annotated[list[ClaimItem], merge_by_id]
     contradictions: Annotated[list[ContradictionItem], merge_by_id]
     critique: Critique | None
+    #: The direct answer, written before the report and streamed as it was
+    #: written. Present from the moment the answerer finishes, which is what
+    #: stops a resumed run answering a second time.
+    answer: AnswerDraft | None
     report: ReportDraft | None
     citation_check: CitationCheck | None
     #: Repairs the validator has been granted, at most ``MAX_CITATION_REPAIRS``.
@@ -232,6 +237,7 @@ def initial_state(brief: RunBrief, *, now: datetime) -> ResearchState:
         claims=[],
         contradictions=[],
         critique=None,
+        answer=None,
         report=None,
         citation_check=None,
         citation_repairs=0,

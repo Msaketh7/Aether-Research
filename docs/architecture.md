@@ -87,15 +87,24 @@ START
   -> Critic               is coverage sufficient?
        |-- insufficient and within limits --> back to Planner (bounded)
        '-- sufficient or limit reached ----v
+  -> Answer               the question, answered, streamed as it is written
   -> Synthesis            structured report from evidence only
   -> Citation Validation  every [n] resolves to real evidence
+       '-- citations rejected, one repair left --> back to Synthesis
 END
 ```
+
+The answer comes before the report deliberately, and the repair loop does not go
+back through it: the reader has an answer while the report is still being
+assembled, a run that dies at synthesis has still answered the question, and a
+citation that did not resolve is a defect in the _report_ rather than a reason to
+rewrite a paragraph somebody has already read (ADR 0023).
 
 Every loop is bounded by `max_iterations`, `max_sources`, `max_search_queries`,
 `max_runtime` and `max_estimated_cost`, checked at every node boundary, and every
 node by a timeout. Hitting a limit is a normal outcome: discovery stops, the run
-proceeds to synthesis, and the report carries an explicit coverage caveat.
+proceeds to the answer and the report, and both carry an explicit coverage
+caveat.
 Cancellation stops the run at the next node. The graph checkpoints after every
 node and resumes from the last checkpoint (ADR 0014).
 

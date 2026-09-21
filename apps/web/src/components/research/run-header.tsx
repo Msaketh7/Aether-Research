@@ -15,7 +15,7 @@ import { ModeBadge, RunStatusBadge } from './badges';
 import { useRunContext } from './run-context';
 
 const TABS = [
-  { segment: '', label: 'Overview' },
+  { segment: '', label: 'Answer' },
   { segment: 'activity', label: 'Activity' },
   { segment: 'sources', label: 'Sources' },
   { segment: 'evidence', label: 'Evidence' },
@@ -111,9 +111,17 @@ export function RunHeader() {
             <h1 className="font-display text-2xl font-semibold leading-tight sm:text-[1.75rem]">
               {run.title}
             </h1>
-            <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-              {run.question}
-            </p>
+            {/*
+             * Everywhere but the answer, where the question is the opening turn
+             * of the conversation and printing it twice would read as a stutter.
+             * The title is derived from the question and is not the question, so
+             * the other tabs still need it.
+             */}
+            {active('') ? null : (
+              <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+                {run.question}
+              </p>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">

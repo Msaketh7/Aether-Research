@@ -35,6 +35,9 @@ const TONES: Record<ResearchEventType, EventTone> = {
   critic_started: 'progress',
   additional_research_requested: 'warning',
   iteration_started: 'progress',
+  answer_started: 'progress',
+  answer_delta: 'progress',
+  answer_completed: 'positive',
   synthesis_started: 'progress',
   citation_check: 'progress',
   report_completed: 'positive',
@@ -161,6 +164,30 @@ export function describeEvent(event: ResearchEvent): EventDescription {
       return {
         title: `Iteration ${event.payload.iteration} of ${event.payload.max_iterations}`,
         detail: null,
+        tone,
+        href: null,
+      };
+
+    case 'answer_started':
+      return { title: 'Answering the question', detail: null, tone, href: null };
+
+    case 'answer_delta':
+      // Never rendered: the hook that feeds this component routes the pieces of
+      // the answer into the answer rather than into the feed. Described anyway,
+      // because the alternative is a `default` case - and a `default` here would
+      // turn the next forgotten event type into a blank row instead of the
+      // compile error this file exists to produce.
+      return {
+        title: 'Answer continues',
+        detail: `${event.payload.text.length} characters`,
+        tone,
+        href: null,
+      };
+
+    case 'answer_completed':
+      return {
+        title: 'Answer written',
+        detail: `${event.payload.word_count} words, ${event.payload.citation_count} claims cited`,
         tone,
         href: null,
       };

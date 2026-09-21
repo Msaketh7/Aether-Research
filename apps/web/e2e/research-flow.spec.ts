@@ -173,6 +173,12 @@ test('a new run streams progress and produces a validated report', async ({ page
     timeout: 60_000,
   });
 
+  // The answer arrives before the report, as prose rather than as a bar. Its
+  // body appearing at all is the assertion that matters: it can only be there
+  // because `answer_delta` events were received and assembled.
+  await expect(page.getByTestId('answer-body')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByTestId('answer-body')).not.toBeEmpty();
+
   // The run reaches a terminal state and the report becomes available.
   await expect(page.locator('[data-status="completed"]').first()).toBeVisible({
     timeout: 90_000,
@@ -196,6 +202,15 @@ test('a completed run exposes sources, evidence and citations', async ({ page })
   await historyLink(page, 'AI inference infrastructure landscape').click();
 
   await expect(page.locator('[data-status="completed"]').first()).toBeVisible();
+
+  // The conversation: the question that was asked, the answer under it, and the
+  // box for the next one under that. Nobody streamed this answer to this
+  // browser - it is read back from the run, which is the path every reader who
+  // arrives after a run has finished takes.
+  await expect(page.getByTestId('run-question')).toBeVisible();
+  await expect(page.getByTestId('answer-body')).toBeVisible();
+  await expect(page.getByTestId('answer-body')).toHaveAttribute('data-streaming', 'false');
+  await expect(page.getByTestId('follow-up-input')).toBeEnabled();
 
   // Sources: filterable, with provenance on every card.
   await runTab(page, 'Sources').click();

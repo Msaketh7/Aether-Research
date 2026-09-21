@@ -93,6 +93,17 @@ report where every material claim is cited.
 > hand, so a stale one is a command away from being fixed rather than a chore
 > nobody does.
 
+**A run is a conversation.** The question, the answer written under it, and the
+box for the next question under that. The answer arrives as it is written -
+phrase by phrase, with a caret while it is still going - and it is produced
+before the report, so a reader has it while the report is still being assembled.
+Its `[n]` markers resolve through the report's citations once there is a report,
+and render unresolved until then rather than pointing at something unchecked.
+Everything that produced it - the stage checklist, the live feed, the budget, the
+plan - sits below the composer rather than above the answer.
+
+![A run as a conversation: question, answer, follow-up box](docs/screenshots/answer.png)
+
 **The report, and the thing it is all for.** Every `[n]` opens the source, the
 verbatim quote behind it and the confidence attached to it. The banner above the
 text is the citation validator's verdict - here 18 of 20 resolved, and the two
@@ -265,7 +276,7 @@ has never run is the kind of claim this repository exists not to make.
 > is in [`docs/load-testing.md`](docs/load-testing.md).
 
 **370 research runs** have been driven through the real pipeline: the real
-queue, the real lease, the real LangGraph graph, all nine agents, the real
+queue, the real lease, the real LangGraph graph, all ten agents, the real
 toolbelt behind its SSRF guard, ingestion, retrieval, the evidence projection
 and report assembly. Only the model provider and the socket are scripted. Plus
 four Locust ladders over the HTTP surface and a worker-concurrency sweep.
@@ -627,7 +638,7 @@ apps/api/app/
 ├── storage/        the ObjectStorage protocol, S3 and filesystem backends
 ├── sources/        the SSRF guard, the guarded client, the six research tools
 ├── retrieval/      ingestion (parse, chunk, embed) and hybrid retrieval
-├── agents/         the research graph and the nine agents that fill it
+├── agents/         the research graph and the ten agents that fill it
 ├── evidence/       source dedup, and the claim/evidence/contradiction projection
 ├── reports/        report assembly and its projection
 ├── cache/          content-hash response cache, TTLs, single-flight
@@ -720,6 +731,7 @@ still run everything else. `alembic upgrade heads` applies both.
 | `GET`    | `/research/{id}/sources`      | what was found, with dedup clusters and credibility   |
 | `GET`    | `/research/{id}/evidence`     | claims, verbatim spans, contradictions                |
 | `GET`    | `/research/{id}/activity`     | the agent trace with its tool and model calls         |
+| `GET`    | `/research/{id}/answer`       | the direct answer, or `null` until the run writes one |
 | `GET`    | `/research/{id}/report`       | the assembled report and the citation check's verdict |
 | `GET`    | `/research/{id}/events`       | **SSE**, resumable with `Last-Event-ID`               |
 | `POST`   | `/research/{id}/cancel`       | stops the run at the next node boundary               |
@@ -985,7 +997,8 @@ is a working product; it talks to a real FastAPI backend that persists to
 PostgreSQL; and behind it are object storage, a provider-neutral model gateway,
 six research tools behind an SSRF guard, a document ingestion pipeline, hybrid
 retrieval, the research graph - bounded, cancellable and checkpointed - and the
-nine agents that run inside it, from planning a question to writing a report
+ten agents that run inside it, from planning a question to answering it and
+writing a report
 whose every citation has been checked back to a source that was really
 retrieved.
 Switching the frontend between fixtures and the live API is one environment

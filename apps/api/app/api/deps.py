@@ -42,6 +42,7 @@ from app.core.config import Settings
 from app.core.errors import Unauthenticated
 from app.core.logging import request_id_var, user_id_var
 from app.core.pagination import PageParams
+from app.db.repositories.answers import SqlAlchemyAnswerRepository
 from app.db.repositories.audit import SqlAlchemyAuditLog
 from app.db.repositories.evaluations import SqlAlchemyEvaluationStore
 from app.db.repositories.evidence import SqlAlchemyEvidenceRepository
@@ -468,6 +469,10 @@ def get_report_repository(session: SessionDep) -> SqlAlchemyReportRepository:
     return SqlAlchemyReportRepository(session)
 
 
+def get_answer_repository(session: SessionDep) -> SqlAlchemyAnswerRepository:
+    return SqlAlchemyAnswerRepository(session)
+
+
 def get_trace_store(database: Annotated[Database, Depends(get_database)]) -> SqlAlchemyTraceStore:
     """The trace store takes the engine, not the request's session.
 
@@ -484,6 +489,7 @@ def get_research_service(
     uploads: Annotated[SqlAlchemyUploadRepository, Depends(get_upload_repository)],
     evidence: Annotated[SqlAlchemyEvidenceRepository, Depends(get_evidence_repository)],
     reports: Annotated[SqlAlchemyReportRepository, Depends(get_report_repository)],
+    answers: Annotated[SqlAlchemyAnswerRepository, Depends(get_answer_repository)],
     activity: Annotated[SqlAlchemyTraceStore, Depends(get_trace_store)],
     queue: Annotated[JobQueue, Depends(get_queue)],
     broker: Annotated[EventBroker, Depends(get_broker)],
@@ -501,6 +507,7 @@ def get_research_service(
         uploads=uploads,
         evidence_store=evidence,
         report_store=reports,
+        answer_store=answers,
         activity_store=activity,
         queue=queue,
         broker=broker,

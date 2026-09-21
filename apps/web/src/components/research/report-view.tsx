@@ -1,7 +1,7 @@
 'use client';
 
 import type { Citation, ReportSection } from '@aether/shared-types';
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { parseInline, parseMarkdown, type Block } from '@/lib/research/markdown';
 import { cn } from '@/lib/utils';
 import { CitationMarker } from './citation-marker';
@@ -141,6 +141,36 @@ function renderBlock(
   }
 }
 
+/**
+ * Markdown with citation markers, rendered as React elements.
+ *
+ * Shared by the report's sections and by the direct answer, because the two are
+ * written to the same rules - the same marker syntax, the same prose subset, and
+ * the same reason for never touching `dangerouslySetInnerHTML`. A marker with no
+ * citation behind it renders unresolved rather than silently as plain text: on
+ * the answer that is the normal case until the report exists, and hiding it
+ * would be the renderer deciding a citation had been checked.
+ */
+export function MarkdownBody({
+  content,
+  citations,
+  className,
+  ...rest
+}: {
+  content: string;
+  citations: readonly Citation[];
+  className?: string;
+} & Omit<ComponentPropsWithoutRef<'div'>, 'content' | 'className'>) {
+  const citationsByOrdinal = new Map(citations.map((citation) => [citation.ordinal, citation]));
+  const blocks = parseMarkdown(content);
+
+  return (
+    <div className={className} {...rest}>
+      {blocks.map((block, index) => renderBlock(block, index, citationsByOrdinal))}
+    </div>
+  );
+}
+
 export function ReportSectionBody({
   section,
   citations,
@@ -148,12 +178,12 @@ export function ReportSectionBody({
   section: ReportSection;
   citations: Citation[];
 }) {
-  const citationsByOrdinal = new Map(citations.map((citation) => [citation.ordinal, citation]));
-  const blocks = parseMarkdown(section.content_md);
-
   return (
-    <div data-testid="report-section" data-kind={section.kind}>
-      {blocks.map((block, index) => renderBlock(block, index, citationsByOrdinal))}
-    </div>
+    <MarkdownBody
+      content={section.content_md}
+      citations={citations}
+      data-testid="report-section"
+      data-kind={section.kind}
+    />
   );
 }

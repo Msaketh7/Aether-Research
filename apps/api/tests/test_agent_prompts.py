@@ -55,11 +55,34 @@ def test_no_system_instruction_is_templated():
         assert "{{" not in template.system
 
 
+#: The one template whose agent does not ask for a schema.
+#:
+#: The answer is shown to a person as it arrives, and a document assembling
+#: itself on screen is not something anybody wants to watch - so it is streamed
+#: as prose and its shape is checked afterwards, by reading the markers out of
+#: what was written. Listed rather than derived, because "this agent returns
+#: free text" is a decision that should be made once and visibly.
+UNSTRUCTURED = {"answerer"}
+
+
 def test_every_template_tells_the_model_to_return_the_structured_object():
     """Each agent asks for a schema, and the instruction has to match the ask."""
     for name in template_names():
+        if name in UNSTRUCTURED:
+            continue
         system = load_template(name).system.lower()
         assert "structured object" in system, name
+
+
+def test_the_unstructured_template_tells_the_model_not_to_return_one():
+    """The other half of the exemption, so it cannot be a template nobody finished.
+
+    A prompt that says neither leaves the model to guess, and a model that
+    guesses JSON here streams a schema assembling itself onto a reader's screen.
+    """
+    for name in sorted(UNSTRUCTURED):
+        system = load_template(name).system.lower()
+        assert "no json" in system, name
 
 
 #: Templates whose variables can carry a delimited block of retrieved text -
@@ -74,6 +97,7 @@ CARRY_RETRIEVED_TEXT = [
     "verifier",
     "contradictions",
     "critic",
+    "answerer",
     "synthesizer",
 ]
 

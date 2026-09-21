@@ -24,6 +24,7 @@ export const queryKeys = {
       ['research', 'evidence', id, filter ?? 'all'] as const,
     activity: (id: string) => ['research', 'activity', id] as const,
     report: (id: string) => ['research', 'report', id] as const,
+    answer: (id: string) => ['research', 'answer', id] as const,
   },
   evaluations: {
     all: () => ['evaluations'] as const,

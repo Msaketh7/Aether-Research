@@ -1,3 +1,4 @@
+import { RESEARCH_STAGES } from '@aether/shared-types';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -61,13 +62,29 @@ for (const path of ['/', '/dashboard'] as const) {
   });
 }
 
+test('a run does not scroll horizontally on a phone', async ({ page }) => {
+  // The one page in the product that stacks a conversation, a composer and a
+  // two-column grid of cards. The loop above cannot cover it: it needs a run id,
+  // which only the history has.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/dashboard');
+  await historyLink(page, 'AI inference infrastructure landscape').click();
+  await expect(page.getByTestId('answer-body')).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(2);
+});
+
 test('the progress checklist is a named list with one entry per stage', async ({ page }) => {
   await page.goto('/dashboard');
   await historyLink(page, 'AI inference infrastructure landscape').click();
 
   const checklist = page.getByRole('list', { name: 'Research progress' }).first();
   await expect(checklist).toBeVisible();
-  await expect(checklist.getByRole('listitem')).toHaveCount(7);
+  // One row per declared stage, answering included.
+  await expect(checklist.getByRole('listitem')).toHaveCount(RESEARCH_STAGES.length);
 });
 
 test('a finished run explains an empty feed instead of showing a stale live region', async ({

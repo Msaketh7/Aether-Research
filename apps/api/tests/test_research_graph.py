@@ -16,10 +16,29 @@ import langsmith.utils
 import pytest
 
 from app.agents.errors import NodeContractViolated, PlanningFailed, SynthesisFailed
-from app.agents.nodes import NodeResult
-from app.agents.schemas import ClaimItem, Plan, ReportDraft, StopReason
+from app.agents.nodes import AnswerStream, NodeResult
+from app.agents.schemas import AnswerDraft, ClaimItem, Plan, ReportDraft, StopReason
 from app.core.enums import ClaimStatus, ResearchMode, TaskPriority
 from tests.support.graph import RecordedRuns, Script, ScriptedNodes, brief, make_runner
+
+
+class CollectedAnswer(AnswerStream):
+    """An answer stream a test can read back, in the order it was written to."""
+
+    def __init__(self) -> None:
+        self.pieces: list[str] = []
+        self.finished = 0
+
+    async def write(self, text: str) -> None:
+        self.pieces.append(text)
+
+    async def finish(self) -> None:
+        self.finished += 1
+
+    @property
+    def text(self) -> str:
+        return "".join(self.pieces)
+
 
 EVERY_NODE_ONCE = {
     "planner": 1,
@@ -29,6 +48,7 @@ EVERY_NODE_ONCE = {
     "verifier": 1,
     "contradiction_checker": 1,
     "critic": 1,
+    "answerer": 1,
     "synthesizer": 1,
     "citation_validator": 1,
 }
@@ -50,8 +70,10 @@ async def test_a_deep_run_goes_from_question_to_validated_report():
     assert len(state["completed_tasks"]) == 2
     assert state["failed_tasks"] == []
     assert all(claim.status is ClaimStatus.VERIFIED for claim in state["claims"])
-    # Ten calls at a hundred tokens each, two of them searches: summed, not guessed.
-    assert state["token_usage"].total == 1000
+    # Eleven calls at a hundred tokens each, two of them searches: summed, not
+    # guessed. The eleventh is the answer, which is a node like any other and
+    # shows up in the run's totals like any other.
+    assert state["token_usage"].total == 1100
     assert state["search_queries"] == 2
 
 
@@ -99,8 +121,102 @@ async def test_a_quick_run_skips_verification_contradictions_and_the_critic():
     assert nodes.calls["verifier"] == nodes.calls["contradiction_checker"] == 0
     assert nodes.calls["critic"] == 0
     assert nodes.calls["evidence_extractor"] == nodes.calls["claim_normalizer"] == 1
+    # It still answers. Quick is a shallower run, not a run that skips the thing
+    # the person asked for.
+    assert nodes.calls["answerer"] == 1
+    assert state["answer"] is not None
     assert state["report"] is not None
     assert all(claim.status is ClaimStatus.CANDIDATE for claim in state["claims"])
+
+
+# --- the answer ---------------------------------------------------------------------
+
+
+async def test_the_answer_is_written_before_the_report_and_streamed_as_it_goes():
+    """The order is the point of the node's position in the graph.
+
+    The reader has the answer while the report is still being assembled, so the
+    answerer must run before the synthesizer - and the pieces must reach the
+    invocation's stream rather than only the state.
+    """
+    nodes = ScriptedNodes()
+    runner, _, _ = make_runner(nodes)
+    stream = CollectedAnswer()
+
+    state = await runner.run(brief(), answers=stream)
+
+    answer = state["answer"]
+    assert isinstance(answer, AnswerDraft)
+    assert stream.finished == 1
+    # More than one piece, and they reassemble into exactly what was stored. An
+    # implementation that wrote the whole answer once would pass on the text and
+    # fail here, which is the difference this feature is.
+    assert len(stream.pieces) > 1
+    assert stream.text == answer.text
+    assert nodes.calls["answerer"] == 1
+
+
+async def test_a_run_with_nobody_watching_still_writes_and_stores_its_answer():
+    """No stream given. The answer is state, not a side effect of a connection."""
+    runner, _, _ = make_runner(ScriptedNodes())
+
+    state = await runner.run(brief())
+
+    assert isinstance(state["answer"], AnswerDraft)
+
+
+async def test_a_failing_answerer_costs_the_answer_and_not_the_run():
+    """A dropped stream must not take the report down with it.
+
+    The gateway does not fail over a stream that has already emitted, so this is
+    a failure the run has to survive: the report is the more expensive artifact
+    and it is still ahead of this node.
+    """
+    nodes = ScriptedNodes(Script(fail_on={"answerer": {1}}))
+    runner, _, _ = make_runner(nodes)
+
+    state = await runner.run(brief())
+
+    assert state["answer"] is None
+    assert state["report"] is not None
+    assert state["citation_check"] is not None and state["citation_check"].passed
+    assert [error.node.value for error in state["errors"]] == ["answerer"]
+
+
+async def test_a_run_with_no_claims_to_answer_from_writes_no_answer():
+    """Nothing to cite means nothing to say, and the state says so plainly."""
+    nodes = ScriptedNodes(Script(answer_is_empty=True))
+    runner, _, _ = make_runner(nodes)
+    stream = CollectedAnswer()
+
+    state = await runner.run(brief(), answers=stream)
+
+    assert state["answer"] is None
+    assert stream.pieces == []
+    # Closed anyway, so a stream holding text has no way to keep it.
+    assert stream.finished == 1
+    # Not an error: the answerer ran and reported honestly.
+    assert state["errors"] == []
+
+
+async def test_a_resumed_run_does_not_answer_a_second_time():
+    """The answer is checkpointed, so a retry after it must not rewrite it.
+
+    Re-answering would pay twice and would replace, under a reader who has
+    already read it, a paragraph with a different one.
+    """
+    nodes = ScriptedNodes(Script(fail_on={"synthesizer": {1}}))
+    runner, _, _ = make_runner(nodes)
+    run = brief()
+
+    with pytest.raises(SynthesisFailed):
+        await runner.run(run, answers=CollectedAnswer())
+    second = CollectedAnswer()
+    state = await runner.run(run, answers=second)
+
+    assert nodes.calls["answerer"] == 1
+    assert second.pieces == []
+    assert isinstance(state["answer"], AnswerDraft)
 
 
 # --- every loop ends ----------------------------------------------------------------

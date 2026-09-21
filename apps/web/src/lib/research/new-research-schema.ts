@@ -12,13 +12,24 @@ import { z } from 'zod';
 /** A domain hint like `sec.gov`; not a URL, and never a scheme. */
 const DOMAIN_PATTERN = /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
 
+/**
+ * The bounds on a question, named so the follow-up box and this schema cannot
+ * disagree about them. Both mirror `MAX_QUESTION_LENGTH` in the API's
+ * `app/research/schemas.py`, which is the rule that actually decides.
+ */
+export const MIN_QUESTION_LENGTH = 15;
+export const MAX_QUESTION_LENGTH = 2000;
+
 export const newResearchSchema = z
   .object({
     question: z
       .string()
       .trim()
-      .min(15, 'Describe the research question in at least 15 characters.')
-      .max(2000, 'Keep the question under 2000 characters.'),
+      .min(
+        MIN_QUESTION_LENGTH,
+        `Describe the research question in at least ${MIN_QUESTION_LENGTH} characters.`,
+      )
+      .max(MAX_QUESTION_LENGTH, `Keep the question under ${MAX_QUESTION_LENGTH} characters.`),
     mode: z.enum(RESEARCH_MODES),
     depth: z.number().int().min(1).max(5),
     domains: z
