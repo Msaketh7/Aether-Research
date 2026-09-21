@@ -203,8 +203,17 @@ def test_tests_get_the_filesystem_backend_without_asking(tmp_path: Path):
 def test_every_other_environment_gets_s3_by_default():
     """The fallback direction matters: omitting configuration must never
     silently downgrade a real deployment to local disk."""
+    from joserfc.jwk import ECKey
+
+    # `staging` needs a signing key like any other real deployment (ADR 0022);
+    # it is nothing to do with storage, but a Settings cannot be built without.
+    staging = Settings(
+        app_env="staging",
+        jwt_private_key=ECKey.generate_key("P-256").as_pem(private=True).decode(),
+    )
+
     assert isinstance(build_object_storage(Settings(app_env="local")), S3ObjectStorage)
-    assert isinstance(build_object_storage(Settings(app_env="staging")), S3ObjectStorage)
+    assert isinstance(build_object_storage(staging), S3ObjectStorage)
 
 
 def test_explicit_configuration_wins_over_the_environment_default(tmp_path: Path):
@@ -216,8 +225,13 @@ def test_explicit_configuration_wins_over_the_environment_default(tmp_path: Path
 def test_the_filesystem_backend_is_refused_in_production(tmp_path: Path):
     """Artifacts on a container's disk do not survive the next deploy, and the
     run that wrote them would have citations pointing at nothing."""
+    from joserfc.jwk import ECKey
+
     settings = Settings(
         app_env="production",
+        # Unrelated to storage, but a production Settings is invalid without a
+        # signing key since ADR 0022.
+        jwt_private_key=ECKey.generate_key("P-256").as_pem(private=True).decode(),
         storage_backend="filesystem",
         storage_local_path=tmp_path,
     )

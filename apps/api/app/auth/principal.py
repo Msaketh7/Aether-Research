@@ -1,8 +1,10 @@
 """Who is making the request.
 
-Since Phase 20 this resolves a **real session**: the caller presents an opaque
-token in an `HttpOnly` cookie, it is hashed and looked up, and the row says who
-they are and whether the session is still live (ADR 0021). Authorisation was
+Since ADR 0022 the caller presents a **signed access token** in an `HttpOnly`
+cookie. It is verified by signature rather than looked up, then checked against
+the revocation index so that signing a device out takes effect on its next
+request. The user row is still read, because a token's claims are a snapshot
+and a role change must not wait for expiry. Authorisation was
 already enforced from Phase 2 - every research object carries a ``user_id`` and
 every read is scoped by it - so authentication slotted in underneath rules that
 were already being exercised, rather than being retrofitted onto a surface that
@@ -137,19 +139,30 @@ async def authenticate(
         return Authenticated(resolve_development_principal(settings, user_header))
 
     if cookie_token:
-        row = await sessions.resolve(cookie_token, now=now)
-        if row is not None:
-            user = await users.get(row.user_id)
-            if user is not None:
-                return Authenticated(
-                    Principal(id=user.id, email=user.email, role=user.role),
-                    session_id=row.id,
-                )
-        # A cookie that does not resolve is *not* an anonymous request in a
-        # development environment: falling through to the shared identity would
-        # make a revoked session look like a working one, which is the single
-        # behaviour session revocation exists to prevent.
-        return None
+        try:
+            # Signature, issuer, audience, expiry - and the revocation index,
+            # which is what makes a signed-out device stop working on its next
+            # request rather than whenever its token happens to expire.
+            claims = await sessions.verify(cookie_token, now=now)
+        except Unauthenticated:
+            # A cookie that does not verify is *not* an anonymous request in a
+            # development environment: falling through to the shared identity
+            # would make a revoked session look like a working one, which is
+            # the single behaviour revocation exists to prevent.
+            return None
+
+        # The row is still read. The token carries the email and role it was
+        # minted with, and those go stale: a role revoked ten minutes ago must
+        # not keep working until the token expires. The token says *who*; the
+        # database says what they may currently do.
+        user = await users.get(claims.user_id)
+        if user is None:
+            return None
+
+        return Authenticated(
+            Principal(id=user.id, email=user.email, role=user.role),
+            session_id=claims.session_id,
+        )
 
     if development_identity_allowed(settings):
         return Authenticated(DEV_PRINCIPAL)

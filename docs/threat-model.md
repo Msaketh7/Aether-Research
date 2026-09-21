@@ -219,6 +219,45 @@ devices out. A session is not bound to an address or a device fingerprint: a
 stolen cookie works from anywhere, which is the trade every cookie session makes
 against breaking every user behind a mobile network.
 
+_Revised in Phase 26 (ADR 0022)._ Single sign-on made the credential a **signed
+access token** rather than a pointer to a row, which changes this section's
+first control and nothing else. The row no longer stores a hash of anything a
+caller can present - there is no session token any more - and revocation is no
+longer a property of the lookup. Three mechanisms replace it: access tokens
+live fifteen minutes, so the window a stolen one works in is bounded; a
+revocation index keyed by the session id is consulted on every verification, so
+signing a device out still lands on that device's next request; and refresh
+tokens are opaque, hashed at rest, rotated on every use, and revoke their whole
+family on reuse - which turns a stolen refresh token from an indefinite
+foothold into a detected event.
+
+_New residual, and it is a real one._ Revocation now depends on a store that
+can be lost. If the revocation index is unreachable or empty, revocation
+degrades to the access token's remaining lifetime - at most fifteen minutes. It
+cannot degrade further, because renewal reads `sessions.revoked_at` from
+Postgres rather than from the index, so a revoked session can never be renewed.
+The index fails **open** on purpose: treating every session as revoked when
+Redis is unreachable would sign out every user of the system over an
+infrastructure blip.
+
+_New threat: federated sign-in._ An attacker who can make a provider assert an
+address they do not own would become whoever holds the local account with that
+address. Controls: identities are keyed on the provider's **subject**, never on
+the email; attaching a provider identity to an existing local account by
+address is off by default and additionally requires the provider to have marked
+the address verified; the token is checked against the provider's published
+keys under an **asymmetric-only** algorithm allowlist, with exact `iss` and
+`aud` comparisons, PKCE S256, a single-use `state` bound to a short-lived
+`HttpOnly` cookie, and a nonce wherever the provider echoes one. The callback's
+redirect target is validated as a path on this application's own origin, so a
+`?next=` value cannot turn our sign-in page into a redirector to somebody
+else's.
+
+_Unverified._ The live provider round trip has never run - there are no Auth0 or
+Supabase credentials on this machine. The controls above are tested against a
+scripted provider; the vendors' exact wire shapes follow published
+documentation and are unconfirmed.
+
 ### 3.7.1 Abuse of the public surface (boundary 2)
 
 **Threat.** An unauthenticated caller brute-forces a password, enumerates

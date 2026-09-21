@@ -22,7 +22,8 @@ from __future__ import annotations
 import datetime as dt
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.deps import (
@@ -38,9 +39,10 @@ from app.api.deps import (
     UserAgent,
     UserRepositoryDep,
 )
+from app.api.errors import error_body
 from app.auth.service import normalise_email
 from app.core.enums import AuditAction
-from app.core.errors import AppError, NotFound
+from app.core.errors import AppError, NotFound, Unauthenticated
 from app.db.models.user import UserRow
 from app.security.ratelimit import AUTH, WRITE, refuse
 
@@ -133,12 +135,16 @@ async def register(
         await trail.failure(AuditAction.REGISTER_REJECTED, reason=exc.code)
         raise
 
-    cookies.attach(response, signed_in.session.token)
+    cookies.attach_tokens(
+        response,
+        access=signed_in.tokens.access_token,
+        refresh=signed_in.tokens.refresh_token,
+    )
     await trail.record(
         AuditAction.REGISTER,
         user_id=signed_in.user.id,
         resource_type="session",
-        resource_id=signed_in.session.id,
+        resource_id=signed_in.tokens.session_id,
     )
     return LoginResponse(user=_user_view(signed_in.user))
 
@@ -178,12 +184,16 @@ async def login(
         )
         raise
 
-    cookies.attach(response, signed_in.session.token)
+    cookies.attach_tokens(
+        response,
+        access=signed_in.tokens.access_token,
+        refresh=signed_in.tokens.refresh_token,
+    )
     await trail.record(
         AuditAction.LOGIN,
         user_id=signed_in.user.id,
         resource_type="session",
-        resource_id=signed_in.session.id,
+        resource_id=signed_in.tokens.session_id,
     )
     return LoginResponse(user=_user_view(signed_in.user))
 
@@ -219,6 +229,78 @@ async def logout(
             resource_id=current.session_id,
         )
     cookies.clear(response)
+
+
+@router.post(
+    "/refresh",
+    response_model=LoginResponse,
+    summary="Renew the token pair",
+    dependencies=[Depends(RateLimit(AUTH))],
+)
+async def refresh(
+    request: Request,
+    response: Response,
+    sessions: SessionServiceDep,
+    users: UserRepositoryDep,
+    cookies: CookiePolicyDep,
+) -> LoginResponse | JSONResponse:
+    """Rotate the refresh token and mint a new access token.
+
+    **The path matters.** The refresh cookie is scoped to exactly this path, so
+    that the credential which can mint sessions is absent from every other
+    request. Moving this endpoint without moving `REFRESH_COOKIE_PATH` means
+    the browser stops sending the cookie and every renewal fails.
+
+    **CSRF is handled by `SameSite`**, not by a token. A cross-site POST does
+    not carry a `Lax` cookie, so a forged request arrives with no credential
+    and is refused. That is the same control protecting every other
+    state-changing endpoint here; a separate CSRF token would add a second
+    mechanism for one endpoint without closing anything the first leaves open.
+
+    Rate-limited in the credential class: it accepts a bearer credential from
+    an unauthenticated caller, which is precisely what that bucket is for.
+    """
+    presented = request.cookies.get(cookies.refresh_name)
+    if not presented:
+        raise Unauthenticated("Sign in to continue.", code="unauthenticated")
+
+    async def load_identity(user_id: UUID) -> tuple[str, str] | None:
+        row = await users.get(user_id)
+        return (row.email, row.role) if row is not None else None
+
+    now = dt.datetime.now(dt.UTC)
+    try:
+        issued, session_row = await sessions.refresh(
+            presented, load_identity=load_identity, now=now
+        )
+    except AppError as exc:
+        # **Returned, not raised.** Clearing the cookies on the injected
+        # `response` and then raising does nothing: the exception handler
+        # builds a fresh response and the mutated one is discarded, so the
+        # browser keeps a refresh token that is known to be dead. Rendering the
+        # same envelope here is the only way to refuse *and* clear in one
+        # response. Caught by `test_a_failed_refresh_clears_both_cookies`.
+        refusal = JSONResponse(
+            status_code=exc.status_code,
+            content=error_body(code=exc.code, message=exc.message, details=exc.details),
+            headers=exc.headers,
+        )
+        cookies.clear(refusal)
+        return refusal
+
+    # Present by construction: `load_identity` returning None is what makes
+    # `refresh` refuse, so reaching here means the row was read.
+    user = await users.get(session_row.user_id)
+    if user is None:
+        refusal = JSONResponse(
+            status_code=401,
+            content=error_body(code="unauthenticated", message="Sign in to continue."),
+        )
+        cookies.clear(refusal)
+        return refusal
+
+    cookies.attach_tokens(response, access=issued.access_token, refresh=issued.refresh_token)
+    return LoginResponse(user=_user_view(user))
 
 
 @router.get("/me", response_model=UserResponse, summary="The authenticated principal")

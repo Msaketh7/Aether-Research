@@ -24,6 +24,7 @@ from app.auth.principal import (
 )
 from app.core.config import Settings
 from app.core.errors import Unauthenticated
+from tests.support.settings import settings_for
 
 # --- the development identity ---------------------------------------------
 
@@ -37,7 +38,7 @@ def test_the_development_identity_is_refused_outside_development(environment: st
     authentication bypass - and it is the environment people forget to lock
     down.
     """
-    settings = Settings(app_env=environment)  # type: ignore[arg-type]
+    settings = settings_for(environment)  # type: ignore[arg-type]
 
     assert not development_identity_allowed(settings)
     with pytest.raises(Unauthenticated) as raised:
@@ -49,7 +50,7 @@ def test_the_development_identity_is_refused_outside_development(environment: st
 @pytest.mark.parametrize("environment", ["staging", "production"])
 def test_the_impersonation_header_is_refused_outside_development(environment: str):
     """Supplying the header must not be a way around the gate."""
-    settings = Settings(app_env=environment)  # type: ignore[arg-type]
+    settings = settings_for(environment)  # type: ignore[arg-type]
 
     with pytest.raises(Unauthenticated):
         resolve_development_principal(settings, "00000000-0000-4000-8000-000000000042")
@@ -58,7 +59,7 @@ def test_the_impersonation_header_is_refused_outside_development(environment: st
 @pytest.mark.parametrize("environment", sorted(DEVELOPMENT_ENVIRONMENTS))
 def test_development_environments_still_resolve_a_principal(environment: str):
     """The gate must not break the development workflow it is protecting."""
-    settings = Settings(app_env=environment)  # type: ignore[arg-type]
+    settings = settings_for(environment)  # type: ignore[arg-type]
 
     assert resolve_development_principal(settings, None) == DEV_PRINCIPAL
 
@@ -80,7 +81,7 @@ def test_the_gate_is_an_allowlist_so_a_new_environment_is_closed():
     for environment in declared - DEVELOPMENT_ENVIRONMENTS:
         with pytest.raises(Unauthenticated):
             resolve_development_principal(  # type: ignore[arg-type]
-                Settings(app_env=environment), None
+                settings_for(environment), None
             )
 
 
@@ -92,10 +93,10 @@ def test_the_dev_identity_flag_can_only_close_the_gate():
     could also switch it *on* would be a second way into the development
     identity, which is the whole class of finding this file records.
     """
-    assert development_identity_allowed(Settings(app_env="local"))
-    assert not development_identity_allowed(Settings(app_env="local", dev_identity_enabled=False))
+    assert development_identity_allowed(settings_for("local"))
+    assert not development_identity_allowed(settings_for("local", dev_identity_enabled=False))
     for environment in ("staging", "production"):
-        settings = Settings(app_env=environment, dev_identity_enabled=True)  # type: ignore[arg-type]
+        settings = settings_for(environment, dev_identity_enabled=True)  # type: ignore[arg-type]
         assert not development_identity_allowed(settings)
 
 
@@ -109,7 +110,7 @@ def test_the_cookie_is_secure_wherever_the_dev_identity_is_refused():
     from app.core.config import Environment
 
     for environment in get_args(Environment):
-        settings = Settings(app_env=environment)
+        settings = settings_for(environment)
         insecure_cookie = not settings.session_cookie_is_secure
         development = environment in DEVELOPMENT_ENVIRONMENTS
         assert insecure_cookie == development, environment
@@ -131,13 +132,13 @@ def test_a_wildcard_cors_origin_is_refused_at_startup(raw: str, monkeypatch):
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", raw)
 
     with pytest.raises(ValidationError, match="cannot be"):
-        Settings(app_env="local")
+        settings_for("local")
 
 
 def test_specific_origins_are_still_accepted(monkeypatch):
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", "https://app.example.com,https://admin.example.com")
 
-    settings = Settings(app_env="local")
+    settings = settings_for("local")
 
     assert settings.cors_allow_origins == [
         "https://app.example.com",

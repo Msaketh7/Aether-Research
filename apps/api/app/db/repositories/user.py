@@ -53,7 +53,7 @@ class UserRepository:
         return (await self._session.execute(statement)).scalar_one_or_none()
 
     async def create(
-        self, *, email: str, password_hash: str, name: str, role: str = "user"
+        self, *, email: str, password_hash: str | None, name: str, role: str = "user"
     ) -> UserRow | None:
         """Register an account, or report that the address is taken.
 
@@ -65,6 +65,11 @@ class UserRepository:
         A SAVEPOINT around the insert: a unique-violation poisons the enclosing
         transaction, and the request still has a rate-limit decision and an
         audit row to commit afterwards.
+
+        ``password_hash`` is optional since ADR 0022: an account created by a
+        provider sign-in has no password, and null is what
+        ``AuthService.sign_in`` refuses - so such an account cannot be reached
+        through the password form until somebody sets one.
         """
         row = UserRow(email=email, password_hash=password_hash, name=name, role=role)
         try:

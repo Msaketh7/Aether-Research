@@ -106,6 +106,23 @@ class RegistrationClosed(AppError):
     message = "This deployment does not accept new registrations."
 
 
+class LastIdentity(AppError):
+    """Refusing to remove somebody's only way of signing in.
+
+    A 409 rather than a 403: nothing is forbidden about the request, the
+    account is simply in a state where it cannot be granted. Adding a password
+    or a second provider makes the same request succeed.
+    """
+
+    status_code = 409
+    code = "last_identity"
+
+    def __init__(
+        self, message: str = "Set a password before unlinking your only sign-in method."
+    ) -> None:
+        super().__init__(message)
+
+
 class Conflict(AppError):
     status_code = 409
     code = "conflict"

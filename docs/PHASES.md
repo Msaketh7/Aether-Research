@@ -1903,6 +1903,47 @@ architecture map grew a deployment topology labelled _never applied_, and the
 README's future-improvements section leads with the two gaps that need money and
 an AWS account rather than time.
 
+## Phase 26 — Single sign-on · **Done (the live round trip is unverified)**
+
+Google and GitHub, brokered by Auth0 and Supabase, alongside the password form
+Phase 20 shipped. Requested with an explicit architectural choice attached: the
+provider's JWT becomes the credential, replacing the opaque server-side
+sessions of ADR 0021. [ADR 0022](ADRs/0022-federated-identity-and-signed-tokens.md)
+records that decision, what it cost, and what was built to pay the cost back.
+
+_Landed, frontend first as asked:_ SSO buttons and a closed-set failure banner
+on `/login` and `/register`, served from `/auth/sso/providers` so a deployment
+that configures nothing shows no dead buttons; an open-redirect guard applied to
+`?next=` on both sides of the wire. Route protection in the Next middleware,
+scoped to live mode - and documented as **navigation, not a boundary**, because
+it does not verify signatures, cannot always see the cookie, and sits in a layer
+with a bypass CVE in its history. The API is the boundary.
+
+_Backend:_ one `IdentityProvider` seam with a shared OIDC implementation and two
+vendor descriptions; PKCE S256, `state`, nonce, an asymmetric-only algorithm
+allowlist and exact `iss`/`aud` checks; a JWKS cache whose refetch-on-unknown-kid
+is rate-limited, because a token header is attacker-chosen and would otherwise
+be an amplifier aimed at the provider. Short access tokens, refresh rotation
+with family revocation on reuse, and a revocation index keyed by `sid` so
+per-device sign-out lands on the next request. Identities link on
+`(provider, subject)` and never on email; linking a verified address to an
+existing local account is off by default because it is an account-takeover
+primitive.
+
+_Defects found by verifying:_ a duplicate test name meant the provider
+token-expiry case was silently shadowed and never ran (ruff `F811`); the
+migration omitted the `created_at` indexes `TimestampMixin` declares, caught by
+`test_the_migrations_and_the_models_agree`; and the first cut of the
+HTTPS-in-production check fired on an unrelated default, failing every
+production `Settings` whether or not SSO was configured.
+
+_Not verified:_ the live round trip. There are no Auth0 or Supabase credentials
+on this machine, so the flow is exercised end to end against a scripted provider
+over `httpx2.MockTransport` - the pattern the model adapters use. The security
+properties are tested; the vendors' exact wire shapes follow their published
+documentation and are **unconfirmed**. This sits alongside the evaluation
+benchmark and the deployment as work that is built and has never been run.
+
 ---
 
 ## Implementation rules
