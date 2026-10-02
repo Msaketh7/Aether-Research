@@ -21,8 +21,6 @@ from app.core.enums import AgentName, ClaimStatus
 from app.models.errors import ProviderUnavailable
 from tests.support.agents import claim, contradiction, evidence, gateway, ident, source, state
 
-pytestmark = pytest.mark.anyio
-
 
 class Sink:
     """What the graph gives the agent: somewhere to put each piece."""

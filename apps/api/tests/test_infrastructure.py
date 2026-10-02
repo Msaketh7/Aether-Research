@@ -20,13 +20,17 @@ images are built there; the claims those cannot check are the ones below.
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
+from tests.support.settings import signing_key_pem
 
 REPO = Path(__file__).resolve().parents[3]
 COMPOSE = REPO / "docker-compose.yml"
@@ -105,13 +109,42 @@ def _declared_environment_names() -> dict[str, set[str]]:
     locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
     names["terraform:locals"] = set(re.findall(r"^\s{4}([A-Z][A-Z0-9_]+)\s*=", locals_hcl, re.M))
 
+    # Only the ConfigMaps and Secrets a pod loads into its environment, because
+    # those are the settings. ollama.yaml carries a ConfigMap as well - a script
+    # mounted as a file - and reading every ConfigMap as settings would report
+    # its file name as an unknown setting and, worse, used to let whichever
+    # ConfigMap was read last replace the real one.
+    loaded = _environment_sources()
     for document in _kubernetes_documents():
-        if document.get("kind") == "ConfigMap":
-            names["kubernetes:configmap"] = set(document["data"])
-        elif document.get("kind") == "Secret":
-            names["kubernetes:secret"] = set(document["stringData"])
+        kind, name = document.get("kind"), document["metadata"]["name"]
+        if kind == "ConfigMap" and name in loaded["configMapRef"]:
+            names.setdefault("kubernetes:configmap", set()).update(document["data"])
+        elif kind == "Secret" and name in loaded["secretRef"]:
+            names.setdefault("kubernetes:secret", set()).update(document["stringData"])
 
     return names
+
+
+def _environment_sources() -> dict[str, set[str]]:
+    """The ConfigMaps and Secrets some pod takes its environment from, by name."""
+    loaded: dict[str, set[str]] = {"configMapRef": set(), "secretRef": set()}
+    for document in _kubernetes_documents():
+        if document.get("kind") not in {"Deployment", "Job"}:
+            continue
+        for container in _pod_containers(document):
+            for source in container.get("envFrom", []):
+                for kind, names in loaded.items():
+                    if kind in source:
+                        names.add(source[kind]["name"])
+    return loaded
+
+
+def _kubernetes_named(kind: str, name: str) -> dict:
+    return next(
+        document
+        for document in _kubernetes_documents()
+        if document.get("kind") == kind and document["metadata"]["name"] == name
+    )
 
 
 @pytest.mark.parametrize("source", sorted(_declared_environment_names()))
@@ -171,8 +204,260 @@ def test_production_deployments_refuse_the_development_identity():
     locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
     assert re.search(r'DEV_IDENTITY_ENABLED\s*=\s*"false"', locals_hcl)
 
-    configmap = next(d for d in _kubernetes_documents() if d.get("kind") == "ConfigMap")
+    configmap = _kubernetes_named("ConfigMap", "aether-config")
     assert configmap["data"]["DEV_IDENTITY_ENABLED"] == "false"
+
+
+# ---------------------------------------------------------------------------
+# What a deployed environment cannot do without
+# ---------------------------------------------------------------------------
+
+#: Settings a deployed environment refuses to start without, each with a value
+#: that satisfies it. A table rather than a derivation, because what satisfies a
+#: validator is not something a test can guess - but the test below holds it to
+#: app/core/config.py in both directions, so it cannot drift from the code.
+REQUIRED_OUTSIDE_DEVELOPMENT: dict[str, Callable[[], str]] = {
+    "JWT_PRIVATE_KEY": signing_key_pem,
+}
+
+DEPLOYED_ENVIRONMENTS = ("staging", "production")
+
+
+def _isolated_settings(monkeypatch: pytest.MonkeyPatch, **values: object) -> Settings:
+    """Settings from exactly these values: no `.env` file, no shell variable.
+
+    This machine's shell sets OPENAI_API_KEY and a developer's `.env` sets
+    more, and either would satisfy a requirement the deployment itself does not.
+    """
+    for key in list(os.environ):
+        if key.upper() in SETTING_NAMES:
+            monkeypatch.delenv(key)
+    return Settings(_env_file=None, **values)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("app_env", DEPLOYED_ENVIRONMENTS)
+def test_the_required_table_is_exactly_what_a_deployment_cannot_start_without(
+    app_env: str, monkeypatch: pytest.MonkeyPatch
+):
+    """Complete, because Settings starts with these and nothing else; minimal,
+    because it refuses to start without any one of them.
+
+    Together those make the table a statement about config.py rather than a
+    list somebody keeps: a validator that starts requiring a new setting fails
+    the first half, and one that stops requiring an old one fails the second.
+    """
+    values = {name.lower(): make() for name, make in REQUIRED_OUTSIDE_DEVELOPMENT.items()}
+
+    _isolated_settings(monkeypatch, app_env=app_env, **values)
+
+    for name in values:
+        without = {key: value for key, value in values.items() if key != name}
+        with pytest.raises(ValidationError, match=name.upper()):
+            _isolated_settings(monkeypatch, app_env=app_env, **without)
+
+
+def _laptop_defaults() -> set[str]:
+    """Settings whose default only works on a developer's machine.
+
+    Derived, so that a setting added later with a localhost default becomes a
+    deployment obligation without anybody remembering to list it. None of these
+    stops a deployment starting - which is the problem: a DATABASE_URL left at
+    its default starts, then fails every request; an OLLAMA_BASE_URL left at its
+    default starts, and retrieval quietly loses its dense arm.
+    """
+    found: set[str] = set()
+    for name, field in Settings.model_fields.items():
+        default = field.default
+        text = default.get_secret_value() if isinstance(default, SecretStr) else str(default)
+        if re.search(r"localhost|127\.0\.0\.1|example\.(com|org|net)", text):
+            found.add(name.upper())
+    return found
+
+
+def _hcl_string_list(text: str, name: str) -> set[str]:
+    match = re.search(rf"\b{name}\s*=\s*\[([^\]]*)\]", text)
+    assert match, f"{name} is not a list literal any more; this parser needs updating"
+    return set(re.findall(r'"([A-Z0-9_]+)"', match.group(1)))
+
+
+def _terraform_supplied() -> set[str]:
+    """Every setting a Terraform task is given, other than the overridable keys.
+
+    `provider_secret_names` is left out on purpose: it is a variable, so an
+    environment can replace it, and a required setting that lives there can be
+    dropped by an override that only meant to remove a search provider.
+    """
+    locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
+    return (
+        _declared_environment_names()["terraform:locals"]
+        | _hcl_string_list(locals_hcl, "derived_secret_names")
+        | _hcl_string_list(locals_hcl, "required_secret_names")
+    )
+
+
+def _kubernetes_supplied() -> set[str]:
+    names = _declared_environment_names()
+    return names["kubernetes:configmap"] | names["kubernetes:secret"]
+
+
+@pytest.mark.parametrize("source", ["terraform", "kubernetes"])
+def test_every_deployment_supplies_what_a_deployed_environment_needs(source: str):
+    """The reverse of the drift test above, and the one that was missing.
+
+    That test asks whether every variable a deployment sets is a setting. This
+    asks whether every setting a deployment needs is set - and until it existed,
+    neither the Terraform nor the manifests supplied JWT_PRIVATE_KEY, so the
+    first apply of either would have started an API and a worker that refused
+    to boot.
+    """
+    laptop = _laptop_defaults()
+    assert {"DATABASE_URL", "REDIS_URL", "OLLAMA_BASE_URL"} <= laptop, (
+        "the localhost-default scan found less than it should; check its pattern"
+    )
+    needed = set(REQUIRED_OUTSIDE_DEVELOPMENT) | laptop
+
+    supplied = _terraform_supplied() if source == "terraform" else _kubernetes_supplied()
+
+    missing = needed - supplied
+    assert not missing, (
+        f"{source} does not supply {sorted(missing)}: a deployment either refuses "
+        "to start without these or runs against a developer's localhost"
+    )
+
+
+def test_a_declared_secret_that_has_not_been_written_reads_as_absent(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The placeholder must be non-empty for AWS and blank for the application.
+
+    Terraform's provider sends `secret_string` only when it is set, and an
+    empty string is not, so `""` reaches PutSecretValue as no value and the
+    first apply fails. The placeholder is therefore a space - which only works
+    because the settings layer strips a credential before deciding it is
+    absent. Every declared name is checked, because the stripping is a list of
+    fields in config.py and a secret missing from that list would turn the
+    placeholder into a one-character API key.
+    """
+    module = (TERRAFORM / "modules" / "secrets" / "main.tf").read_text(encoding="utf-8")
+    resource = 'resource "aws_secretsmanager_secret_version" "declared_placeholder"'
+    block = module.split(resource, 1)[1]
+    placeholder = json.loads(re.search(r'secret_string\s*=\s*("[^"]*")', block).group(1))
+    assert placeholder, "an empty placeholder is dropped by the provider and refused by AWS"
+
+    variables = (TERRAFORM / "variables.tf").read_text(encoding="utf-8")
+    provider_block = variables.split('variable "provider_secret_names"', 1)[1]
+    locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
+    declared = _hcl_string_list(provider_block, "default") | _hcl_string_list(
+        locals_hcl, "required_secret_names"
+    )
+    assert "JWT_PRIVATE_KEY" in declared
+
+    settings = _isolated_settings(
+        monkeypatch, app_env="test", **{name.lower(): placeholder for name in declared}
+    )
+    for name in declared:
+        assert getattr(settings, name.lower()) is None, (
+            f"{name} reads the placeholder {placeholder!r} as a value"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The embedding service
+# ---------------------------------------------------------------------------
+
+
+def _terraform_local(name: str) -> str:
+    locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
+    match = re.search(rf'^\s*{name}\s*=\s*"([^"]+)"', locals_hcl, re.M)
+    assert match, f"local.{name} is not a string literal in locals.tf"
+    return match.group(1)
+
+
+def test_the_deployed_embedding_model_is_the_one_the_embedding_service_serves():
+    """Four files name the embedding model, and a disagreement is silent.
+
+    The registry declares it, the deployments pin it, the embedding service
+    pulls it and the vector column is sized for it. If the pinned key is not an
+    Ollama embedding model, or the service pulls a different name than the
+    registry asks for, ingestion fails to embed and retrieval runs on its
+    lexical arm alone - every run still completes, and nothing says why search
+    got worse.
+    """
+    from app.core.enums import LlmProvider
+    from app.db.models.source import EMBEDDING_DIMENSIONS
+    from app.models.registry import load_registry
+
+    key = _terraform_local("embedding_model_key")
+    model = _terraform_local("ollama_model")
+    pin = _terraform_local("ollama_model_pin")
+
+    spec = load_registry(None).specs[key]
+    assert spec.supports_embeddings, f"{key} is not an embedding model"
+    assert spec.provider is LlmProvider.OLLAMA, f"{key} is not served by Ollama"
+    assert spec.model_id == model, "the service would pull a model the registry does not ask for"
+    assert spec.embedding_dimensions == EMBEDDING_DIMENSIONS
+    # A version, not `latest`: a pointer the model library can move would let a
+    # task started next month embed with different weights than the index.
+    assert pin.startswith(f"{model}:") and not pin.endswith(":latest")
+
+    locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
+    assert re.search(r"EMBEDDING_MODEL\s*=\s*local\.embedding_model_key", locals_hcl)
+
+    configmap = _kubernetes_named("ConfigMap", "aether-config")["data"]
+    assert configmap["EMBEDDING_MODEL"] == key
+
+    deployment = _kubernetes_named("Deployment", "aether-ollama")
+    container = _pod_containers(deployment)[0]
+    env = {item["name"]: item["value"] for item in container["env"]}
+    assert env["OLLAMA_MODEL"] == model
+    assert env["OLLAMA_MODEL_PIN"] == pin
+    assert container["readinessProbe"]["exec"]["command"][-1] == model
+
+    variables = (TERRAFORM / "variables.tf").read_text(encoding="utf-8")
+    image = re.search(r'variable "ollama_image"[\s\S]*?default\s*=\s*"([^"]+)"', variables).group(1)
+    assert container["image"] == image, "the two deployments run different Ollama builds"
+
+
+def test_the_application_is_pointed_at_the_embedding_service_the_deployment_runs():
+    """OLLAMA_BASE_URL names the service by the name and port it is published on."""
+    port = int(_terraform_local_number("ollama_port"))
+
+    locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
+    assert re.search(
+        r'OLLAMA_BASE_URL\s*=\s*"http://\$\{module\.discovery\.service_hostnames\["ollama"\]\}'
+        r':\$\{local\.ollama_port\}"',
+        locals_hcl,
+    )
+    main_hcl = (TERRAFORM / "main.tf").read_text(encoding="utf-8")
+    discovery = main_hcl.split('module "discovery"', 1)[1].split("\n}\n", 1)[0]
+    assert re.search(r'services\s*=\s*\[[^\]]*"ollama"', discovery)
+    ollama = main_hcl.split('module "ollama_service"', 1)[1].split("\n}\n", 1)[0]
+    assert re.search(r"container_port\s*=\s*local\.ollama_port", ollama)
+    assert 'module.discovery.service_arns["ollama"]' in ollama
+
+    service = _kubernetes_named("Service", "aether-ollama")
+    url = _kubernetes_named("ConfigMap", "aether-config")["data"]["OLLAMA_BASE_URL"]
+    assert url == f"http://{service['metadata']['name']}:{service['spec']['ports'][0]['port']}"
+    assert service["spec"]["ports"][0]["port"] == port
+
+
+def _terraform_local_number(name: str) -> str:
+    locals_hcl = (TERRAFORM / "locals.tf").read_text(encoding="utf-8")
+    match = re.search(rf"^\s*{name}\s*=\s*(\d+)\s*$", locals_hcl, re.M)
+    assert match, f"local.{name} is not a number literal in locals.tf"
+    return match.group(1)
+
+
+def test_both_deployments_start_the_embedding_service_with_the_same_script():
+    """One script, carried twice; a fix to one copy must reach the other."""
+    script = (TERRAFORM / "files" / "ollama-entrypoint.sh").read_text(encoding="utf-8")
+
+    main_hcl = (TERRAFORM / "main.tf").read_text(encoding="utf-8")
+    ollama = main_hcl.split('module "ollama_service"', 1)[1].split("\n}\n", 1)[0]
+    assert 'file("${path.module}/files/ollama-entrypoint.sh")' in ollama
+
+    configmap = _kubernetes_named("ConfigMap", "aether-ollama-entrypoint")
+    assert configmap["data"]["entrypoint.sh"] == script
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +499,25 @@ def test_images_drop_root_before_the_entrypoint(dockerfile: Path):
 
     assert users, f"{dockerfile.name} never drops root"
     assert users[-1] not in {"root", "0", "0:0"}, f"{dockerfile.name} ends as root"
+
+
+def test_the_web_runtime_carries_no_package_manager():
+    """The base image's npm is where every finding the image scan reported lived.
+
+    Ten HIGH and one CRITICAL, all inside npm's own dependency tree, none of it
+    loaded by the Next server - and build.yml refuses to push an image with a
+    HIGH finding, so until npm was removed no web image could be published at
+    all. Put back, or dropped by a rewrite of the runtime stage, and the next
+    advisory against npm's dependencies blocks every release again.
+    """
+    runtime = DOCKERFILE_WEB.read_text(encoding="utf-8").split(" AS runtime", 1)[1]
+    removals = " ".join(
+        instruction
+        for instruction in re.split(r"\n(?=[A-Z]+\s)", runtime)
+        if instruction.startswith("RUN") and "rm -rf" in instruction
+    )
+    for path in ("/usr/local/lib/node_modules", "/usr/local/bin/npm", "/usr/local/bin/npx"):
+        assert path in removals, f"the web runtime stage no longer removes {path}"
 
 
 def test_the_api_and_the_worker_are_one_image():
@@ -474,6 +778,33 @@ def test_every_module_is_reachable_from_the_root():
     assert sources == {module.name for module in _module_dirs()}
 
 
+def test_the_two_service_resources_differ_only_in_who_owns_the_revision():
+    """Terraform cannot make a lifecycle argument conditional, so there are two.
+
+    modules/ecs-service declares the service twice - once ignoring the task
+    definition, for the images deploy.yml rolls, and once not, for the Ollama
+    image Terraform rolls - and everything else about them must be identical.
+    An edit to the network, the load balancer or the deployment settings that
+    reaches one and not the other would apply to some services and not others,
+    with nothing in the plan saying so.
+    """
+    module = (TERRAFORM / "modules" / "ecs-service" / "main.tf").read_text(encoding="utf-8")
+
+    def body(name: str) -> str:
+        text = module.split(f'resource "aws_ecs_service" "{name}" {{', 1)[1].split("\n}\n", 1)[0]
+        text = re.sub(r"^\s*count\s*=.*$", "", text, flags=re.M)
+        return re.sub(r"\n  lifecycle \{[\s\S]*?\n  \}\n", "\n", text)
+
+    pipeline, terraform = body("this"), body("terraform_owned")
+    assert pipeline == terraform
+
+    owned = module.split('resource "aws_ecs_service" "terraform_owned"', 1)[1]
+    assert re.search(r"ignore_changes\s*=\s*\[desired_count\]", owned), (
+        "the Terraform-owned service must not ignore its task definition, or an "
+        "image bump applies and rolls nothing"
+    )
+
+
 @pytest.mark.parametrize(
     "tfvars",
     sorted((TERRAFORM / "environments").glob("*.tfvars")),
@@ -561,3 +892,116 @@ def test_every_container_declares_what_it_needs_and_what_it_may_not_exceed():
             resources = container.get("resources", {})
             assert resources.get("requests", {}).get("memory"), name
             assert resources.get("limits", {}).get("memory"), name
+
+
+# ---------------------------------------------------------------------------
+# The deploy role and the workflow that assumes it
+# ---------------------------------------------------------------------------
+
+DEPLOY_WORKFLOW = REPO / ".github" / "workflows" / "deploy.yml"
+DEPLOY_ROLE = TERRAFORM / "modules" / "deploy-role" / "main.tf"
+
+#: AWS operations a step makes through an action rather than a `run:` block,
+#: which the scan below cannot see. Each is what that action calls.
+ACTION_CALLS = {
+    "aws-actions/amazon-ecr-login": {"ecr:GetAuthorizationToken"},
+    "aws-actions/amazon-ecs-render-task-definition": {"ecs:DescribeTaskDefinition"},
+}
+
+#: `aws ecs wait <waiter>` polls a describe call, which is what IAM sees.
+WAITERS = {
+    "services-stable": "ecs:DescribeServices",
+    "tasks-stopped": "ecs:DescribeTasks",
+}
+
+
+def _deploy_workflow() -> dict:
+    return yaml.safe_load(DEPLOY_WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _deploy_calls() -> set[str]:
+    """Every IAM action deploy.yml needs, read off what it actually runs."""
+    steps = [step for job in _deploy_workflow()["jobs"].values() for step in job.get("steps", [])]
+    scripts = "\n".join(step.get("run", "") for step in steps)
+
+    services = set(re.findall(r"\baws ([a-z0-9-]+) [a-z]", scripts))
+    assert services == {"ecs"}, (
+        f"deploy.yml now calls AWS services {sorted(services)}; map them here and "
+        "grant them in modules/deploy-role"
+    )
+
+    calls: set[str] = set()
+    for operation, waiter in re.findall(r"\baws ecs ([a-z-]+)(?: ([a-z-]+))?", scripts):
+        if operation == "wait":
+            calls.add(WAITERS[waiter])
+        else:
+            calls.add("ecs:" + "".join(part.capitalize() for part in operation.split("-")))
+
+    for step in steps:
+        calls |= ACTION_CALLS.get(step.get("uses", "").split("@", 1)[0], set())
+
+    # `imagetools create` copies the images into ECR, which is a push.
+    if "imagetools create" in scripts:
+        calls |= {"ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:CompleteLayerUpload"}
+    return calls
+
+
+def test_the_deploy_role_grants_every_aws_call_the_deploy_workflow_makes():
+    """Written in two files, and a call the role does not grant fails mid-deploy.
+
+    Mid-deploy is the worst place for it: after the images are mirrored and the
+    revisions registered, with the rollback step about to run under the same
+    role. The workflow has never executed, so this is the only thing that has
+    compared the two.
+    """
+    calls = _deploy_calls()
+    assert "ecs:RunTask" in calls, "the scan found less than it should; check its pattern"
+
+    role = DEPLOY_ROLE.read_text(encoding="utf-8")
+    granted = set(re.findall(r'"((?:ecs|ecr|iam):[A-Za-z]+)"', role))
+
+    missing = calls - granted
+    assert not missing, f"deploy.yml makes {sorted(missing)}, which the deploy role does not grant"
+    # Registering or running a task definition passes the roles it names.
+    assert "iam:PassRole" in granted
+
+
+def test_only_the_deploy_job_of_the_matching_environment_can_assume_the_role():
+    """The trust is one GitHub environment of one repository, compared exactly.
+
+    The environment is where the deploy job's approval rule lives, so a role
+    trusting the repository rather than the environment could be assumed by a
+    workflow on any branch - and a StringLike with a wildcard is how that
+    happens without anybody writing "any branch".
+    """
+    role = DEPLOY_ROLE.read_text(encoding="utf-8")
+    assert '"repo:${var.github_repository}:environment:${var.github_environment}"' in role
+    assert not re.search(r'test\s*=\s*"StringLike"', role)
+
+    main_hcl = (TERRAFORM / "main.tf").read_text(encoding="utf-8")
+    block = main_hcl.split('module "deploy_role"', 1)[1].split("\n}\n", 1)[0]
+    assert re.search(r"github_environment\s*=\s*var\.environment", block)
+
+    # And the names line up: a GitHub environment the workflow deploys to is a
+    # Terraform environment whose role trusts it.
+    workflow = _deploy_workflow()
+    # PyYAML reads the bare key `on` as the boolean true.
+    options = set(workflow[True]["workflow_dispatch"]["inputs"]["environment"]["options"])
+    environments = {
+        re.search(r'^environment\s*=\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.M).group(1)
+        for path in (TERRAFORM / "environments").glob("*.tfvars")
+    }
+    assert options <= environments
+
+
+def test_the_terraform_outputs_supply_every_variable_the_deploy_workflow_reads():
+    """Setting up a GitHub environment is copying one output, not a scavenger hunt."""
+    read = set(re.findall(r"\bvars\.([A-Z0-9_]+)", DEPLOY_WORKFLOW.read_text(encoding="utf-8")))
+    assert read, "the scan found no variables; check its pattern"
+
+    outputs = (TERRAFORM / "outputs.tf").read_text(encoding="utf-8")
+    block = outputs.split('output "github_environment_variables"', 1)[1].split("\n}\n", 1)[0]
+    supplied = set(re.findall(r"^\s{4}([A-Z0-9_]+)\s*=", block, re.M))
+
+    missing = read - supplied
+    assert not missing, f"deploy.yml reads {sorted(missing)}, which no Terraform output supplies"

@@ -4,6 +4,7 @@ import type { SsoOption } from '@aether/shared-types';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { apiHref } from '@/lib/api/config';
 import { useSsoOptions } from '@/lib/api/queries';
 import { CONNECTION_ICONS } from './provider-icons';
 
@@ -31,8 +32,8 @@ export function SsoButtons({ next }: { next?: string }) {
   if (isPending) {
     return (
       <div className="flex flex-col gap-2" aria-hidden>
-        <Skeleton className="h-9 w-full" />
-        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-11 w-full" />
+        <Skeleton className="h-11 w-full" />
       </div>
     );
   }
@@ -60,7 +61,7 @@ export function SsoButtons({ next }: { next?: string }) {
       {data.password_enabled ? (
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
-          <span className="text-xs text-muted-foreground">or</span>
+          <span className="text-xs text-muted-foreground">or continue with</span>
           <Separator className="flex-1" />
         </div>
       ) : null}
@@ -76,17 +77,20 @@ export function SsoButtons({ next }: { next?: string }) {
 
 function SsoButton({ option, next }: { option: SsoOption; next?: string }) {
   const Icon = CONNECTION_ICONS[option.connection];
-  const href = next ? `${option.start_url}?next=${encodeURIComponent(next)}` : option.start_url;
+  // On the API's origin, not this one: in local development they differ, and
+  // a bare `/api/v1/...` here would 404 on the web app instead of starting.
+  const start = apiHref(option.start_url);
+  const href = next ? `${start}?next=${encodeURIComponent(next)}` : start;
 
   return (
-    <Button asChild variant="outline" className="w-full">
+    <Button asChild variant="outline" className="group h-11 w-full">
       {/*
         `rel="nofollow"` because this is a state-changing GET: following it
         mints an OAuth transaction and sets a cookie, which is not something a
         crawler or a link prefetcher should be doing on a visitor's behalf.
       */}
       <a href={href} rel="nofollow" data-testid={`sso-${option.connection}`}>
-        {Icon ? <Icon className="size-4" /> : null}
+        {Icon ? <Icon className="size-4 group-hover:scale-110 group-hover:-rotate-6" /> : null}
         Continue with {option.label}
       </a>
     </Button>

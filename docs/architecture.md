@@ -167,12 +167,17 @@ applied** - there is no AWS account behind this repository.
                                   |
          RDS Postgres + pgvector  |  ElastiCache Redis  |  S3
                                   |
-                              worker service  (no ingress; scales on queue depth)
+                              worker service  (no ingress; scales on CPU)
+                                  |
+            ollama service  (embeddings; private DNS, api and worker only)
 ```
 
-Nine Terraform modules - `network`, `security`, `database`, `cache`, `storage`,
-`alb`, `ecs-cluster`, `ecs-service`, `secrets` - with one `.tfvars` per
-environment, and a Kubernetes manifest set as the portability escape hatch.
+Eleven Terraform modules - `network`, `security`, `database`, `cache`,
+`storage`, `alb`, `ecs-cluster`, `ecs-service`, `secrets`, `service-discovery`,
+`deploy-role` - with one `.tfvars` per environment, and a Kubernetes manifest set
+as the portability escape hatch. The worker scales on CPU rather than on queue
+depth because nothing yet publishes the queue gauge to CloudWatch; the policy
+for it is written and switched off, and says why.
 `infra/monitoring/` holds the Prometheus scrape config and the Grafana
 dashboard, so the dashboard is a reviewable file rather than something someone
 once clicked together.

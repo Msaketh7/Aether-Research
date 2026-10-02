@@ -58,7 +58,18 @@ FROM node:22-alpine AS runtime
 # The Next standalone server writes nothing and needs no package manager, so
 # the runtime has neither npm's cache nor the workspace install: 32 MB of
 # traced dependencies instead of a 1.2 GB node_modules.
+#
+# Nor the package managers themselves. The base image ships npm, corepack and
+# yarn, and npm's own dependency tree is where every finding the image scan has
+# ever reported lives - ten HIGH and one CRITICAL in brace-expansion, tar,
+# pacote, sigstore and friends, none of which this server loads. Deleting them
+# is what lets build.yml's scan pass at all; waiting for the base image to
+# catch up would mean no image could be published until it did. The app's own
+# traced dependencies are under /srv/aether and are untouched.
 RUN apk add --no-cache tini \
+    && rm -rf /usr/local/lib/node_modules \
+        /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* \
     && addgroup -g 10001 aether \
     && adduser -u 10001 -G aether -D -h /home/aether aether
 

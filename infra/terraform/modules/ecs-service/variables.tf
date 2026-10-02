@@ -4,7 +4,7 @@ variable "name_prefix" {
 }
 
 variable "service_name" {
-  description = "api, web or worker. Also the container name and the log stream prefix."
+  description = "api, web, worker or ollama. Also the container name and the log stream prefix."
   type        = string
 }
 
@@ -43,6 +43,56 @@ variable "command" {
   description = "Overrides the image's CMD. Null keeps it - which is how the API runs and the worker does not."
   type        = list(string)
   default     = null
+}
+
+variable "entry_point" {
+  description = "Overrides the image's ENTRYPOINT. Null keeps it; only a third-party image needs this."
+  type        = list(string)
+  default     = null
+}
+
+variable "health_check" {
+  description = <<-EOT
+    A container health check, for a service no load balancer checks.
+
+    Null means none. A service behind a target group is checked there; one that
+    is not has only this, and without it ECS counts a task as healthy the moment
+    its process starts - before it can answer anything.
+  EOT
+  type = object({
+    command      = list(string)
+    interval     = number
+    timeout      = number
+    retries      = number
+    start_period = number
+  })
+  default = null
+}
+
+variable "service_registry_arn" {
+  description = "Cloud Map service to register tasks in, so other tasks can find this one by name. Empty registers nothing."
+  type        = string
+  default     = ""
+}
+
+variable "image_owner" {
+  description = <<-EOT
+    Who decides which task definition revision runs: "pipeline" or "terraform".
+
+    "pipeline" for this repository's own images, which deploy.yml rolls by
+    registering new revisions - Terraform must then ignore the revision, or the
+    next unrelated apply would roll the deployment back. "terraform" for a
+    third-party image pinned in a variable, where nothing else will ever roll
+    it - ignoring the revision there would make an image bump a plan that
+    applies and changes nothing.
+  EOT
+  type        = string
+  default     = "pipeline"
+
+  validation {
+    condition     = contains(["pipeline", "terraform"], var.image_owner)
+    error_message = "image_owner must be \"pipeline\" or \"terraform\"."
+  }
 }
 
 variable "cpu" {

@@ -22,3 +22,8 @@ output "cache_security_group_id" {
   value       = aws_security_group.cache.id
   description = "Attached to the ElastiCache replication group."
 }
+
+output "ollama_security_group_id" {
+  value       = aws_security_group.ollama.id
+  description = "Attached to the embedding service."
+}

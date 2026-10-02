@@ -1,0 +1,499 @@
+/*
+ * The sign-in stage: /login and /register.
+ *
+ * The one place in the product that is allowed to perform. Every other page is
+ * a working surface and keeps its motion to feedback; this one is the first
+ * thing a person sees, it stands on a looping video of light, and it earns a
+ * little theatre. The timing still comes from the tokens in globals.css - the
+ * ambient loops (the beam, the stage flow) are the only durations chosen here,
+ * and like `shimmer` and `breathe` they are rates, not transitions.
+ *
+ * Entrances are keyframes, not the `@starting-style` transitions `.reveal`
+ * uses, and the difference is deliberate. This markup is present at first
+ * paint, where a browser runs no transitions at all - so `.reveal` would leave
+ * it invisible. A keyframe does run on first paint. The trap with keyframes is
+ * that a cancelled one can hold its `from` state; that is avoided by declaring
+ * every entrance only inside `prefers-reduced-motion: no-preference`, so the
+ * resting style - visible - is what anything that suppresses motion gets, and
+ * by filling `backwards` only, so nothing is held after the entrance ends.
+ */
+
+@property --auth-beam {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.985);
+  }
+}
+
+@keyframes auth-word {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 0.35em, 0);
+    filter: blur(10px);
+  }
+}
+
+@keyframes auth-sweep-text {
+  from {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes auth-beam {
+  to {
+    --auth-beam: 1turn;
+  }
+}
+
+@keyframes auth-flow {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes auth-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@layer components {
+  /*
+   * The palette of the video itself, sampled from its frames: pure electric
+   * blue at the core of each band, lavender where a band saturates to white,
+   * black at the edges. Scoped to the stage so nothing else can reach for it.
+   */
+  .auth-stage {
+    --auth-ink: oklch(0.09 0.02 266);
+    --auth-blue: oklch(0.47 0.28 264);
+    --auth-blue-bright: oklch(0.62 0.24 266);
+    --auth-lavender: oklch(0.88 0.065 285);
+    background-color: var(--auth-ink);
+    isolation: isolate;
+  }
+
+  /*
+   * The same light, painted. Seven lens-shaped bands stacked about the centre,
+   * brightest in the middle rows, which is the video's composition at rest.
+   * It is what a reduced-motion or Save-Data visitor sees instead of the
+   * video, and what everyone sees for the moment before it starts.
+   */
+  .auth-still {
+    background:
+      radial-gradient(30% 4.5% at 50% 12%, oklch(0.47 0.28 264 / 0.45), transparent 75%),
+      radial-gradient(38% 6% at 50% 24%, oklch(0.7 0.16 276 / 0.5), transparent 75%),
+      radial-gradient(44% 7% at 50% 36%, oklch(0.88 0.065 285 / 0.55), transparent 75%),
+      radial-gradient(45% 7% at 50% 48%, oklch(0.8 0.1 280 / 0.5), transparent 75%),
+      radial-gradient(42% 7% at 50% 60%, oklch(0.62 0.24 266 / 0.55), transparent 75%),
+      radial-gradient(36% 6% at 50% 72%, oklch(0.47 0.28 264 / 0.5), transparent 75%),
+      radial-gradient(28% 5% at 50% 84%, oklch(0.4 0.25 264 / 0.35), transparent 75%),
+      var(--auth-ink);
+  }
+
+  .auth-video {
+    opacity: 0;
+    transition: opacity var(--duration-slower) var(--ease-out-soft);
+  }
+
+  .auth-video[data-visible='true'] {
+    opacity: 1;
+  }
+
+  /* Scaled up a touch so the parallax never shows the stage's edge. */
+  .auth-parallax {
+    transform: scale(1.06);
+  }
+
+  /*
+   * Legibility over light. A vignette everywhere, and from `lg` a wash from
+   * the left so the story column reads against the darkest part of the frame
+   * while the bright centre of the video stays visible between the columns.
+   */
+  .auth-scrim {
+    background:
+      radial-gradient(130% 100% at 50% 42%, transparent 28%, oklch(0.09 0.02 266 / 0.82) 100%),
+      linear-gradient(180deg, oklch(0.09 0.02 266 / 0.35), oklch(0.09 0.02 266 / 0.62));
+  }
+
+  @media (min-width: 64rem) {
+    .auth-scrim {
+      background:
+        linear-gradient(
+          90deg,
+          oklch(0.09 0.02 266 / 0.9) 0%,
+          oklch(0.09 0.02 266 / 0.72) 34%,
+          oklch(0.09 0.02 266 / 0.18) 60%,
+          transparent 78%
+        ),
+        radial-gradient(130% 100% at 55% 42%, transparent 30%, oklch(0.09 0.02 266 / 0.8) 100%),
+        linear-gradient(180deg, oklch(0.09 0.02 266 / 0.2), oklch(0.09 0.02 266 / 0.5));
+    }
+  }
+
+  /* Film grain, so the video's soft gradients do not band on an 8-bit panel. */
+  .auth-grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.07;
+    mix-blend-mode: overlay;
+  }
+
+  /* Small glass: the pipeline panel and the pause control. */
+  .auth-chip {
+    border: 1px solid oklch(1 0 0 / 0.09);
+    background-color: oklch(0.15 0.02 266 / 0.55);
+    box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.06);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    transition:
+      background-color var(--duration-fast) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft),
+      color var(--duration-fast) var(--ease-out-soft),
+      transform var(--duration-fast) var(--ease-out-soft);
+  }
+
+  button.auth-chip:hover {
+    border-color: oklch(1 0 0 / 0.2);
+    background-color: oklch(0.22 0.03 266 / 0.72);
+  }
+
+  button.auth-chip:active {
+    transform: scale(0.92);
+    transition-duration: var(--duration-instant);
+  }
+
+  /*
+   * A feature row. It is information, not a control, so its hover does not
+   * pretend otherwise - no lift, no pointer - it only brightens, the way a
+   * line under a reading finger does.
+   */
+  .auth-feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.875rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid oklch(1 0 0 / 0.06);
+    border-radius: var(--radius-xl);
+    background-color: oklch(0.13 0.02 266 / 0.5);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition:
+      background-color var(--duration-base) var(--ease-out-soft),
+      border-color var(--duration-base) var(--ease-out-soft);
+  }
+
+  .auth-feature:hover {
+    border-color: color-mix(in oklch, var(--auth-blue-bright) 35%, transparent);
+    background-color: oklch(0.17 0.03 268 / 0.62);
+  }
+
+  .auth-feature-icon {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 1px solid color-mix(in oklch, var(--auth-blue-bright) 38%, transparent);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(
+      145deg,
+      color-mix(in oklch, var(--auth-blue) 40%, transparent),
+      color-mix(in oklch, var(--auth-blue) 8%, transparent)
+    );
+    box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.1);
+    color: var(--primary-strong);
+    transition:
+      transform var(--duration-base) var(--ease-spring),
+      box-shadow var(--duration-base) var(--ease-out-soft);
+  }
+
+  .auth-feature:hover .auth-feature-icon {
+    transform: scale(1.08) rotate(-6deg);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.14),
+      0 0 22px -4px var(--auth-blue-bright);
+  }
+
+  /*
+   * The card. Frosted over the video, lit along its top edge, with a blue
+   * underglow so it reads as sitting in the light rather than pasted on it.
+   */
+  .auth-card {
+    position: relative;
+    border-radius: var(--radius-2xl);
+    /* 0.8 at the top, not less: measured over the loop's brightest frame, the
+       card's muted subtitle fell to 5:1 at 0.74 - too close to the 4.5 floor. */
+    background: linear-gradient(180deg, oklch(0.2 0.025 268 / 0.8), oklch(0.15 0.02 268 / 0.86));
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.09),
+      0 0 0 1px oklch(1 0 0 / 0.07),
+      0 40px 100px -30px oklch(0.05 0.05 266 / 0.95),
+      0 0 90px -30px color-mix(in oklch, var(--auth-blue) 55%, transparent);
+  }
+
+  .auth-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /*
+   * The beam: an arc of light running round the card's edge. A conic
+   * gradient on a one-pixel ring - the mask cuts the middle out - whose start
+   * angle is a registered custom property, which is what lets a keyframe
+   * animate an angle inside a gradient at all.
+   */
+  .auth-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--auth-beam),
+      transparent 0turn,
+      transparent 0.6turn,
+      color-mix(in oklch, var(--auth-blue-bright) 90%, transparent) 0.8turn,
+      var(--auth-lavender) 0.9turn,
+      transparent 1turn
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* The spotlight under the pointer. Mouse only; a finger has no hover. */
+  .auth-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: radial-gradient(
+      22rem circle at var(--mx, 50%) var(--my, -20%),
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 60%
+    );
+    opacity: 0;
+    transition: opacity var(--duration-slow) var(--ease-out-soft);
+    pointer-events: none;
+  }
+
+  @media (hover: hover) {
+    .auth-card:hover::after {
+      opacity: 1;
+    }
+  }
+
+  /* A line of light that draws itself out from the centre of a focused field. */
+  .auth-field-line {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0;
+    left: 0.75rem;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--auth-lavender), transparent);
+    opacity: 0;
+    transform: scaleX(0);
+    transition:
+      transform var(--duration-slow) var(--ease-out-soft),
+      opacity var(--duration-fast) var(--ease-out-soft);
+    pointer-events: none;
+  }
+
+  .auth-input:focus ~ .auth-field-line {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  /*
+   * A password manager's autofill paints the field pale blue with an
+   * `!important` the page cannot override. Deferring the transition to that
+   * colour indefinitely is the one method that works without a script.
+   */
+  .auth-input:-webkit-autofill,
+  .auth-input:-webkit-autofill:hover,
+  .auth-input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--foreground);
+    caret-color: var(--foreground);
+    transition:
+      background-color 0s 600000s,
+      color 0s 600000s !important;
+  }
+
+  /*
+   * The primary action. White on a blue that measures above 4.5:1 at both
+   * ends of the gradient, so the label is legible wherever the hover leaves
+   * it. The sheen is a pseudo-element that only travels on the way in; on the
+   * way out it snaps back unseen, so it never runs backwards.
+   */
+  .auth-cta {
+    position: relative;
+    display: inline-flex;
+    width: 100%;
+    height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background-image: linear-gradient(
+      110deg,
+      oklch(0.45 0.27 264) 0%,
+      oklch(0.52 0.24 274) 50%,
+      oklch(0.49 0.27 262) 100%
+    );
+    background-position: 0% 50%;
+    background-size: 200% 100%;
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.22),
+      0 0 0 1px color-mix(in oklch, var(--auth-blue-bright) 60%, transparent),
+      0 10px 30px -10px color-mix(in oklch, var(--auth-blue) 90%, transparent);
+    color: oklch(0.99 0 0);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    transition:
+      background-position var(--duration-slower) var(--ease-out-soft),
+      box-shadow var(--duration-base) var(--ease-out-soft),
+      transform var(--duration-fast) var(--ease-out-soft),
+      opacity var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .auth-cta::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 25%, oklch(1 0 0 / 0.3) 50%, transparent 75%);
+    transform: translateX(-120%);
+    pointer-events: none;
+  }
+
+  .auth-cta:not(:disabled):hover {
+    background-position: 100% 50%;
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.28),
+      0 0 0 1px var(--auth-blue-bright),
+      0 14px 40px -10px var(--auth-blue),
+      0 0 32px -6px var(--auth-blue-bright);
+  }
+
+  .auth-cta:not(:disabled):hover::after {
+    transform: translateX(120%);
+    transition: transform var(--duration-slower) var(--ease-out-soft);
+  }
+
+  .auth-cta:not(:disabled):active {
+    transform: scale(0.98);
+    transition-duration: var(--duration-instant);
+  }
+
+  .auth-cta:disabled {
+    cursor: progress;
+    opacity: 0.88;
+  }
+
+  /* Disabled because there is nothing to send yet - an incomplete code. */
+  .auth-cta:disabled[data-state='idle'] {
+    cursor: not-allowed;
+    opacity: 0.5;
+    box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.12);
+  }
+
+  .auth-cta:focus-visible {
+    outline: 2px solid var(--auth-lavender);
+    outline-offset: 3px;
+  }
+
+  .auth-word {
+    display: inline-block;
+  }
+
+  .auth-gradient-text {
+    background-image: linear-gradient(
+      100deg,
+      var(--auth-lavender) 0%,
+      oklch(0.78 0.13 272) 40%,
+      oklch(0.7 0.19 266) 70%,
+      var(--auth-lavender) 100%
+    );
+    background-position: 0% 50%;
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .auth-segment {
+    background-image: linear-gradient(90deg, var(--auth-blue), var(--primary));
+  }
+
+  .auth-segment-live {
+    background-image: linear-gradient(
+      90deg,
+      var(--auth-blue),
+      var(--auth-lavender),
+      var(--auth-blue)
+    );
+    background-size: 200% 100%;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .auth-enter {
+      animation: auth-rise var(--duration-slower) var(--ease-out-soft) var(--enter-delay, 0ms)
+        backwards;
+    }
+
+    .auth-word {
+      animation: auth-word var(--duration-slower) var(--ease-out-soft) var(--enter-delay, 0ms)
+        backwards;
+    }
+
+    .auth-word.auth-gradient-text {
+      animation:
+        auth-word var(--duration-slower) var(--ease-out-soft) var(--enter-delay, 0ms) backwards,
+        auth-sweep-text 2.4s var(--ease-out-soft) var(--enter-delay, 0ms) backwards;
+    }
+
+    .auth-parallax {
+      transform: translate3d(calc(var(--px, 0) * -18px), calc(var(--py, 0) * -12px), 0) scale(1.06);
+      transition: transform var(--duration-slower) var(--ease-out-soft);
+      will-change: transform;
+    }
+
+    .auth-card::before {
+      animation: auth-beam 7s linear infinite;
+    }
+
+    .auth-segment-live {
+      animation: auth-flow 1.6s linear infinite;
+    }
+
+    .auth-pop {
+      animation: auth-pop var(--duration-slow) var(--ease-spring);
+    }
+  }
+}

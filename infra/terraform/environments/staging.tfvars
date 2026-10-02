@@ -24,6 +24,12 @@ sec_user_agent = "AetherResearch/0.1 (REPLACE_ME)"
 
 certificate_arn = ""
 
+# The origin people reach this deployment at, once DNS points the domain at the
+# load balancer. Until then leave it unset and the load balancer's own name is
+# used. It is the access tokens' issuer and audience, and where single sign-on
+# returns the browser, so it must match the address bar exactly.
+# public_url = "https://REPLACE_ME"
+
 api_service = {
   cpu           = 512
   memory        = 1024
@@ -50,6 +56,14 @@ worker_service = {
   desired_count = 1
   min_count     = 0
   max_count     = 4
+}
+
+ollama_service = {
+  cpu           = 1024
+  memory        = 2048
+  desired_count = 1
+  min_count     = 1
+  max_count     = 2
 }
 
 database = {

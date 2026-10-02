@@ -215,7 +215,8 @@ jobs:
       - name: Lint the shell scripts
         run: |
           shellcheck --version
-          shellcheck scripts/bootstrap-aws.sh apps/api/scripts/loadtest_api.sh
+          shellcheck scripts/bootstrap-aws.sh apps/api/scripts/loadtest_api.sh \
+            infra/terraform/files/ollama-entrypoint.sh
 
       # These workflow files are themselves configuration that only fails when
       # it runs. actionlint catches the half of that which is static: an

@@ -7,9 +7,10 @@
 # is what only AWS can see: the infrastructure underneath the application, and
 # the load balancer in front of it.
 #
-# Every alarm treats missing data as `notBreaching`. A service with no traffic
-# emits no datapoints, and an alarm that fires because nothing happened is an
-# alarm people mute.
+# Every alarm but one treats missing data as `notBreaching`. A service with no
+# traffic emits no datapoints, and an alarm that fires because nothing happened
+# is an alarm people mute. The exception is `ollama_down`, where silence is the
+# failure itself.
 
 locals {
   alarm_actions = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
@@ -139,6 +140,34 @@ resource "aws_cloudwatch_metric_alarm" "worker_at_capacity" {
   period              = 300
   evaluation_periods  = 3
   treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
+
+# The one failure in this deployment that degrades rather than breaks. With no
+# embedding service, ingestion stores chunks without vectors and retrieval runs
+# on its lexical arm alone: every research run still completes, the reports
+# still render, and nothing a user or the load balancer sees says that search
+# got worse. So it is the one alarm here that treats missing data as breaching -
+# a service with no tasks has nothing left to report a count from.
+resource "aws_cloudwatch_metric_alarm" "ollama_down" {
+  alarm_name        = "${local.name_prefix}-ollama-down"
+  alarm_description = "No embedding task has been running for ten minutes; retrieval is lexical only until one is."
+
+  namespace   = "ECS/ContainerInsights"
+  metric_name = "RunningTaskCount"
+  statistic   = "Minimum"
+  dimensions = {
+    ClusterName = module.ecs.cluster_name
+    ServiceName = module.ollama_service.service_name
+  }
+
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  period              = 300
+  evaluation_periods  = 2
+  treat_missing_data  = "breaching"
 
   alarm_actions = local.alarm_actions
   ok_actions    = local.alarm_actions

@@ -153,6 +153,16 @@ class IdentityProvider(Protocol):
         """
         ...
 
+    async def available_connections(self) -> tuple[Connection, ...]:
+        """The configured connections the upstream will actually accept now.
+
+        What the sign-in page offers and what `start` allows. A provider that
+        can ask its upstream which connections are switched on should, so a
+        button never leads to the vendor's own error page; one that cannot
+        returns `connections`.
+        """
+        ...
+
     def authorize(
         self,
         *,

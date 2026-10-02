@@ -1,6 +1,6 @@
 output "service_name" {
   description = "The ECS service name, which the deploy workflow updates."
-  value       = aws_ecs_service.this.name
+  value       = one(concat(aws_ecs_service.this[*].name, aws_ecs_service.terraform_owned[*].name))
 }
 
 output "task_definition_family" {

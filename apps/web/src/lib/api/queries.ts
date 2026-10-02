@@ -60,10 +60,18 @@ export function useRegister() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: authApi.register,
-    // Registration signs the account in, so the account menu and every guarded
-    // page can render immediately instead of waiting for a `/auth/me` round trip.
-    onSuccess: (data) => queryClient.setQueryData(queryKeys.auth.me(), data.user),
+    // When registration signs the account in, the account menu and every
+    // guarded page can render immediately instead of waiting for a `/auth/me`
+    // round trip. When it asks for the emailed link first, there is nobody to
+    // cache yet.
+    onSuccess: (data) => {
+      if ('user' in data) queryClient.setQueryData(queryKeys.auth.me(), data.user);
+    },
   });
+}
+
+export function useResendConfirmation() {
+  return useMutation({ mutationFn: authApi.resendConfirmation });
 }
 
 export function useLogin() {

@@ -36,8 +36,6 @@ from tests.support.projection import (
     seed_user,
 )
 
-pytestmark = pytest.mark.anyio
-
 
 @pytest.fixture
 async def owner(database: Database) -> uuid.UUID:

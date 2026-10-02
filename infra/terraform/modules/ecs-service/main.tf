@@ -1,10 +1,10 @@
-# One Fargate service. Used three times: api, web, worker.
+# One Fargate service. Used four times: api, web, worker and ollama.
 #
-# The three differ in ways that are all inputs - image, command, port, whether
-# a load balancer is in front, what the task role may do, what it scales on -
-# so they share this module rather than three near-copies that drift. The
-# worker in particular is the same *image* as the API (ADR 0001) with a
-# different command, and this is where that stops being a claim.
+# They differ in ways that are all inputs - image, command, port, whether a
+# load balancer is in front, what the task role may do, what it scales on, who
+# rolls the image - so they share this module rather than four near-copies that
+# drift. The worker in particular is the same *image* as the API (ADR 0001)
+# with a different command, and this is where that stops being a claim.
 
 locals {
   # A task with no port is not behind a load balancer; a task with one is.
@@ -13,6 +13,8 @@ locals {
   load_balanced = var.target_group_arn != ""
 
   log_group = "/ecs/${var.name_prefix}/${var.service_name}"
+
+  service_name = "${var.name_prefix}-${var.service_name}"
 }
 
 resource "aws_cloudwatch_log_group" "this" {
@@ -143,6 +145,16 @@ resource "aws_ecs_task_definition" "this" {
         stopTimeout = var.stop_timeout_seconds
       },
       var.command == null ? {} : { command = var.command },
+      var.entry_point == null ? {} : { entryPoint = var.entry_point },
+      var.health_check == null ? {} : {
+        healthCheck = {
+          command     = var.health_check.command
+          interval    = var.health_check.interval
+          timeout     = var.health_check.timeout
+          retries     = var.health_check.retries
+          startPeriod = var.health_check.start_period
+        }
+      },
       # The worker has a port too - its Prometheus endpoint - it just has no
       # target group. So the mapping follows the port, not the load balancer.
       var.container_port > 0 ? {
@@ -158,9 +170,17 @@ resource "aws_ecs_task_definition" "this" {
 }
 
 # --- service -----------------------------------------------------------------
+#
+# Two resources, exactly one of which exists, because they differ in a
+# `lifecycle` block and Terraform does not allow a lifecycle argument to be an
+# expression. Everything else about them is the same and must stay the same;
+# `test_infrastructure.py` compares the two bodies so an edit to one cannot
+# quietly miss the other.
 
 resource "aws_ecs_service" "this" {
-  name            = "${var.name_prefix}-${var.service_name}"
+  count = var.image_owner == "pipeline" ? 1 : 0
+
+  name            = local.service_name
   cluster         = var.cluster_id
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = var.desired_count
@@ -183,6 +203,13 @@ resource "aws_ecs_service" "this" {
       target_group_arn = var.target_group_arn
       container_name   = var.service_name
       container_port   = var.container_port
+    }
+  }
+
+  dynamic "service_registries" {
+    for_each = var.service_registry_arn == "" ? [] : [1]
+    content {
+      registry_arn = var.service_registry_arn
     }
   }
 
@@ -212,19 +239,88 @@ resource "aws_ecs_service" "this" {
     ignore_changes = [task_definition, desired_count]
   }
 
-  tags = { Name = "${var.name_prefix}-${var.service_name}" }
+  tags = { Name = local.service_name }
+}
+
+resource "aws_ecs_service" "terraform_owned" {
+  count = var.image_owner == "terraform" ? 1 : 0
+
+  name            = local.service_name
+  cluster         = var.cluster_id
+  task_definition = aws_ecs_task_definition.this.arn
+  desired_count   = var.desired_count
+  launch_type     = "FARGATE"
+
+  enable_execute_command = var.enable_execute_command
+  propagate_tags         = "SERVICE"
+
+  network_configuration {
+    subnets = var.subnet_ids
+    # Private subnets throughout, so a task reaches the internet through the
+    # NAT gateway and has no address of its own.
+    assign_public_ip = false
+    security_groups  = [var.security_group_id]
+  }
+
+  dynamic "load_balancer" {
+    for_each = local.load_balanced ? [1] : []
+    content {
+      target_group_arn = var.target_group_arn
+      container_name   = var.service_name
+      container_port   = var.container_port
+    }
+  }
+
+  dynamic "service_registries" {
+    for_each = var.service_registry_arn == "" ? [] : [1]
+    content {
+      registry_arn = var.service_registry_arn
+    }
+  }
+
+  # Without this the service can fail its first deployment: the task starts,
+  # the target group has not yet seen two consecutive healthy checks, and ECS
+  # kills it as unhealthy. The grace period is the application's own startup -
+  # the API imports about 6 s of Python before it listens.
+  health_check_grace_period_seconds = local.load_balanced ? var.health_check_grace_period : null
+
+  # A rolling deployment that can never drop below capacity: 100% minimum
+  # healthy, 200% maximum, so new tasks start before old ones stop. The
+  # circuit breaker is what makes a bad image a rollback rather than an
+  # outage - ECS stops replacing tasks and restores the previous definition.
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  lifecycle {
+    # Terraform owns the image here, so a new revision is the deployment and
+    # must not be ignored. Only the count is left to the autoscaler.
+    ignore_changes = [desired_count]
+  }
+
+  tags = { Name = local.service_name }
 }
 
 # --- autoscaling -------------------------------------------------------------
 
+# The resource id is built from the name both service resources share, so the
+# target does not depend on which of them exists. `depends_on` restores the
+# ordering the reference used to give: the service must exist before it can be
+# scaled.
 resource "aws_appautoscaling_target" "this" {
   count = var.autoscaling_enabled ? 1 : 0
 
   service_namespace  = "ecs"
-  resource_id        = "service/${var.cluster_name}/${aws_ecs_service.this.name}"
+  resource_id        = "service/${var.cluster_name}/${local.service_name}"
   scalable_dimension = "ecs:service:DesiredCount"
   min_capacity       = var.min_count
   max_capacity       = var.max_count
+
+  depends_on = [aws_ecs_service.this, aws_ecs_service.terraform_owned]
 }
 
 resource "aws_appautoscaling_policy" "cpu" {

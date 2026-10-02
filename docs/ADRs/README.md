@@ -29,3 +29,5 @@ accepted; a changed mind means a new ADR that supersedes the old one.
 | [0021](0021-sessions-not-tokens.md)                  | Opaque server-side sessions in a cookie; a rate limit that is a bucket            | Superseded by [0022](0022-federated-identity-and-signed-tokens.md) |
 | [0022](0022-federated-identity-and-signed-tokens.md) | Federated identity behind one interface; signed tokens with a revocation index    | Accepted                                                           |
 | [0023](0023-the-streamed-answer.md)                  | The answer is its own agent, streamed as durable events, stored as its own row    | Accepted                                                           |
+| [0024](0024-self-hosted-embeddings.md)               | Embeddings in a deployment come from a self-hosted Ollama service                 | Accepted                                                           |
+| [0025](0025-supabase-holds-the-credentials.md)       | Supabase holds the credentials; this system holds the session                     | Accepted                                                           |

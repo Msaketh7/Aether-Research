@@ -98,11 +98,16 @@ describe('mock API gate', () => {
 });
 
 describe('route protection', () => {
-  it('sends a signed-out visitor on a guarded page to sign in', async () => {
+  it('sends a visitor without a usable token to the resume page, not straight to sign in', async () => {
+    // The access cookie dies with its fifteen-minute token, and the refresh
+    // cookie is scoped to the API's refresh path and never reaches this - so a
+    // signed-out visitor and one whose token merely expired look identical
+    // here. Sending both to sign in signed everybody out every quarter hour;
+    // the resume page asks the API which one this is.
     const { response } = await runMiddleware('live', '/dashboard');
 
     expect(response.status).toBe(307);
-    expect(new URL(response.headers.get('location')!).pathname).toBe('/login');
+    expect(new URL(response.headers.get('location')!).pathname).toBe('/resume');
   });
 
   it('carries the destination so the visitor lands where they were going', async () => {
@@ -174,7 +179,38 @@ describe('route protection', () => {
     const { response } = await runMiddleware('live', '/');
 
     expect(response.status).toBe(307);
-    expect(new URL(response.headers.get('location')!).pathname).toBe('/login');
+    expect(new URL(response.headers.get('location')!).pathname).toBe('/resume');
+  });
+
+  it('does not guard the resume page itself', async () => {
+    // Guarded, it would redirect to itself forever.
+    const { response } = await runMiddleware('live', '/resume?next=/dashboard');
+
+    expect(response.status).not.toBe(307);
+  });
+
+  it('sends a visitor whose token is still good straight on from the resume page', async () => {
+    const { response } = await runMiddleware(
+      'live',
+      '/resume?next=/research/abc%3Ftab%3Devidence',
+      jwt({ exp: future() }),
+    );
+
+    expect(response.status).toBe(307);
+    const location = new URL(response.headers.get('location')!);
+    expect(`${location.pathname}${location.search}`).toBe('/research/abc?tab=evidence');
+  });
+
+  it('refuses to forward off this origin from the resume page', async () => {
+    const { response } = await runMiddleware(
+      'live',
+      '/resume?next=//evil.example/phish',
+      jwt({ exp: future() }),
+    );
+
+    const location = new URL(response.headers.get('location')!);
+    expect(location.origin).toBe('http://localhost:3000');
+    expect(location.pathname).toBe('/');
   });
 
   it('does not accept a token in the redirect target', async () => {

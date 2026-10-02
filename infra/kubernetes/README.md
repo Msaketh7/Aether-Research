@@ -20,6 +20,7 @@ a different scheduler.
 | `api.yaml`         | Deployment, Service, HPA, PodDisruptionBudget                    |
 | `web.yaml`         | Deployment, Service, HPA                                         |
 | `worker.yaml`      | Deployment and HPA. No Service — nothing calls a worker          |
+| `ollama.yaml`      | The embedding service, its start script, Service and policy      |
 | `ingress.yaml`     | The one path rule: `/api` to the API, everything else to the web |
 
 ## What is not here

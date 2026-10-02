@@ -259,7 +259,11 @@ class AuditAction(StrEnum):
     LOGIN_FAILED = "auth.login_failed"
     LOGOUT = "auth.logout"
     REGISTER = "auth.register"
+    #: A Supabase sign-up waiting on its emailed link. No user id yet: the row
+    #: here is created at the first sign-in after the address is confirmed.
+    REGISTER_PENDING = "auth.register_pending"
     REGISTER_REJECTED = "auth.register_rejected"
+    CONFIRMATION_RESENT = "auth.confirmation_resent"
     SESSION_REVOKED = "auth.session_revoked"
     SESSIONS_REVOKED = "auth.sessions_revoked"
     SETTINGS_UPDATED = "account.settings_updated"

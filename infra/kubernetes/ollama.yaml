@@ -1,0 +1,225 @@
+# The embedding service: Ollama serving one model, nomic-embed-text, to the API
+# and the worker - the same service infra/terraform runs as `ollama_service`.
+#
+# Without it, ingestion stores chunks with no vectors and retrieval runs on its
+# lexical arm alone, which works and searches worse and is reported by nothing.
+#
+# The start script is the Terraform root's files/ollama-entrypoint.sh, carried
+# here as a ConfigMap; apps/api/tests/test_infrastructure.py fails if the two
+# copies differ. It pulls a versioned tag and names it what the application
+# asks for, so the weights cannot move under an existing index.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aether-ollama-entrypoint
+  namespace: aether
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    # The embedding service's entrypoint: start Ollama, give it exactly one model,
+    # and stay in the foreground for as long as it runs.
+    #
+    # Run by `/bin/sh -c` in the stock ollama/ollama image (modules/ecs-service,
+    # entry_point), with two settings from the task definition:
+    #
+    #   OLLAMA_MODEL_PIN  the versioned tag to pull, e.g. nomic-embed-text:v1.5
+    #   OLLAMA_MODEL      the name the application asks for - the registry entry's
+    #                     model_id - which the pinned tag is copied to
+    #
+    # Why the copy: the application requests `nomic-embed-text`, which Ollama
+    # resolves as `:latest`, a pointer the registry can move. Pulling `latest`
+    # directly would mean a task started next month could embed with different
+    # weights than the index was built with - vectors that still compare, and
+    # compare meaninglessly. Pulling a version and naming it what the application
+    # asks for keeps the request unchanged and the weights fixed.
+    #
+    # Every failure exits non-zero, so ECS marks the task stopped rather than
+    # leaving a server with no model registered as healthy. The container health
+    # check
+    # (`ollama show $OLLAMA_MODEL`) is what keeps the task out of service discovery
+    # until the copy has happened.
+    set -u
+
+    : "${OLLAMA_MODEL_PIN:?OLLAMA_MODEL_PIN must name the tag to pull}"
+    : "${OLLAMA_MODEL:?OLLAMA_MODEL must name the model the application requests}"
+
+    /bin/ollama serve &
+    server=$!
+
+    # `sh -c` is PID 1, and PID 1 has no default signal handlers: without this, the
+    # SIGTERM ECS sends at a deployment would be ignored and the task killed at the
+    # stop timeout instead of shutting down.
+    trap 'kill -TERM "$server" 2>/dev/null; wait "$server"; exit 143' TERM INT
+
+    # Bounded: a server that never answers is a task that should fail, not one that
+    # waits forever while the health check's start period runs out.
+    attempts=0
+    until /bin/ollama list >/dev/null 2>&1; do
+      if ! kill -0 "$server" 2>/dev/null; then
+        echo "ollama serve exited before it was ready" >&2
+        exit 1
+      fi
+      attempts=$((attempts + 1))
+      if [ "$attempts" -ge 120 ]; then
+        echo "ollama serve did not answer within 120 s" >&2
+        kill -TERM "$server" 2>/dev/null
+        exit 1
+      fi
+      sleep 1
+    done
+
+    if ! /bin/ollama pull "$OLLAMA_MODEL_PIN"; then
+      echo "could not pull $OLLAMA_MODEL_PIN" >&2
+      kill -TERM "$server" 2>/dev/null
+      exit 1
+    fi
+
+    if ! /bin/ollama cp "$OLLAMA_MODEL_PIN" "$OLLAMA_MODEL"; then
+      echo "could not name $OLLAMA_MODEL_PIN as $OLLAMA_MODEL" >&2
+      kill -TERM "$server" 2>/dev/null
+      exit 1
+    fi
+
+    wait "$server"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aether-ollama
+  namespace: aether
+  labels:
+    app.kubernetes.io/name: aether
+    app.kubernetes.io/component: ollama
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aether
+      app.kubernetes.io/component: ollama
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aether
+        app.kubernetes.io/component: ollama
+    spec:
+      # The stock image runs as root; this runs it as the same uid as every
+      # other pod, with HOME and the model store somewhere that uid can write.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: ollama
+          # Pinned by digest, the same image as variables.tf's ollama_image.
+          image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+          command: ['/bin/sh', '/opt/aether/entrypoint.sh']
+          ports:
+            - name: http
+              containerPort: 11434
+          env:
+            - name: HOME
+              value: /tmp/ollama
+            - name: OLLAMA_MODELS
+              value: /tmp/ollama/models
+            - name: OLLAMA_HOST
+              value: 0.0.0.0:11434
+            - name: OLLAMA_KEEP_ALIVE
+              value: '-1'
+            - name: OLLAMA_MODEL
+              value: nomic-embed-text
+            - name: OLLAMA_MODEL_PIN
+              value: nomic-embed-text:v1.5
+          # Ready only once the model answers under the name the application
+          # uses, which is after the pull and the copy.
+          readinessProbe:
+            exec:
+              command: ['/bin/ollama', 'show', 'nomic-embed-text']
+            periodSeconds: 10
+            timeoutSeconds: 10
+          startupProbe:
+            exec:
+              command: ['/bin/ollama', 'show', 'nomic-embed-text']
+            periodSeconds: 10
+            timeoutSeconds: 10
+            # Eighteen tries ten seconds apart: the model download.
+            failureThreshold: 18
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: '1'
+              memory: 2Gi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: entrypoint
+              mountPath: /opt/aether
+              readOnly: true
+            - name: models
+              mountPath: /tmp/ollama
+      volumes:
+        - name: entrypoint
+          configMap:
+            name: aether-ollama-entrypoint
+            defaultMode: 0555
+        # Pulled again on every start rather than kept on a volume: 274 MB is
+        # a short download, and a pod with no persistent state is one the
+        # scheduler can move freely.
+        - name: models
+          emptyDir:
+            sizeLimit: 2Gi
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aether-ollama
+  namespace: aether
+spec:
+  selector:
+    app.kubernetes.io/name: aether
+    app.kubernetes.io/component: ollama
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+---
+# Ollama serves an unauthenticated API, so who can reach it is the whole of its
+# access control: the API and the worker, on its one port. Its own egress is
+# DNS and HTTPS - it reads no open web, it only downloads its model.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ollama
+  namespace: aether
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: ollama
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [api, worker]
+      ports:
+        - port: 11434
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP

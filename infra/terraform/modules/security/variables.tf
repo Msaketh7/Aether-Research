@@ -27,3 +27,8 @@ variable "worker_metrics_port" {
   description = "WORKER_METRICS_PORT, scraped from inside the VPC."
   type        = number
 }
+
+variable "ollama_port" {
+  description = "The port the embedding service listens on, reachable from the API and the worker."
+  type        = number
+}

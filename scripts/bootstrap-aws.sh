@@ -4,7 +4,7 @@
 #   scripts/bootstrap-aws.sh --bucket my-terraform-state --region us-east-1
 #   scripts/bootstrap-aws.sh --bucket my-terraform-state --dry-run
 #
-# Three resources, and each is here for the same reason: it has to exist before
+# Four kinds of thing, and each is here for the same reason: it has to exist before
 # the thing that would otherwise own it can run.
 #
 #   * The **state bucket**. Terraform's backend is configured before any
@@ -17,6 +17,10 @@
 #     `ECR_REGISTRY` is an account's registry host rather than an environment's.
 #     Having the staging root create them would make production's images depend
 #     on staging's state, so neither root owns them and this does.
+#   * **GitHub's OIDC identity provider**, for the same reason: an account has
+#     one per issuer, and every environment's deploy role (the Terraform
+#     module modules/deploy-role) trusts it. Each root looks it up rather than
+#     creating it, so `terraform plan` fails naming it until this has run.
 #
 # Everything here is idempotent: it checks before it creates and says which of
 # the two it did, so re-running after a partial failure is safe and running it
@@ -187,6 +191,26 @@ EOF
     )"
 done
 
+# --- GitHub OIDC identity provider ---------------------------------------------
+# What lets deploy.yml exchange the token GitHub signs for each run for an hour
+# of AWS credentials, so no access key ever lives in the repository's secrets.
+# No thumbprint is passed: IAM verifies GitHub's endpoint against its own
+# trusted certificate authorities, and a pinned thumbprint would only be one
+# more thing to rotate when GitHub's certificate changes.
+OIDC_HOST="token.actions.githubusercontent.com"
+echo
+echo "oidc provider: $OIDC_HOST"
+if aws iam list-open-id-connect-providers \
+  --query "OpenIDConnectProviderList[].Arn" --output text \
+  | tr '\t' '\n' | grep -q "oidc-provider/${OIDC_HOST}\$"; then
+  echo "  exists"
+else
+  echo "  creating"
+  run aws iam create-open-id-connect-provider \
+    --url "https://${OIDC_HOST}" \
+    --client-id-list sts.amazonaws.com
+fi
+
 echo
 if [[ "$DRY_RUN" == 1 ]]; then
   echo "dry run: nothing was created."
@@ -202,5 +226,8 @@ Done. What to do with it:
   GitHub variable ECR_REGISTRY $account.dkr.ecr.$REGION.amazonaws.com
   environments/*.tfvars        api_image / web_image under that registry
 
-Then: make tf-plan ENV=staging
+Then: make tf-plan ENV=staging, and after the apply copy
+\`terraform output github_environment_variables\` into the GitHub environment
+of the same name - AWS_ROLE_ARN among them, which is the deploy role that
+trusts the provider created above.
 EOF

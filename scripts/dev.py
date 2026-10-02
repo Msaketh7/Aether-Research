@@ -55,6 +55,7 @@ import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 REPO = Path(__file__).resolve().parent.parent
 API = REPO / "apps" / "api"
@@ -226,26 +227,49 @@ def start_managed() -> str | None:
 
     if not managed_running():
         say(f"starting     {colour(f'postgres on {MANAGED_PORT}', DIM)}")
-        started = subprocess.run(
-            [
-                str(pg_ctl),
-                "-D",
-                str(datadir),
-                "-l",
-                str(logfile),
-                "-w",
-                "-t",
-                "60",
-                "-o",
-                f"-p {MANAGED_PORT} -c listen_addresses=127.0.0.1",
-                "start",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        # **Into a file, never a pipe.** The server `pg_ctl start` launches
+        # inherits pg_ctl's standard handles, so with `capture_output` the
+        # pipe's write end lives exactly as long as Postgres does: `run` then
+        # waits for an end-of-file that only arrives at shutdown, and the
+        # launcher froze on "starting postgres" with the server up and ready
+        # behind it. The test harness learned this first
+        # (`tests/support/postgres.py::_run`); a file keeps pg_ctl's own
+        # message readable when a start really does fail.
+        ctl_log = MANAGED_DIR / "pg_ctl.log"
+        with ctl_log.open("w", encoding="utf-8") as output:
+            try:
+                started = subprocess.run(
+                    [
+                        str(pg_ctl),
+                        "-D",
+                        str(datadir),
+                        "-l",
+                        str(logfile),
+                        "-w",
+                        "-t",
+                        "60",
+                        "-o",
+                        f"-p {MANAGED_PORT} -c listen_addresses=127.0.0.1",
+                        "start",
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                    # pg_ctl gives up after its own 60 s; this is the backstop if
+                    # it never returns at all.
+                    timeout=90,
+                )
+            except subprocess.TimeoutExpired:
+                fail(
+                    "the local cluster did not start within 90 seconds.",
+                    fix=f"look in {logfile}",
+                )
         if started.returncode != 0:
-            print((started.stderr or started.stdout)[-800:], file=sys.stderr)
+            print(
+                ctl_log.read_text(encoding="utf-8", errors="replace")[-800:],
+                file=sys.stderr,
+            )
             fail(
                 "the local cluster would not start.",
                 fix=f"look in {logfile}",
@@ -418,6 +442,7 @@ def detect(python: Path, url: str, code: str) -> bool:
 PGVECTOR_PROBE = """
 import asyncio, os, asyncpg
 from urllib.parse import urlsplit
+from urllib.request import urlopen
 async def main():
     dsn = os.environ["DATABASE_URL"].replace("+asyncpg", "")
     conn = await asyncpg.connect(dsn)
@@ -574,6 +599,34 @@ def wait_for(
     return False
 
 
+#: Pages a first visit passes through before it reaches anything else, in that
+#: order: an expired session at `/` is sent to /resume, which renews it or
+#: sends the visitor to /login. Compiled here, before "ready" is printed, so the
+#: first person through is not the one who waits for `next dev` to build them.
+WARM_PAGES = ("/resume?next=%2F", "/login", "/register")
+
+
+def warm(paths: tuple[str, ...]) -> None:
+    """Request each page once so `next dev` compiles it now rather than later.
+
+    Development mode builds a route on its first request - measured at 4.2 s
+    for /resume on this machine, against 0.25 s once built - and an opened
+    browser asks for several in a row. Failures are ignored: a page that does
+    not warm is merely as slow as it would have been, and the launcher must
+    never refuse to start over an optimisation. Gated pages are left alone;
+    they redirect without a session, so requesting them builds nothing.
+    """
+    say(f"warming      {colour(' '.join(path.split('?')[0] for path in paths), DIM)}")
+    started = time.monotonic()
+    for path in paths:
+        try:
+            with urlopen(f"http://localhost:{WEB_PORT}{path}", timeout=120) as response:
+                response.read()
+        except OSError:  # refused, reset or timed out: see the docstring
+            continue
+    say(f"warm         {colour(f'{time.monotonic() - started:.1f}s', DIM)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--no-web", action="store_true", help="API and worker only")
@@ -702,6 +755,7 @@ def main() -> int:
         elif not args.no_web:
             # Next's first compile is slow enough to look like a hang.
             if wait_for("web", WEB_PORT, deadline=180, processes=processes):
+                warm(WARM_PAGES)
                 print()
                 say(colour(f"ready  ->  http://localhost:{WEB_PORT}", BOLD))
                 mode = "fixtures" if args.mock else "the live API"
