@@ -49,7 +49,7 @@ test('a new user can register, arrive signed in, and sign out again', async ({ p
 
   await expect(page).toHaveURL(/\/register$/);
   await page.getByLabel('Email').fill('ada@example.com');
-  await page.getByLabel('Password').fill('correct-horse-battery-staple');
+  await page.getByLabel('Password', { exact: true }).fill('correct-horse-battery-staple');
   await page.getByTestId('register-submit').click();
 
   await expect(page).toHaveURL(/\/$/);
@@ -71,7 +71,7 @@ test('registration renders the API refusal beside the field that caused it', asy
   await page.goto('/register');
 
   await page.getByLabel('Email').fill('ada@example.com');
-  await page.getByLabel('Password').fill('short');
+  await page.getByLabel('Password', { exact: true }).fill('short');
   await page.getByTestId('register-submit').click();
 
   await expect(page.getByText(/at least 12 characters/i)).toBeVisible();

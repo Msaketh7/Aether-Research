@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* The sign-in stage. Its own file because it is the one page that performs. */
+@import './auth.css';
 
 @custom-variant dark (&:is(.dark *));
 
