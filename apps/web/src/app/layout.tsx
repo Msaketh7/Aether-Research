@@ -51,7 +51,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body className="min-h-dvh bg-background text-foreground antialiased">
+      {/* `suppressHydrationWarning` because browser extensions write onto
+          <body> before React hydrates - Grammarly adds
+          `data-gr-ext-installed` and `data-new-gr-c-s-check-loaded` - and each
+          one surfaced as a hydration error in development. It covers this
+          element's own attributes only, one level deep; a real mismatch
+          anywhere inside the page is still reported. */}
+      <body
+        className="min-h-dvh bg-background text-foreground antialiased"
+        suppressHydrationWarning
+      >
         <Providers>{children}</Providers>
       </body>
     </html>
