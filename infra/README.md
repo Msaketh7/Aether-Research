@@ -26,6 +26,11 @@ because `app/core/config.py` resolves the repository root by walking four
 directories up from itself. `.dockerignore` is what keeps that context from
 meaning 77,000 files and a `.env`.
 
+A fourth service runs beside them and is not built here: Ollama, serving the
+embedding model to the API and the worker ([ADR 0024](../docs/ADRs/0024-self-hosted-embeddings.md)).
+It is a third-party image pinned by digest, rolled by Terraform rather than by
+the deploy pipeline, the way the database engine is.
+
 ## What has and has not been run
 
 The Terraform is validated (`terraform validate`, and `terraform fmt`) and has

@@ -903,8 +903,12 @@ worker and the web app under the `app` profile, so the whole system runs in
 containers on one machine.
 
 **Terraform for ECS Fargate**, as a modular root:
-`modules/{network,security,database,cache,storage,alb,ecs-cluster,ecs-service,secrets}`
-with one `.tfvars` per environment. `terraform validate` accepts it.
+`modules/{network,security,database,cache,storage,alb,ecs-cluster,ecs-service,secrets,service-discovery,deploy-role}`
+with one `.tfvars` per environment. `terraform validate` accepts it. Beside the
+three services built from this repository it runs a fourth, Ollama, which serves
+the embedding model to the API and the worker by private DNS; and it creates the
+role `deploy.yml` assumes, trusted by that environment's GitHub deploy job and
+nothing else.
 Kubernetes manifests exist as the portability escape hatch
 ([ADR 0008](docs/ADRs/0008-aws-ecs-deployment.md)).
 
@@ -1219,27 +1223,53 @@ blank.
 
 **What must be supplied:**
 
-| Thing                          | Why                                                             |
-| ------------------------------ | --------------------------------------------------------------- |
-| `DATABASE_URL` (PostgreSQL 17) | system of record; needs the `pgvector` and `citext` extensions  |
-| `REDIS_URL`                    | queue, cache, rate limiter, event fan-out - not optional        |
-| `S3_BUCKET` + credentials      | raw documents and uploads; on ECS this is the task role         |
-| One model provider key         | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or a reachable Ollama    |
-| A search provider key          | `TAVILY_API_KEY` or `BRAVE_API_KEY` - the web researcher's tool |
-| An embedding model             | see below - the shipped one needs Ollama                        |
-| `SEC_USER_AGENT`               | a real contact address; SEC blocks anonymous agents             |
-| `DEV_IDENTITY_ENABLED=false`   | belt and braces; the allowlist already refuses it               |
+| Thing                          | Why                                                               |
+| ------------------------------ | ----------------------------------------------------------------- |
+| `DATABASE_URL` (PostgreSQL 17) | system of record; needs the `pgvector` and `citext` extensions    |
+| `REDIS_URL`                    | queue, cache, rate limiter, event fan-out - not optional          |
+| `S3_BUCKET` + credentials      | raw documents and uploads; on ECS this is the task role           |
+| `JWT_PRIVATE_KEY`              | signs every access token; the API refuses to start without it     |
+| `SSO_APP_BASE_URL`             | the public origin - the tokens' issuer and audience, not only SSO |
+| One model provider key         | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or a reachable Ollama      |
+| A search provider key          | `TAVILY_API_KEY` or `BRAVE_API_KEY` - the web researcher's tool   |
+| An embedding model             | see below - `infra/` runs the Ollama it needs                     |
+| `SEC_USER_AGENT`               | a real contact address; SEC blocks anonymous agents               |
+| `DEV_IDENTITY_ENABLED=false`   | belt and braces; the allowlist already refuses it                 |
 
-Sessions need no signing secret: the cookie carries an opaque 256-bit token and
-the server stores its SHA-256, so there is no key to rotate and nothing to forge
-([ADR 0021](docs/ADRs/0021-sessions-not-tokens.md)).
+`apps/api/tests/test_infrastructure.py` fails the build when the Terraform or the
+Kubernetes manifests stop supplying any of the first five, or any other setting
+whose default points at a developer's machine.
 
-**The embedding model needs a decision, and it is the one that catches people
-out.** The shipped registry declares exactly one - `ollama:embed`, at 768
-dimensions - and nothing in `infra/` deploys an Ollama. A deployment that does
-not run one itself has to declare its own, in the file `MODEL_REGISTRY_PATH`
-names, and pin it with `EMBEDDING_MODEL`. Three things then have to agree, and
-each disagreement is caught rather than discovered later:
+**The signing key is the one secret with no safe default.** Since
+[ADR 0022](docs/ADRs/0022-federated-identity-and-signed-tokens.md) the session
+credential is a short-lived access token the API signs with ES256, and outside
+`local` and `test` the settings refuse to start without the key - an ephemeral
+one would differ between the API and the worker and change on every restart,
+signing everybody out. Make a P-256 key once per environment and store it as the
+`JWT_PRIVATE_KEY` secret:
+
+```bash
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out jwt-signing-key.pem
+```
+
+```bash
+aws secretsmanager put-secret-value --secret-id aether-production/jwt-private-key --secret-string file://jwt-signing-key.pem
+```
+
+Rotating it invalidates every outstanding access token at once - the verifier
+holds exactly one key - while refresh tokens, which are opaque rows rather than
+signed values, survive the change.
+
+**The embedding model is the decision that catches people out.** The shipped
+registry declares exactly one - `ollama:embed`, nomic-embed-text at 768
+dimensions - and `infra/` runs the Ollama it needs: a fourth Fargate service in
+Terraform (`ollama_service`, reached by private DNS from the API and the worker
+only) and `ollama.yaml` in the Kubernetes set. It pulls `nomic-embed-text:v1.5`
+at start and names it what the registry asks for, so the weights cannot move
+under an existing index, and both deployments pin `EMBEDDING_MODEL`. A
+deployment that would rather use a hosted model declares its own in the file
+`MODEL_REGISTRY_PATH` names and pins that instead. Three things then have to
+agree, and each disagreement is caught rather than discovered later:
 
 - the **width the model emits** and `EMBEDDING_DIMENSIONS` in
   `app/db/models/source.py` - ingestion refuses to start if they differ;
@@ -1256,12 +1286,21 @@ Without any of this the app still runs - lexical retrieval works and the dense
 arm returns nothing - which is precisely why it is worth checking before a
 deployment rather than after.
 
-**Bootstrap the account first.** The Terraform state bucket and the two ECR
-repositories have to exist before anything that would otherwise own them can
-run - the backend is configured before any provider is, and the image
-repositories are account-scoped rather than per-environment.
-[`scripts/bootstrap-aws.sh`](scripts/bootstrap-aws.sh) creates all three,
+**Bootstrap the account first.** The Terraform state bucket, the two ECR
+repositories and GitHub's OIDC identity provider have to exist before anything
+that would otherwise own them can run - the backend is configured before any
+provider is, and the repositories and the identity provider are account-scoped
+rather than per-environment.
+[`scripts/bootstrap-aws.sh`](scripts/bootstrap-aws.sh) creates all of them,
 idempotently, and `--dry-run` prints what it would do without doing it.
+
+**Then give the deploy workflow its environment.** Each Terraform root creates a
+deploy role that only that environment's GitHub deploy job can assume, and
+`terraform output github_environment_variables` prints every variable
+`deploy.yml` reads - `AWS_ROLE_ARN` among them - under the names it reads them
+by. Set them on the GitHub environment of the same name, and give `production` a
+required reviewer there, because that rule is what the role's trust is scoped
+to.
 
 **Run the migration as its own step, before the services roll.** `alembic
 upgrade heads` applies both branches. The deploy pipeline registers the new task
