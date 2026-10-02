@@ -23,6 +23,12 @@ sec_user_agent = "AetherResearch/0.1 (REPLACE_ME)"
 # sign in, because the session cookie carries Secure.
 certificate_arn = "REPLACE_ME"
 
+# The origin people reach this deployment at, once DNS points the domain at the
+# load balancer. Until then leave it unset and the load balancer's own name is
+# used. It is the access tokens' issuer and audience, and where single sign-on
+# returns the browser, so it must match the address bar exactly.
+# public_url = "https://REPLACE_ME"
+
 api_service = {
   cpu           = 1024
   memory        = 2048
@@ -47,6 +53,16 @@ worker_service = {
   desired_count = 2
   min_count     = 1
   max_count     = 20
+}
+
+# Two floor tasks, so a replacement or the loss of a zone is not a window in
+# which retrieval is lexical only. Sizing decisions, not measurements.
+ollama_service = {
+  cpu           = 2048
+  memory        = 4096
+  desired_count = 2
+  min_count     = 2
+  max_count     = 6
 }
 
 database = {

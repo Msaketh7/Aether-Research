@@ -11,6 +11,10 @@ data "aws_caller_identity" "current" {}
 locals {
   name_prefix = "${var.project}-${var.environment}"
 
+  # Where people reach this deployment: the domain once DNS points at the load
+  # balancer, the load balancer's own name before then.
+  public_url = trimsuffix(var.public_url != "" ? var.public_url : module.alb.url, "/")
+
   # S3 bucket names are a single global namespace, so a name that is unique
   # within this account is not enough.
   artifact_bucket = "${local.name_prefix}-artifacts-${data.aws_caller_identity.current.account_id}"
@@ -54,6 +58,22 @@ locals {
     SEC_USER_AGENT = var.sec_user_agent
 
     METRICS_ENABLED = "true"
+
+    # Embeddings come from the Ollama service this root runs inside the VPC
+    # (ollama_service in main.tf), reached by its private DNS name. Pinned
+    # rather than resolved, because an index whose vectors came from two models
+    # fails silently - and the model the service pulls is held to this key by
+    # apps/api/tests/test_infrastructure.py.
+    EMBEDDING_MODEL = local.embedding_model_key
+    OLLAMA_BASE_URL = "http://${module.discovery.service_hostnames["ollama"]}:${local.ollama_port}"
+
+    # The public origin, which is more than an SSO setting: it is the issuer
+    # and the audience of every access token the API mints (app/api/deps.py),
+    # so leaving it at its localhost default signs production tokens as
+    # http://localhost:3000. The redirect base is the API under the same
+    # origin, because the load balancer routes /api/* there.
+    SSO_APP_BASE_URL      = local.public_url
+    SSO_REDIRECT_BASE_URL = "${local.public_url}/api/v1"
   }
 
   api_environment = merge(
@@ -78,6 +98,24 @@ locals {
   api_port            = 8000
   web_port            = 3000
   worker_metrics_port = 9100
+  ollama_port         = 11434
+
+  # The embedding model, stated once. `embedding_model_key` is the registry key
+  # the application pins; `ollama_model` is that entry's `model_id` in
+  # app/models/registry.yaml, which is the name the application asks Ollama
+  # for. `ollama_model_pin` is the tag actually pulled - `latest` is a moving
+  # pointer, and a model that changes under an existing index is the silent
+  # failure EMBEDDING_MODEL exists to prevent - and it is then copied to the
+  # unversioned name so the application's requests resolve to it.
+  embedding_model_key = "ollama:embed"
+  ollama_model        = "nomic-embed-text"
+  ollama_model_pin    = "nomic-embed-text:v1.5"
+
+  # Declared secrets every deployment needs, whatever else it chooses. Kept out
+  # of `var.provider_secret_names` so that overriding that list - to drop a
+  # search provider, say - cannot also drop the key the API refuses to start
+  # without (app/core/config.py, _check_auth_bounds).
+  required_secret_names = ["JWT_PRIVATE_KEY"]
 
   # Derived secrets: values this configuration computed and the application
   # reads as one string each. Names and values are separate because Terraform

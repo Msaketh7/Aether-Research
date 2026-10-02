@@ -1,8 +1,8 @@
 # What a person or a pipeline needs after an apply.
 #
 # Deliberately short. An output is a promise that something else consumes;
-# `.github/workflows/deploy.yml` consumes the cluster and service names and the
-# URL, and a human consumes the rest. Nothing sensitive is here - the DSNs are
+# `.github/workflows/deploy.yml` consumes `github_environment_variables`, and a
+# human consumes the rest. Nothing sensitive is here - the DSNs are
 # in Secrets Manager and marked sensitive at their source.
 
 output "url" {
@@ -31,6 +31,7 @@ output "service_names" {
     api    = module.api_service.service_name
     web    = module.web_service.service_name
     worker = module.worker_service.service_name
+    ollama = module.ollama_service.service_name
   }
 }
 
@@ -77,4 +78,26 @@ output "cache_replication_group_id" {
 output "secret_names" {
   description = "Settings whose values live in Secrets Manager, by setting name."
   value       = keys(module.secrets.arns_by_name)
+}
+
+output "deploy_role_arn" {
+  description = "The role deploy.yml assumes from this environment's GitHub deploy job."
+  value       = module.deploy_role.arn
+}
+
+# Every `vars.*` deploy.yml reads, by the name it reads it under, so setting up
+# a GitHub environment is copying this map rather than working each value out.
+# apps/api/tests/test_infrastructure.py fails when the workflow starts reading a
+# variable this map does not supply.
+output "github_environment_variables" {
+  description = "Variables for this environment's GitHub environment, as deploy.yml names them."
+  value = {
+    AWS_ROLE_ARN            = module.deploy_role.arn
+    AWS_REGION              = var.aws_region
+    ECS_CLUSTER             = module.ecs.cluster_name
+    ECR_REGISTRY            = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    PRIVATE_SUBNET_IDS      = join(",", module.network.private_subnet_ids)
+    TASKS_SECURITY_GROUP_ID = module.security.tasks_security_group_id
+    DEPLOYMENT_URL          = local.public_url
+  }
 }

@@ -27,6 +27,19 @@ data:
   METRICS_ENABLED: 'true'
   WORKER_CONCURRENCY: '1'
   WORKER_METRICS_PORT: '9100'
+  # SEC blocks anonymous agents, and the application's default carries an
+  # example.com contact. Put a real address here before applying.
+  SEC_USER_AGENT: 'AetherResearch/0.1 (REPLACE_ME)'
+  # Embeddings come from the Ollama Deployment in ollama.yaml, by its Service
+  # name. Pinned rather than resolved: an index whose vectors came from two
+  # models fails silently.
+  EMBEDDING_MODEL: ollama:embed
+  OLLAMA_BASE_URL: http://aether-ollama:11434
+  # The origin people reach the ingress at. It is the access tokens' issuer and
+  # audience, not only where single sign-on returns the browser, so it must be
+  # set even with SSO off - the default is a developer's localhost.
+  SSO_APP_BASE_URL: 'https://REPLACE_ME'
+  SSO_REDIRECT_BASE_URL: 'https://REPLACE_ME/api/v1'
 ---
 # Not a manifest to apply as it stands: the values are empty, and a Secret
 # committed to a repository with values in it is the failure this file exists
@@ -35,10 +48,14 @@ data:
 #   kubectl -n aether create secret generic aether-secrets \
 #     --from-literal=DATABASE_URL='postgresql+asyncpg://...' \
 #     --from-literal=REDIS_URL='rediss://...' \
+#     --from-file=JWT_PRIVATE_KEY=jwt-signing-key.pem \
 #     --from-literal=ANTHROPIC_API_KEY='...'
 #
 # A provider key left empty reads as absent rather than as an empty string
-# (app/core/config.py), so that provider simply does not exist.
+# (app/core/config.py), so that provider simply does not exist. JWT_PRIVATE_KEY
+# is the exception: the API and the worker refuse to start without it. It is a
+# P-256 private key in PEM form; the README's production setup says how to make
+# one.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -50,8 +67,11 @@ type: Opaque
 stringData:
   DATABASE_URL: ''
   REDIS_URL: ''
+  JWT_PRIVATE_KEY: ''
   ANTHROPIC_API_KEY: ''
   OPENAI_API_KEY: ''
   TAVILY_API_KEY: ''
   BRAVE_API_KEY: ''
   GITHUB_TOKEN: ''
+  AUTH0_CLIENT_SECRET: ''
+  SUPABASE_PUBLISHABLE_KEY: ''

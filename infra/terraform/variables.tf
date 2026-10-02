@@ -117,6 +117,45 @@ variable "allowed_ingress_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "public_url" {
+  description = <<-EOT
+    The origin people use to reach this deployment, e.g. https://research.example.org.
+
+    Empty means the load balancer's own DNS name, which is right until a DNS
+    record points the domain at it. It becomes SSO_APP_BASE_URL - the issuer
+    and audience of every access token, and where single sign-on returns the
+    browser - so it must be the origin the browser actually has in its address
+    bar, or every token is minted for the wrong audience and every provider
+    redirect is refused as unregistered.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.public_url == "" || can(regex("^https?://[^/]+/?$", var.public_url))
+    error_message = "public_url must be an origin - scheme and host, no path."
+  }
+}
+
+# --- continuous deployment ---------------------------------------------------
+
+variable "github_repository" {
+  description = <<-EOT
+    owner/name of the repository whose deploy workflow may assume the deploy role.
+
+    The role trusts exactly one GitHub environment of exactly this repository
+    (modules/deploy-role), compared case-sensitively, because that is how the
+    OIDC token's `sub` claim is compared.
+  EOT
+  type        = string
+  default     = "Msaketh7/Aether-Research"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must be owner/name."
+  }
+}
+
 # --- images ------------------------------------------------------------------
 
 variable "api_image" {
@@ -127,6 +166,26 @@ variable "api_image" {
 variable "web_image" {
   description = "Fully qualified image for the web service."
   type        = string
+}
+
+variable "ollama_image" {
+  description = <<-EOT
+    The Ollama server image for the embedding service, pinned by digest.
+
+    Not built or scanned by this repository's pipeline: it is a backing
+    service in the way Postgres and Redis are, and Terraform rolls it rather
+    than deploy.yml. It is pulled from Docker Hub, whose anonymous pull limit
+    is per address - and every task here shares the NAT gateway's - so a
+    deployment that scales this service often should mirror the image into
+    ECR and point this at the copy.
+  EOT
+  type        = string
+  default     = "ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551"
+
+  validation {
+    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.ollama_image))
+    error_message = "ollama_image must be pinned by digest: a tag can be moved under a running index."
+  }
 }
 
 # --- service sizing ----------------------------------------------------------
@@ -189,6 +248,31 @@ variable "worker_service" {
     desired_count = 2
     min_count     = 1
     max_count     = 20
+  }
+}
+
+variable "ollama_service" {
+  description = <<-EOT
+    Fargate sizing and scaling bounds for the embedding service (Ollama).
+
+    CPU inference of nomic-embed-text, a 137M-parameter model: small enough
+    that memory is not the constraint, so CPU is what to raise if ingestion
+    waits on embeddings. A sizing decision, not a measurement - nothing here
+    has run against it.
+  EOT
+  type = object({
+    cpu           = number
+    memory        = number
+    desired_count = number
+    min_count     = number
+    max_count     = number
+  })
+  default = {
+    cpu           = 1024
+    memory        = 2048
+    desired_count = 1
+    min_count     = 1
+    max_count     = 4
   }
 }
 
@@ -303,6 +387,11 @@ variable "provider_secret_names" {
     Terraform creates the secret and the task's permission to read it; the
     value is written out of band, because a model provider key in a plan output
     is a model provider key in a CI log.
+
+    Each is optional: an entry left at its empty placeholder reads as absent,
+    so that provider - or, for the last two, that single sign-on broker - is
+    simply not built. JWT_PRIVATE_KEY is not in this list because it is not
+    optional; see `required_secret_names` in locals.tf.
   EOT
   type        = list(string)
   default = [
@@ -311,6 +400,8 @@ variable "provider_secret_names" {
     "TAVILY_API_KEY",
     "BRAVE_API_KEY",
     "GITHUB_TOKEN",
+    "AUTH0_CLIENT_SECRET",
+    "SUPABASE_PUBLISHABLE_KEY",
   ]
 }
 

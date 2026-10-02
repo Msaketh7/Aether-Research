@@ -125,6 +125,54 @@ resource "aws_vpc_security_group_egress_rule" "worker_all" {
   ip_protocol       = "-1"
 }
 
+# --- the embedding service (Ollama) -----------------------------------------
+
+# Reached by the API and the worker on Ollama's port, and by nothing else. It
+# serves an unauthenticated API - anything that can reach it can run models on
+# this account's CPU - so the ingress rules are what stands in for a password.
+resource "aws_security_group" "ollama" {
+  name        = "${var.name_prefix}-ollama"
+  description = "Embedding service. Reachable from the API and the worker only."
+  vpc_id      = var.vpc_id
+
+  tags = { Name = "${var.name_prefix}-ollama" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ollama_from_tasks" {
+  security_group_id            = aws_security_group.ollama.id
+  description                  = "API tasks"
+  referenced_security_group_id = aws_security_group.tasks.id
+  from_port                    = var.ollama_port
+  to_port                      = var.ollama_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ollama_from_worker" {
+  security_group_id            = aws_security_group.ollama.id
+  description                  = "Worker tasks"
+  referenced_security_group_id = aws_security_group.worker.id
+  from_port                    = var.ollama_port
+  to_port                      = var.ollama_port
+  ip_protocol                  = "tcp"
+}
+
+# HTTPS out and nothing else. Unlike the research tasks, this one reads no open
+# web: it pulls its image and its model weights at start, both over 443, and
+# otherwise only answers. Name resolution goes to the VPC resolver, which
+# security groups do not filter.
+resource "aws_vpc_security_group_egress_rule" "ollama_https" {
+  security_group_id = aws_security_group.ollama.id
+  description       = "Image and model downloads at task start"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+}
+
 # --- data stores -------------------------------------------------------------
 
 resource "aws_security_group" "database" {

@@ -5,13 +5,19 @@
 # services. Terraform writes them.
 #
 # **Declared** secrets have a value Terraform must never see: the model and
-# search provider keys. Terraform creates the entry and the task's permission
+# search provider keys, the single sign-on client secrets, and the key the API
+# signs access tokens with. Terraform creates the entry and the task's permission
 # to read it, and the value is written out of band, once, by a person or a
 # deployment secret store. A placeholder version is created so that a task
 # referencing it starts rather than failing to pull - the application already
 # treats a blank credential as an absent one (app/core/config.py), so a
 # provider whose key has not been set simply does not exist, which is a
 # degraded deployment rather than a crashed one.
+#
+# The exception is JWT_PRIVATE_KEY, which the API and the worker refuse to start
+# without. That is deliberate: a deployment that cannot sign tokens cannot sign
+# anybody in, and a task that fails its first start naming the missing key is a
+# better first apply than a login page that never works.
 
 resource "aws_secretsmanager_secret" "derived" {
   for_each = toset(var.derived_names)
@@ -60,8 +66,15 @@ resource "aws_secretsmanager_secret_version" "declared_placeholder" {
   for_each = toset(var.declared)
 
   secret_id = aws_secretsmanager_secret.declared[each.key].id
-  # An empty string, which the settings layer reads as "no credential".
-  secret_string = ""
+  # One space, not an empty string - and the difference is the first apply.
+  # The provider sends `secret_string` only when `GetOk` finds it set, which an
+  # empty string is not, so `""` reaches PutSecretValue as no value at all and
+  # AWS refuses it ("You must provide either SecretString or SecretBinary").
+  # The settings layer strips a credential before deciding it is absent
+  # (app/core/config.py, _blank_credential_is_no_credential), so a space reads
+  # as "no credential" exactly as an empty string would have.
+  # apps/api/tests/test_infrastructure.py holds the two to each other.
+  secret_string = " "
 
   lifecycle {
     # The whole point: once a real value is written, Terraform stops having an
