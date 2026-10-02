@@ -129,7 +129,10 @@ async def sso_providers(
             start_url=f"/api/v1/auth/sso/{name}/{connection}/start",
         )
         for name, provider in sorted(providers.items())
-        for connection in provider.connections
+        # What the upstream will accept *now*, not only what is configured: a
+        # Google button before Google is switched on in the Supabase dashboard
+        # leads to Supabase's own error page.
+        for connection in await provider.available_connections()
     ]
     return SsoOptionsResponse(
         options=options,
@@ -163,7 +166,7 @@ async def sso_start(
     request per call.
     """
     chosen = providers.get(provider)
-    if chosen is None or connection not in chosen.connections:
+    if chosen is None or connection not in await chosen.available_connections():
         # Not "provider not found": naming which half was wrong tells an
         # unauthenticated caller how this deployment is configured.
         raise NotFound("That sign-in method is not available.", code="sso_not_available")

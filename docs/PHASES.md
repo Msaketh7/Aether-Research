@@ -2011,6 +2011,91 @@ path; pointing it at the answerer needs a key and about three cents a run.
 
 ---
 
+## Phase 28 — Supabase as the account store · **Done (a live sign-in is unverified)**
+
+Requested plainly: people create an account, sign in with it, or sign in with
+Google or GitHub, and the accounts live in Supabase. Most of the machinery
+existed - Phase 20's sign-up and sign-in, Phase 26's Supabase provider - so the
+choice put to the user was where passwords live. They chose Supabase for
+everything. [ADR 0025](ADRs/0025-supabase-holds-the-credentials.md) records
+it: Supabase holds the credential and confirms the address; this system still
+issues and revokes its own session.
+
+_Landed, backend:_ a Supabase project (`aether-research`, free tier, us-west-1)
+created through the connector; `AUTH_BACKEND=supabase|local`, explicit and never
+inferred, refusing to start as `supabase` without a project; `app/auth/supabase.py`,
+the only module that speaks Supabase Auth, with JSON bodies, a one-retry policy
+limited to requests that never left, and every GoTrue `error_code` mapped to one
+of our errors so no upstream text reaches a person. Registration answers `201`
+signed in or `202 confirmation_required`, and an already-registered address gets
+the same `202`. `POST /auth/confirmation/resend`, behind both credential buckets.
+Optional `SUPABASE_SECRET_KEY`, so Supabase can rate-limit per person rather than
+per API server.
+
+_Frontend:_ "Check your inbox" in place of the registration form; on `/login`, a
+banner for a followed confirmation link and a resend button when the password
+was right but the address is unconfirmed. The confirmation link leaves a
+Supabase session in the URL fragment, which this system never uses - the page
+scrubs it from the address bar, and reads the fragment's error code through a
+closed table rather than rendering its text, because the fragment is
+attacker-writable.
+
+_Defects found by verifying against the live project:_ the Phase 26 Supabase
+path could not have completed a single sign-in, four ways, and every one passed
+its tests because the scripted provider was written from the same reading of the
+documentation as the code.
+
+- **The code exchange was a form; Supabase parses JSON.** `400 bad_json`.
+- **`/authorize` was sent `redirect_uri`; Supabase reads `redirect_to`.** The
+  person would have landed on the project's Site URL with a code nobody claimed.
+- **The callback required `state`; Supabase does not echo it.** Every sign-in
+  would have ended in `invalid_state`. `state` now rides inside `redirect_to`.
+- **Verification was read from `email_verified`; Supabase's tokens have none.**
+  Every new account would have been refused as unverified. It is read from
+  `user.email_confirmed_at`, after checking the body names the token's user.
+
+Each is pinned by a test that the old code fails, against a script rebuilt from
+what the live project actually answered.
+
+_Verified live:_ the project's ES256 signing key through the real key cache; a
+wrong password mapped to `invalid_credentials`; the JSON exchange reaching
+`flow_state_not_found` rather than `bad_json`; the authorize URL parsed as far as
+"provider is not enabled"; and the real app, configured from `.env`, refusing a
+wrong password through Supabase and a short one before it. The project still
+holds zero accounts.
+
+_Then, buttons only for what exists - and a code that was built and withdrawn._
+Asked for after the first live sign-ups worked: confirm the address with a
+six-digit code rather than a link, and add Google and GitHub. The code was
+built - `POST /auth/confirmation/verify` against Supabase's `/verify`, six boxes
+over one real input, the credential buckets spent before every guess because
+Supabase sees all of them as one address - and then withdrawn the same day at
+the owner's request, in favour of Supabase's default confirmation link. None of
+it had been committed, so it is kept as a restore patch in
+`.data/otp-confirmation/` on the development machine (gitignored); its README
+says how to apply it and what to change in the dashboard.
+
+Google and GitHub needed no new protocol - Phase 28's provider already speaks
+it - but two defects stood between the code and a working button:
+
+- **The buttons linked to the wrong origin.** The API names its start route as
+  a path, `/api/v1/auth/sso/...`, which only works where the web app and the
+  API share an origin. Locally they are :3000 and :8000, so every button would
+  have been a 404 on the web app. `apiHref` resolves it against the API.
+- **A configured provider was offered before it existed.** `SSO_CONNECTIONS`
+  said Google; the Supabase project had not switched it on; the button led to
+  Supabase's own error page. Providers now report `available_connections()`,
+  and the Supabase one asks the project's public `/settings`, cached for a
+  minute - so a button appears when the dashboard switch is flipped and not
+  before, and `start` refuses a switched-off connection.
+
+_Verified live:_ no buttons offered and `start` refused while both providers
+were off in the project.
+
+_Not verified:_ the Google and GitHub round trips end to end.
+
+---
+
 ## Implementation rules
 
 1. Do not use mocked data once a real implementation exists.

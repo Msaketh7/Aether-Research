@@ -188,6 +188,11 @@ class OidcProvider(IdentityProvider):
     def connections(self) -> tuple[Connection, ...]:
         return self._connections
 
+    async def available_connections(self) -> tuple[Connection, ...]:
+        # Standard OIDC has no way to ask which upstream connections a tenant
+        # has enabled, so the configuration is the answer.
+        return self._connections
+
     def authorize(self, *, connection: Connection, redirect_uri: str) -> AuthorizationRequest:
         if connection not in self._connections:
             # Not a user-facing case: the route resolves the connection against

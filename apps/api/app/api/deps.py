@@ -32,6 +32,7 @@ from app.auth.revocation import (
 )
 from app.auth.service import AuthService
 from app.auth.sessions import SessionPolicy, SessionService
+from app.auth.supabase import SupabaseAuth, build_supabase_auth
 from app.auth.tokens import TokenIssuer
 from app.auth.transactions import (
     InMemoryTransactionStore,
@@ -253,6 +254,7 @@ def get_providers(
             # cache key that could be logged.
             "1" if settings.auth0_client_secret else "0",
             "1" if settings.supabase_publishable_key else "0",
+            "1" if settings.supabase_secret_key else "0",
         ]
     )
     cached = _PROVIDER_CACHE.get(key)
@@ -306,12 +308,67 @@ def get_session_service(
     )
 
 
+#: Supabase Auth clients, memoised per configuration for the same reason as the
+#: providers: each owns a JWKS cache that must outlive one request.
+_SUPABASE_CACHE: dict[str, SupabaseAuth] = {}
+
+
+def get_supabase_auth(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> SupabaseAuth | None:
+    """The project's Auth client, or None when no project is configured."""
+    if not (settings.supabase_url and settings.supabase_publishable_key):
+        return None
+    key = "|".join(
+        [
+            settings.supabase_url,
+            # Presence only, as above: never a secret in a cache key.
+            "1" if settings.supabase_secret_key else "0",
+            str(settings.sso_request_timeout_seconds),
+        ]
+    )
+    cached = _SUPABASE_CACHE.get(key)
+    if cached is None:
+        cached = build_supabase_auth(
+            url=settings.supabase_url,
+            publishable_key=settings.supabase_publishable_key.get_secret_value(),
+            secret_key=(
+                settings.supabase_secret_key.get_secret_value()
+                if settings.supabase_secret_key
+                else None
+            ),
+            timeout_seconds=settings.sso_request_timeout_seconds,
+        )
+        if cached is None:
+            return None
+        _SUPABASE_CACHE[key] = cached
+    return cached
+
+
 def get_auth_service(
     users: Annotated[UserRepository, Depends(get_user_repository)],
     sessions: Annotated[SessionService, Depends(get_session_service)],
+    identities: Annotated[IdentityRepository, Depends(get_identity_repository)],
+    supabase: Annotated[SupabaseAuth | None, Depends(get_supabase_auth)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> AuthService:
-    return AuthService(users=users, sessions=sessions, settings=settings)
+    if settings.auth_backend != "supabase":
+        return AuthService(users=users, sessions=sessions, settings=settings)
+    return AuthService(
+        users=users,
+        sessions=sessions,
+        settings=settings,
+        supabase=supabase,
+        # Gated on `registration_enabled`, not the SSO setting: a Supabase
+        # password account is a password account, and the first sign-in after
+        # its address is confirmed is where its row here is created.
+        federation=FederationService(
+            users=users,
+            identities=identities,
+            registration_enabled=settings.registration_enabled,
+            link_by_verified_email=settings.sso_link_by_verified_email,
+        ),
+    )
 
 
 def get_cookie_policy(

@@ -1,8 +1,11 @@
 """Which providers this deployment has, built from settings.
 
-Two vendor descriptions and the rule for turning configuration into providers.
-The descriptions are the only vendor-specific code in the system: everything
-else - the exchange, the verification, the linking, the endpoints - is shared.
+Auth0's description for the shared OIDC code, the Supabase provider, and the
+rule for turning configuration into providers. Auth0 is described rather than
+implemented because it speaks standard OIDC; Supabase has its own class
+(`supabase.py`) because, checked against a live project, it does not (ADR 0025).
+Everything after the provider - the linking, the sessions, the endpoints - is
+shared.
 
 **A provider is built only when it is fully configured.** A half-configured
 one is not offered at all rather than being offered and failing at the
@@ -21,6 +24,8 @@ from typing import cast
 
 from app.auth.providers.base import Connection, IdentityProvider, ProviderName
 from app.auth.providers.oidc import OidcDescription, OidcProvider
+from app.auth.providers.supabase import SupabaseProvider
+from app.auth.supabase import build_supabase_auth
 from app.core.config import Settings
 from app.core.logging import get_logger
 
@@ -48,48 +53,6 @@ def auth0_description(domain: str) -> OidcDescription:
         connection_values={"google": "google-oauth2", "github": "github"},
         identity_token_field="id_token",  # noqa: S106 - a field name, not a secret
         echoes_nonce=True,
-    )
-
-
-def supabase_description(project_url: str, publishable_key: str) -> OidcDescription:
-    """Supabase GoTrue's endpoints for a project.
-
-    Three departures from standard OIDC, all of them Supabase's:
-
-    * The identity claims are in its own `access_token`, not an `id_token`.
-    * The PKCE exchange names the code `auth_code`, puts the grant type in the
-      endpoint's query string, and rejects a repeated `redirect_uri`.
-    * Every request carries the project's publishable key as `apikey`.
-
-    **The project must be using asymmetric signing keys.** Supabase originally
-    signed with a shared HS256 secret, and this system's algorithm allowlist
-    contains no HMAC algorithm - deliberately, because accepting one is how
-    algorithm-confusion attacks work. A project still on a legacy JWT secret
-    will fail verification, and that is the correct outcome rather than a bug
-    to work around: the fix is to migrate the project to ES256 keys, which is
-    also what Supabase now recommends.
-    """
-    base = project_url.strip().rstrip("/")
-    return OidcDescription(
-        name="supabase",
-        issuer=f"{base}/auth/v1",
-        authorization_endpoint=f"{base}/auth/v1/authorize",
-        token_endpoint=f"{base}/auth/v1/token?grant_type=pkce",
-        jwks_uri=f"{base}/auth/v1/.well-known/jwks.json",
-        connection_parameter="provider",
-        connection_values={"google": "google", "github": "github"},
-        identity_token_field="access_token",  # noqa: S106 - a field name, not a secret
-        # GoTrue signs every token with `aud: "authenticated"`.
-        audience="authenticated",
-        # GoTrue's PKCE flow does not echo a nonce. PKCE and `state` still bind
-        # the callback to this flow and this browser; what is lost is replay
-        # protection on the token itself, which is why the nonce is kept
-        # wherever a provider does echo it rather than being dropped for all.
-        echoes_nonce=False,
-        code_parameter="auth_code",
-        sends_grant_type=False,
-        sends_redirect_uri=False,
-        extra_token_headers={"apikey": publishable_key},
     )
 
 
@@ -146,20 +109,20 @@ def _build_auth0(
 def _build_supabase(
     settings: Settings, connections: tuple[Connection, ...]
 ) -> IdentityProvider | None:
-    url = settings.supabase_url
-    key = settings.supabase_publishable_key
-
-    if not (url and key):
-        return None
-
-    return OidcProvider(
-        supabase_description(url, key.get_secret_value()),
-        client_id=settings.supabase_client_id or url.strip().rstrip("/"),
-        # A public client: the PKCE verifier is the proof, not a secret this
-        # system holds. Supabase's publishable key is not a client secret and
-        # must not be sent as one - it is a per-project identifier that ships
-        # in browsers.
-        client_secret=None,
-        connections=connections,
+    auth = build_supabase_auth(
+        url=settings.supabase_url,
+        publishable_key=(
+            settings.supabase_publishable_key.get_secret_value()
+            if settings.supabase_publishable_key
+            else None
+        ),
+        secret_key=(
+            settings.supabase_secret_key.get_secret_value()
+            if settings.supabase_secret_key
+            else None
+        ),
         timeout_seconds=settings.sso_request_timeout_seconds,
     )
+    if auth is None:
+        return None
+    return SupabaseProvider(auth, connections=connections)

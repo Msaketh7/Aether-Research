@@ -15,11 +15,18 @@ and costs this process no Argon2.
 **A refused login still writes an audit row**, which is the reason the audit
 store has a transaction of its own: the refusal raises, and the request's own
 transaction is rolled back.
+
+**Registration has two successes** when Supabase holds the passwords (ADR
+0025): `201` with a signed-in user when the address needs no confirming, and
+`202` with `confirmation_required` when Supabase has emailed a link first -
+its default. The `202` is also what an already-registered address gets, so
+sign-up cannot be used to discover who has an account.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -40,7 +47,7 @@ from app.api.deps import (
     UserRepositoryDep,
 )
 from app.api.errors import error_body
-from app.auth.service import normalise_email
+from app.auth.service import ConfirmationSent, normalise_email
 from app.core.enums import AuditAction
 from app.core.errors import AppError, NotFound, Unauthenticated
 from app.db.models.user import UserRow
@@ -81,6 +88,21 @@ class LoginResponse(BaseModel):
     user: UserResponse
 
 
+class ConfirmationResponse(BaseModel):
+    """A sign-up waiting on its emailed link. Mirrors `ConfirmationRequired`.
+
+    Carries the address back so the page can say where the link went - the
+    address the person typed, normalised, which tells them nothing new.
+    """
+
+    confirmation_required: Literal[True] = True
+    email: str
+
+
+class ResendConfirmationRequest(BaseModel):
+    email: EmailStr
+
+
 class SessionResponse(BaseModel):
     """One live session, as `/settings` lists it."""
 
@@ -106,8 +128,9 @@ def _user_view(row: UserRow) -> UserResponse:
     "/register",
     response_model=LoginResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create an account and sign in",
+    summary="Create an account, and sign in unless the address needs confirming",
     dependencies=[Depends(RateLimit(WRITE))],
+    responses={status.HTTP_202_ACCEPTED: {"model": ConfirmationResponse}},
 )
 async def register(
     body: RegisterRequest,
@@ -118,12 +141,12 @@ async def register(
     trail: AuditTrailDep,
     address: ClientAddress,
     user_agent: UserAgent,
-) -> LoginResponse:
+) -> LoginResponse | JSONResponse:
     await _spend_credential_budget(limiter, address=address, email=body.email)
 
     now = dt.datetime.now(dt.UTC)
     try:
-        signed_in = await service.register(
+        outcome = await service.register(
             email=body.email,
             password=body.password,
             name=body.name,
@@ -135,6 +158,14 @@ async def register(
         await trail.failure(AuditAction.REGISTER_REJECTED, reason=exc.code)
         raise
 
+    if isinstance(outcome, ConfirmationSent):
+        await trail.record(AuditAction.REGISTER_PENDING, email=outcome.email)
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=ConfirmationResponse(email=outcome.email).model_dump(),
+        )
+
+    signed_in = outcome
     cookies.attach_tokens(
         response,
         access=signed_in.tokens.access_token,
@@ -196,6 +227,34 @@ async def login(
         resource_id=signed_in.tokens.session_id,
     )
     return LoginResponse(user=_user_view(signed_in.user))
+
+
+@router.post(
+    "/confirmation/resend",
+    response_model=ConfirmationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Send the sign-up confirmation email again",
+    dependencies=[Depends(RateLimit(WRITE))],
+)
+async def resend_confirmation(
+    body: ResendConfirmationRequest,
+    service: AuthServiceDep,
+    limiter: RateLimiterDep,
+    trail: AuditTrailDep,
+    address: ClientAddress,
+) -> ConfirmationResponse:
+    """Ask Supabase to send the link again.
+
+    The same answer whether or not the address has a sign-up waiting - and
+    behind the same two credential buckets as sign-in, because an endpoint that
+    sends email to an address of the caller's choosing is a way to send email
+    to anyone unless it is limited per address.
+    """
+    await _spend_credential_budget(limiter, address=address, email=body.email)
+    email = normalise_email(body.email)
+    await service.resend_confirmation(email=email, ip=address)
+    await trail.record(AuditAction.CONFIRMATION_RESENT, email=email)
+    return ConfirmationResponse(email=email)
 
 
 @router.post(

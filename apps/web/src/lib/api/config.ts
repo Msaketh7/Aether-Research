@@ -31,6 +31,20 @@ export const MOCK_SPEED: number = Math.max(
   Number(process.env.NEXT_PUBLIC_MOCK_SPEED ?? '1') || 1,
 );
 
+/**
+ * A path the API handed back, as somewhere a browser can be sent.
+ *
+ * The API names its own routes as absolute paths (`/api/v1/auth/sso/...`).
+ * Where the web app and the API share an origin - a deployment behind one load
+ * balancer, or mock mode - that path is already correct. Where they do not -
+ * local development, :3000 and :8000 - it would resolve against the web app
+ * and 404, so it is resolved against the API's own origin instead.
+ */
+export function apiHref(path: string): string {
+  if (!/^https?:\/\//.test(API_BASE_URL)) return path;
+  return new URL(path, API_BASE_URL).toString();
+}
+
 export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }

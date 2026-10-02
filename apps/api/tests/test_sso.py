@@ -24,7 +24,7 @@ from joserfc.jwk import ECKey, KeySet, RSAKey
 from app.auth.providers.base import ProviderError, ProviderRefused
 from app.auth.providers.jwks import JwksCache
 from app.auth.providers.oidc import OidcProvider, _s256_challenge
-from app.auth.providers.registry import auth0_description, supabase_description
+from app.auth.providers.registry import auth0_description
 from app.auth.redirects import DEFAULT_DESTINATION, safe_destination
 from app.auth.revocation import InMemoryRevocationStore, revocation_ttl_seconds
 from app.auth.tokens import TokenIssuer, hash_refresh_token, mint_refresh_token
@@ -504,15 +504,6 @@ def test_auth0s_issuer_keeps_its_trailing_slash() -> None:
 
 def test_auth0_names_googles_connection_the_way_auth0_names_it() -> None:
     assert auth0_description("t.auth0.com").connection_values["google"] == "google-oauth2"
-
-
-def test_supabase_reads_claims_from_its_own_access_token() -> None:
-    description = supabase_description("https://ref.supabase.co", "anon-key")
-
-    assert description.identity_token_field == "access_token"  # noqa: S105 - a field name
-    assert description.audience == "authenticated"
-    assert description.code_parameter == "auth_code"
-    assert description.extra_token_headers["apikey"] == "anon-key"
 
 
 def test_no_hmac_algorithm_is_ever_allowed() -> None:

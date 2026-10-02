@@ -1,5 +1,6 @@
 import type {
   ActivityResponse,
+  ConfirmationRequired,
   AnswerResponse,
   CreateResearchRequest,
   CreateResearchResponse,
@@ -11,10 +12,12 @@ import type {
   LoginResponse,
   Page,
   RegisterRequest,
+  RegisterResponse,
   ReportResponse,
   ResearchPlan,
   ResearchRun,
   ResearchRunSummary,
+  ResendConfirmationRequest,
   RevokedSessions,
   SessionInfo,
   SourcesResponse,
@@ -34,8 +37,12 @@ import { apiRequest } from './client';
  */
 
 export const authApi = {
+  /** Signs in (`201`), or answers "check your inbox" (`202`) - see `RegisterResponse`. */
   register: (body: RegisterRequest) =>
-    apiRequest<LoginResponse>('/auth/register', { method: 'POST', body }),
+    apiRequest<RegisterResponse>('/auth/register', { method: 'POST', body }),
+  /** Email the sign-up link again. The same answer for any address. */
+  resendConfirmation: (body: ResendConfirmationRequest) =>
+    apiRequest<ConfirmationRequired>('/auth/confirmation/resend', { method: 'POST', body }),
   login: (body: LoginRequest) => apiRequest<LoginResponse>('/auth/login', { method: 'POST', body }),
   logout: () => apiRequest<void>('/auth/logout', { method: 'POST' }),
   me: (signal?: AbortSignal) => apiRequest<User>('/auth/me', { signal }),

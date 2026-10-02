@@ -102,6 +102,16 @@ def settings(postgres: ProvisionedDatabase | None, tmp_path: Path) -> Settings:
         # every test that needs a gateway passes its own provider in.
         openai_api_key=None,
         anthropic_api_key=None,
+        # The same rule for sign-in: a developer's `.env` pointing at a real
+        # Supabase project must not move the suite's passwords there, or send
+        # its sign-ups to a live mailer. Tests that want Supabase script it.
+        auth_backend="local",
+        supabase_url=None,
+        supabase_publishable_key=None,
+        supabase_secret_key=None,
+        auth0_domain=None,
+        auth0_client_id=None,
+        auth0_client_secret=None,
         sse_heartbeat_seconds=1,
         sse_max_connection_seconds=2,
         max_concurrent_runs_per_user=3,

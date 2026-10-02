@@ -91,6 +91,31 @@ class Unauthenticated(AppError):
     message = "Sign in to continue."
 
 
+class InvalidCredentials(Unauthenticated):
+    """The single refusal every failed credential check returns.
+
+    One class, one message, so that no branch - an unknown address, a wrong
+    password, an account with no password, a refusal relayed from Supabase -
+    can become distinguishable from the others by its wording or its code.
+    """
+
+    code = "invalid_credentials"
+    message = "That email and password do not match an account."
+
+
+class EmailNotConfirmed(AppError):
+    """A correct password for an address that has not been confirmed yet.
+
+    Only ever raised *after* the password was accepted, so it tells a caller
+    nothing they did not already prove they know. A 403 rather than a 401: the
+    credential is right, the account is just not allowed in yet.
+    """
+
+    status_code = 403
+    code = "email_not_confirmed"
+    message = "Confirm your email address first. We sent you a link when you signed up."
+
+
 class Forbidden(AppError):
     status_code = 403
     code = "forbidden"
@@ -169,6 +194,19 @@ class DependencyUnavailable(AppError):
     status_code = 503
     code = "dependency_unavailable"
     message = "A required service is temporarily unavailable."
+
+
+class EmailDeliveryUnavailable(DependencyUnavailable):
+    """The confirmation email could not be sent, so no account was created.
+
+    Almost always configuration rather than an outage: Supabase's built-in
+    mailer only delivers to the project's own team, and refuses every other
+    address until the project has custom SMTP. Reported as a 503 because there
+    is nothing the person signing up can change to make it work.
+    """
+
+    code = "email_delivery_unavailable"
+    message = "We could not send a confirmation email to that address. Please try again later."
 
 
 class NotImplementedYet(AppError):

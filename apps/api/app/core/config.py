@@ -302,13 +302,26 @@ class Settings(BaseSettings):
     auth0_client_secret: SecretStr | None = None
 
     supabase_url: str | None = None
-    #: The project's publishable ("anon") key. Not a secret in the sense a
-    #: client secret is - it ships in browsers - but held as one so it cannot
-    #: be logged by the settings dump.
+    #: The project's publishable key (`sb_publishable_...`). Not a secret in the
+    #: sense a client secret is - it ships in browsers - but held as one so it
+    #: cannot be logged by the settings dump.
     supabase_publishable_key: SecretStr | None = None
-    #: What Supabase's tokens carry as their audience is fixed, so this is only
-    #: the value sent as `client_id`; unset falls back to the project URL.
-    supabase_client_id: str | None = None
+    #: Optional: the project's secret key (`sb_secret_...`). Every call to
+    #: Supabase Auth comes from this API, so without it Supabase rate-limits all
+    #: users as one address - this server's. With it, the API forwards each
+    #: person's own address in `Sb-Forwarded-For`, which Supabase only accepts
+    #: alongside a secret key and only once IP forwarding is switched on in the
+    #: project's rate-limit settings. A real secret: it bypasses row-level
+    #: security, and it never leaves this process.
+    supabase_secret_key: SecretStr | None = None
+
+    #: Where passwords live (ADR 0025). `supabase`: sign-up, sign-in and email
+    #: confirmation are Supabase Auth's, and the `users` table here is the
+    #: application's record of an account Supabase owns. `local`: the Argon2id
+    #: path from Phase 20, kept for the test suite and for development without a
+    #: Supabase project. Never inferred from whether Supabase is configured - a
+    #: mistyped key must not quietly move a deployment's passwords somewhere else.
+    auth_backend: Literal["local", "supabase"] = "local"
 
     # --- first-party tokens (Phase 26, ADR 0022) --------------------------
     #: Signing key for the tokens this system mints for password sign-in, as a
@@ -543,6 +556,7 @@ class Settings(BaseSettings):
         "s3_secret_access_key",
         "auth0_client_secret",
         "supabase_publishable_key",
+        "supabase_secret_key",
         "jwt_private_key",
         mode="before",
     )
@@ -569,7 +583,6 @@ class Settings(BaseSettings):
         "auth0_domain",
         "auth0_client_id",
         "supabase_url",
-        "supabase_client_id",
         "sso_redirect_base_url",
         mode="before",
     )
@@ -786,6 +799,16 @@ class Settings(BaseSettings):
             )
         if self.trusted_proxy_hops < 0:
             raise ValueError("TRUSTED_PROXY_HOPS cannot be negative.")
+        # Refused at startup rather than at the first sign-in, where it would
+        # read to the person signing in as an outage.
+        if self.auth_backend == "supabase" and not (
+            self.supabase_url and self.supabase_publishable_key
+        ):
+            raise ValueError(
+                "AUTH_BACKEND=supabase needs SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY."
+            )
+        if self.supabase_url and not self.supabase_url.startswith("https://"):
+            raise ValueError("SUPABASE_URL must be an https:// URL.")
         # A deployment that cannot mint tokens cannot authenticate anybody, and
         # an ephemeral key signs everyone out on every restart and cannot be
         # shared between the two processes. Refused rather than generated

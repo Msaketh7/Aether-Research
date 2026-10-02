@@ -108,4 +108,21 @@ describe('RegisterPage', () => {
       await screen.findByText('This deployment does not accept new registrations.'),
     ).toBeInTheDocument();
   });
+
+  it('asks the person to check their inbox when the address needs confirming', async () => {
+    // Supabase's default (ADR 0025): no session until the emailed link is followed.
+    vi.stubGlobal('fetch', respond(202, { confirmation_required: true, email: 'ada@example.com' }));
+    const user = userEvent.setup();
+
+    renderWithProviders(<RegisterPage />);
+    await user.type(screen.getByLabelText('Email'), 'ada@example.com');
+    await user.type(screen.getByLabelText('Password'), 'correct-horse-battery-staple');
+    await user.click(screen.getByTestId('register-submit'));
+
+    const inbox = await screen.findByTestId('check-inbox');
+    expect(inbox).toHaveTextContent('Check your inbox');
+    expect(inbox).toHaveTextContent('ada@example.com');
+    expect(screen.getByRole('link', { name: /Go to sign in/ })).toHaveAttribute('href', '/login');
+    expect(push).not.toHaveBeenCalled();
+  });
 });

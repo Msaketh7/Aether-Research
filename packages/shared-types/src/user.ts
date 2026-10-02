@@ -46,9 +46,29 @@ export interface RegisterRequest {
   name?: string;
 }
 
-/** Registration returns the same body as sign-in: the account is signed in. */
+/** What sign-in returns, and what registration returns when it signs in. */
 export interface LoginResponse {
   user: User;
+}
+
+/**
+ * A sign-up waiting on the emailed confirmation link (`202`).
+ *
+ * What registration returns when Supabase holds the passwords and confirms
+ * addresses - its default (ADR 0025). Also what an already-registered address
+ * gets, so the form cannot be used to find out who has an account.
+ */
+export interface ConfirmationRequired {
+  confirmation_required: true;
+  /** The address the link went to, as the person typed it, normalised. */
+  email: string;
+}
+
+/** `201` signs the account in; `202` means check your inbox first. */
+export type RegisterResponse = LoginResponse | ConfirmationRequired;
+
+export interface ResendConfirmationRequest {
+  email: string;
 }
 
 /** How many other devices `DELETE /auth/sessions` signed out. */
