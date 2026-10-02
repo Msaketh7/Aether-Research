@@ -21,8 +21,6 @@ from app.research.recorder import RunRecorder
 from tests.support import agents as fake
 from tests.support.projection import WIRE, count, seed_run, seed_source, seed_user
 
-pytestmark = pytest.mark.anyio
-
 
 @pytest.fixture
 async def owner(database: Database) -> uuid.UUID:

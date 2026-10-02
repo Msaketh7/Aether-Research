@@ -31,8 +31,6 @@ from app.research.recorder import RunRecorder
 from tests.support import agents as fake
 from tests.support.projection import WIRE, count, seed_run, seed_source, seed_user
 
-pytestmark = pytest.mark.anyio
-
 QUOTE = "Inference on H100 instances is priced at $4.10 per GPU-hour."
 
 
