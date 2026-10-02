@@ -573,12 +573,16 @@ existed - a 403 would confirm the id. Those rules were tested from the first
 endpoint, so when Phase 20 put real sessions underneath them there was nothing
 to retrofit.
 
-**A session is a row; the cookie is a pointer to it.** Argon2id passwords, a
-256-bit token stored as a SHA-256, and an `HttpOnly` cookie - so "sign this
-device out" takes effect on that device's next request. Not a JWT, which either
-cannot be revoked or is checked against a list on every request, at which point
-it is a session with extra cryptography
-([ADR 0021](docs/ADRs/0021-sessions-not-tokens.md)). Every request also draws on
+**A fifteen-minute signed token, renewed without anyone noticing.** Argon2id
+passwords or single sign-on, then an ES256 access token in an `HttpOnly` cookie
+and an opaque refresh token rotated on every use, whose reuse revokes the whole
+family; a revocation index keyed by session makes "sign this device out" land
+on that device's next request
+([ADR 0022](docs/ADRs/0022-federated-identity-and-signed-tokens.md), which
+replaced the opaque sessions of ADR 0021). The web app renews an expired token
+on the 401 it causes and retries once, one renewal at a time across every tab,
+because two at once would present the same refresh token and revoke the
+session. Every request also draws on
 a token bucket keyed by identity and route class, declared once on the whole
 `/api/v1` router so a route added later is limited before anybody remembers to;
 and every authentication event and research mutation lands in an append-only
@@ -817,13 +821,20 @@ anywhere, which is the most common way this control is bypassed in practice.
 input format. The parser runs scrubbed and isolated, with a deadline, so a
 malicious document costs a subprocess rather than the worker.
 
-**A session is a row; the cookie is a pointer to it.** Argon2id passwords at the
-shipped parameters (about 130 ms of deliberate CPU, run in a thread so the event
-loop keeps serving), a 256-bit token stored as a SHA-256, and an `HttpOnly`
-cookie - so "sign this device out" takes effect on that device's next request.
-Not a JWT, which either cannot be revoked or is checked against a list on every
-request, at which point it is a session with extra cryptography
-([ADR 0021](docs/ADRs/0021-sessions-not-tokens.md)).
+**A short-lived signed token, and a renewal the reader never sees.** Argon2id
+passwords at the shipped parameters (about 130 ms of deliberate CPU, run in a
+thread so the event loop keeps serving) or single sign-on through Auth0 or
+Supabase; either way the browser holds an ES256 access token for fifteen
+minutes and an opaque refresh token for fourteen days, both `HttpOnly`, the
+second scoped to the refresh endpoint's path and rotated on every use
+([ADR 0022](docs/ADRs/0022-federated-identity-and-signed-tokens.md)). A
+revocation index keyed by session makes signing a device out land on its next
+request. The web app renews on the 401 an expired token causes and retries the
+request once (`apps/web/src/lib/auth/refresh.ts`); renewals are single-flight
+within a tab and queue on a Web Lock across tabs, because two in flight would
+present the same refresh token and the API treats that as theft. A page load
+with no usable access token goes through `/resume`, which renews if it can and
+sends the visitor to sign in only if the API says there is nothing to renew.
 
 **Registering and signing in fail identically** for an unknown email and a wrong
 password, including in how long they take - an endpoint that answers faster for

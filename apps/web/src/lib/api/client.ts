@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '@aether/shared-types';
+import { refreshSession, renewsOnUnauthorized } from '@/lib/auth/refresh';
 import { apiUrl } from './config';
 
 /**
@@ -9,6 +10,11 @@ import { apiUrl } from './config';
  * once. The error envelope matches the API contract in
  * `@aether/shared-types`, and unexpected failures are normalised into the same
  * shape so callers only ever handle `ApiError`.
+ *
+ * It is also where an expired session is renewed. The access token outlives
+ * fifteen minutes only by being replaced, so a 401 here usually means "renew",
+ * not "signed out": the request is retried once after a renewal, and only a
+ * renewal the API refuses reaches the caller as the 401 it was.
  */
 
 export class ApiError extends Error {
@@ -84,11 +90,28 @@ async function toApiError(response: Response): Promise<ApiError> {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const sentAt = Date.now();
+  const response = await send(path, options);
+
+  if (response.status === 401 && renewsOnUnauthorized(path)) {
+    const outcome = await refreshSession(sentAt);
+    if (outcome === 'renewed') return read<T>(await send(path, options));
+    if (outcome === 'unreachable') {
+      // Not a verdict on the session, so not a 401: reported as the network
+      // failure it is, which the query layer retries rather than treating as
+      // a sign-out.
+      throw new ApiError(0, 'network_error', 'Could not reach the Aether API.');
+    }
+  }
+
+  return read<T>(response);
+}
+
+async function send(path: string, options: RequestOptions): Promise<Response> {
   const { method = 'GET', body, signal, query } = options;
 
-  let response: Response;
   try {
-    response = await fetch(buildUrl(path, query), {
+    return await fetch(buildUrl(path, query), {
       method,
       // Session cookies; no token is ever stored in JS-readable storage.
       credentials: 'include',
@@ -106,7 +129,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
     throw new ApiError(0, 'network_error', 'Could not reach the Aether API.');
   }
+}
 
+async function read<T>(response: Response): Promise<T> {
   if (!response.ok) throw await toApiError(response);
   if (response.status === 204) return undefined as T;
 

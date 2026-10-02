@@ -25,6 +25,12 @@ import { useCurrentUser } from '@/lib/api/queries';
  * leaves the pages mounted so each renders its own error state, which says
  * what happened - being bounced to a sign-in form by a 503 is the least
  * informative possible response to an outage.
+ *
+ * And an authentication failure here is already final. The API client renews
+ * an expired access token before any 401 reaches a query (lib/auth/refresh),
+ * so a 401 that gets this far is one the API refused to renew - the session
+ * was revoked or has run its fourteen days. The page they were on travels with
+ * them, so signing in again puts them back on it.
  */
 export function RequireSession({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -32,7 +38,9 @@ export function RequireSession({ children }: { children: ReactNode }) {
   const signedOut = isError && error instanceof ApiError && error.isAuthError;
 
   useEffect(() => {
-    if (signedOut) router.replace('/login');
+    if (!signedOut) return;
+    const here = `${window.location.pathname}${window.location.search}`;
+    router.replace(`/login?${new URLSearchParams({ next: here }).toString()}`);
   }, [signedOut, router]);
 
   if (isPending) {

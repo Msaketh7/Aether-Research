@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetRefreshState } from '@/lib/auth/refresh';
 import { ApiError, apiRequest } from './client';
 
 /**
@@ -23,6 +24,8 @@ function mockFetch(response: Partial<Response> & { json?: () => Promise<unknown>
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  resetRefreshState();
 });
 
 describe('apiRequest', () => {
@@ -124,5 +127,151 @@ describe('apiRequest', () => {
       },
     });
     await expect(apiRequest('/auth/logout', { method: 'POST' })).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * The access token lives fifteen minutes, so a 401 is usually an expiry rather
+ * than a sign-out. Before ADR 0022's refresh endpoint had a caller, every
+ * signed-in person was sent back to the sign-in page a quarter of an hour after
+ * arriving; these pin the renewal that prevents that, and the cases where it
+ * must not happen.
+ */
+describe('apiRequest after the access token expires', () => {
+  type Reply = { status: number; body?: unknown };
+
+  function replies(...sequence: Reply[]) {
+    const fn = vi.fn();
+    for (const { status, body = {} } of sequence) {
+      fn.mockResolvedValueOnce({
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: '',
+        json: async () => body,
+      });
+    }
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  const UNAUTHENTICATED = {
+    status: 401,
+    body: { error: { code: 'unauthenticated', message: 'Sign in to continue.' } },
+  };
+
+  const urls = (fn: ReturnType<typeof vi.fn>) =>
+    fn.mock.calls.map(
+      ([url, init]) =>
+        `${(init as RequestInit).method} ${new URL(String(url), 'http://x').pathname}`,
+    );
+
+  it('renews the session and retries the request once', async () => {
+    const fetchMock = replies(
+      UNAUTHENTICATED,
+      { status: 200 },
+      { status: 200, body: { id: 'run-1' } },
+    );
+
+    await expect(apiRequest('/research/run-1')).resolves.toEqual({ id: 'run-1' });
+    expect(urls(fetchMock)).toEqual([
+      expect.stringMatching(/^GET .*\/research\/run-1$/),
+      expect.stringMatching(/^POST .*\/auth\/refresh$/),
+      expect.stringMatching(/^GET .*\/research\/run-1$/),
+    ]);
+  });
+
+  it('sends the same body again on the retry', async () => {
+    const fetchMock = replies(UNAUTHENTICATED, { status: 200 }, { status: 202, body: { id: 'r' } });
+
+    await apiRequest('/research', { method: 'POST', body: { question: 'Why?' } });
+
+    const first = fetchMock.mock.calls[0]![1] as RequestInit;
+    const retry = fetchMock.mock.calls[2]![1] as RequestInit;
+    expect(retry.method).toBe('POST');
+    expect(retry.body).toBe(first.body);
+  });
+
+  it('passes the 401 on when the API refuses to renew', async () => {
+    const fetchMock = replies(UNAUTHENTICATED, UNAUTHENTICATED);
+
+    const error = (await apiRequest('/auth/me').catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.status).toBe(401);
+    expect(error.isAuthError).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries only once, so a revoked session cannot loop', async () => {
+    const fetchMock = replies(UNAUTHENTICATED, { status: 200 }, UNAUTHENTICATED);
+
+    const error = (await apiRequest('/auth/me').catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports an unreachable refresh as a network failure, not a sign-out', async () => {
+    // A 401 here would send the person to the sign-in form over an outage.
+    replies(UNAUTHENTICATED, { status: 503 });
+
+    const error = (await apiRequest('/research').catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.status).toBe(0);
+    expect(error.code).toBe('network_error');
+    expect(error.isRetryable).toBe(true);
+  });
+
+  it('does not renew on a wrong password', async () => {
+    const fetchMock = replies({
+      status: 401,
+      body: { error: { code: 'invalid_credentials', message: 'Check your email and password.' } },
+    });
+
+    const error = (await apiRequest('/auth/login', {
+      method: 'POST',
+      body: { email: 'a@b.co', password: 'nope' },
+    }).catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.code).toBe('invalid_credentials');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not renew on a 403, which is a refusal rather than an expiry', async () => {
+    const fetchMock = replies({
+      status: 403,
+      body: { error: { code: 'forbidden', message: 'No.' } },
+    });
+
+    await apiRequest('/research/someone-elses').catch(() => undefined);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('renews once for requests that expire together', async () => {
+    // Three queries on one page all 401 at the same moment. One renewal, or
+    // the second presentation of the refresh token revokes the session.
+    // A renewal takes time, so the clock moves while it is in flight - which is
+    // what lets a 401 arriving after it see that it is already answered.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000);
+    let renewed = false;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/auth/refresh')) {
+        vi.setSystemTime(2_000);
+        renewed = true;
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      return renewed
+        ? { ok: true, status: 200, json: async () => ({ url }) }
+        : { ok: false, status: 401, statusText: '', json: async () => UNAUTHENTICATED.body };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      Promise.all([apiRequest('/research/a'), apiRequest('/research/b'), apiRequest('/stats')]),
+    ).resolves.toHaveLength(3);
+
+    const renewals = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/auth/refresh'));
+    expect(renewals).toHaveLength(1);
   });
 });

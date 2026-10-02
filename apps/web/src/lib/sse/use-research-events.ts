@@ -10,13 +10,18 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiUrl } from '@/lib/api/config';
 import { queryKeys } from '@/lib/api/query-keys';
+import { refreshSession } from '@/lib/auth/refresh';
 
 /**
  * Subscribes to a run's progress stream (ADR 0006).
  *
  * Native `EventSource` handles reconnection and replays from `Last-Event-ID`,
  * which the server honours - so this hook does not implement its own retry
- * loop. Its three jobs are (a) keep an ordered, de-duplicated, bounded buffer of
+ * loop, with one exception. A reconnect the server answers with anything but
+ * a 200 makes the browser give up for good, and the usual one is a 401: the
+ * server closes a stream after `SSE_MAX_CONNECTION_SECONDS`, and a run that
+ * outlasts the fifteen-minute access token reconnects without one. So a stream
+ * the browser has closed is renewed and reopened, a bounded number of times. Its three jobs are (a) keep an ordered, de-duplicated, bounded buffer of
  * events for the activity feed, (b) assemble the answer out of the pieces it
  * arrives in, and (c) reconcile the TanStack Query cache so the live feed and
  * the REST snapshot never disagree.
@@ -32,6 +37,15 @@ const TERMINAL: ReadonlySet<RunStatus> = new Set(['completed', 'failed', 'cancel
 
 /** Cap on retained events. A long deep run can emit thousands. */
 const MAX_BUFFERED_EVENTS = 500;
+
+/**
+ * Reopenings in a row, with no successful open between them, before the hook
+ * stops. Every one is a session renewal, and a stream that keeps failing after
+ * one - a run that was deleted, an API that answers 500 - is not going to be
+ * fixed by more; the run's polling fallback still converges on the truth.
+ */
+const MAX_REOPENINGS = 3;
+const REOPEN_DELAY_MS = 1_000;
 
 export type StreamState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
@@ -196,16 +210,10 @@ export function useResearchEvents(
     if (!enabled || !runId) return;
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
 
-    const source = new EventSource(apiUrl(`/research/${runId}/events`), {
-      withCredentials: true,
-    });
-
-    const onOpen = () => setState('open');
-    const onError = () => {
-      // EventSource retries on its own; `error` also fires on a normal server
-      // close, so this is a status hint rather than a fatal condition.
-      setState('error');
-    };
+    let source: EventSource | null = null;
+    let disposed = false;
+    let reopenings = 0;
+    let pending: ReturnType<typeof setTimeout> | undefined;
 
     const parse = (raw: MessageEvent<string>) => {
       try {
@@ -216,19 +224,44 @@ export function useResearchEvents(
       }
     };
 
-    source.addEventListener('open', onOpen);
-    source.addEventListener('error', onError);
-    for (const type of RESEARCH_EVENT_TYPES) {
-      source.addEventListener(type, parse as EventListener);
-    }
+    const open = () => {
+      const stream = new EventSource(apiUrl(`/research/${runId}/events`), {
+        withCredentials: true,
+      });
+      source = stream;
+
+      stream.addEventListener('open', () => {
+        reopenings = 0;
+        setState('open');
+      });
+      stream.addEventListener('error', () => {
+        // EventSource retries on its own; `error` also fires on a normal server
+        // close, so this is a status hint rather than a fatal condition -
+        // unless the browser has closed the stream, which it never reopens.
+        setState('error');
+        if (stream.readyState !== EventSource.CLOSED || disposed) return;
+        if (reopenings >= MAX_REOPENINGS) return;
+        reopenings += 1;
+        // The refused reconnect was made a moment ago, so only a renewal from
+        // now on answers it; one from earlier in a long stream may itself have
+        // expired. A reopened stream sends no Last-Event-ID, so the server
+        // replays from the start, and `handleEvent` drops what it has seen.
+        void refreshSession().then((outcome) => {
+          if (disposed || outcome === 'refused') return;
+          pending = setTimeout(open, REOPEN_DELAY_MS * reopenings);
+        });
+      });
+      for (const type of RESEARCH_EVENT_TYPES) {
+        stream.addEventListener(type, parse as EventListener);
+      }
+    };
+
+    open();
 
     return () => {
-      source.removeEventListener('open', onOpen);
-      source.removeEventListener('error', onError);
-      for (const type of RESEARCH_EVENT_TYPES) {
-        source.removeEventListener(type, parse as EventListener);
-      }
-      source.close();
+      disposed = true;
+      clearTimeout(pending);
+      source?.close();
     };
   }, [enabled, runId, handleEvent]);
 

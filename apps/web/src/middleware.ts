@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { ACCESS_COOKIE_NAME } from '@/lib/auth/cookies';
+import { safeDestination } from '@/lib/auth/redirect';
 
 /**
  * Two jobs, and only one of them is a security control.
@@ -54,6 +55,19 @@ const GUARDED_EXACT = ['/'] as const;
 /** Pages that exist to get a session, and are pointless once you have one. */
 const AUTH_PAGES = ['/login', '/register'] as const;
 
+/**
+ * Where a guarded page sends a visitor with no usable access token.
+ *
+ * Not the sign-in page, because this cannot tell a signed-out visitor from a
+ * signed-in one whose access token simply expired. The access cookie dies with
+ * its token after fifteen minutes; the refresh token that would renew it lives
+ * for fourteen days, but its cookie is scoped to the refresh endpoint's path
+ * and is never sent here. So the resume page asks: it renews if it can and
+ * continues to `next`, and sends the visitor to sign in only if the API says
+ * there is nothing to renew.
+ */
+export const RESUME_PAGE = '/resume';
+
 const DEFAULT_DESTINATION = '/';
 
 export function middleware(request: NextRequest) {
@@ -82,11 +96,11 @@ export function middleware(request: NextRequest) {
 
   if (!signedIn && guarded) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    url.pathname = RESUME_PAGE;
     url.search = '';
     // Path and query only, taken from the parsed URL rather than from any
-    // header. An absolute URL here would be reflected into the sign-in page's
-    // redirect and is how this becomes an open redirect.
+    // header. An absolute URL here would be reflected into the resume and
+    // sign-in pages' redirects and is how this becomes an open redirect.
     url.searchParams.set('next', `${pathname}${search}`);
     return NextResponse.redirect(url);
   }
@@ -96,6 +110,17 @@ export function middleware(request: NextRequest) {
     url.pathname = DEFAULT_DESTINATION;
     url.search = '';
     return NextResponse.redirect(url);
+  }
+
+  // Nothing to resume: go straight on, rather than renewing a token that is
+  // still good. Validated like every other `next`, because it came from the
+  // address bar.
+  if (signedIn && pathname === RESUME_PAGE) {
+    const destination = new URL(
+      safeDestination(request.nextUrl.searchParams.get('next')),
+      request.nextUrl.origin,
+    );
+    return NextResponse.redirect(destination);
   }
 
   return NextResponse.next();
@@ -117,6 +142,7 @@ function isUnder(pathname: string, prefix: string): boolean {
  * Checking `exp` at all is about not bouncing people. Without it, a browser
  * holding a day-old cookie is routed into the app, every query 401s, and the
  * app sends it back here — a redirect loop that looks like a broken session.
+ * An expired token goes to the resume page instead, which renews it.
  */
 function hasUnexpiredToken(token: string | undefined): boolean {
   if (!token) return false;
@@ -128,8 +154,8 @@ function hasUnexpiredToken(token: string | undefined): boolean {
   if (typeof exp !== 'number') return false;
 
   // No leeway. Clock skew matters when *rejecting* a valid token; here the
-  // cost of being a few seconds optimistic is one refused request, and the
-  // refresh flow handles that.
+  // cost of being a few seconds optimistic is one refused request, which the
+  // API client answers by renewing the session (lib/auth/refresh).
   return exp * 1000 > Date.now();
 }
 
