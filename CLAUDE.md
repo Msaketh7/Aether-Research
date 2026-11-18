@@ -617,6 +617,28 @@ $'
   bare `PgUUID`. `tests/test_schema.py` fails if the conversion is removed.
 - **`langgraph` depends on `langgraph-sdk`, which pins `websockets` below 17**,
   so the lockfile holds 16.x. uvicorn needs 13 or later.
+- **The interpreter is pinned by `apps/api/.python-version`, and it has to be.**
+  `uv sync --frozen` locks every library, but `requires-python = ">=3.12"` has
+  no ceiling, no workflow passes `setup-uv` a `python-version`, and uv picks the
+  newest interpreter satisfying the floor - so CI silently floated from 3.13 to
+  **3.14** and six tests went red on a branch that had touched no Python at all.
+  The interpreter was the one unpinned dependency in an otherwise fully pinned
+  project, which is the same class as an Ollama model tagged `latest`. All three
+  uv-using workflows (`ci`, `test`, `eval`) run with `working-directory:
+apps/api`, so that one file covers every one of them and local work too; three
+  workflow edits would drift apart. `requires-python` is deliberately left
+  alone - tightening it would force a re-lock, and `uv sync --frozen` would then
+  reject the committed `uv.lock`.
+- **Two real defects are waiting on Python 3.14**, found by that float and
+  currently only reachable by removing the pin. `scripts/smoke.py` never closes
+  the `HTTPError` urllib returns for a non-2xx response, and that object owns a
+  temp file: 3.14's collector reports the leak as a `ResourceWarning`, which the
+  suite's `filterwarnings = error` escalates, so `test_smoke_script.py` fails
+  four ways on a deallocator rather than on anything it asserts. And trafilatura
+  extracts neither the title nor the date it used to from the parsing fixtures -
+  same locked version, different Python under lxml - so
+  `test_document_parsing.py` and `test_ingestion_pipeline.py` compare `None`
+  against what they expected. Neither is a test problem.
 - **Alembic's `fileConfig` disables every existing logger** unless told not to,
   and `migrations/env.py` imports the application to reach its metadata - so
   running migrations in-process used to silence every `app.*` logger while the
