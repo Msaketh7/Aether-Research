@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { AppBackdrop } from './app-backdrop';
 import { DemoBanner } from './demo-banner';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
@@ -7,14 +8,14 @@ import { Topbar } from './topbar';
  * Persistent chrome for every signed-in page.
  *
  * The skip link is first in the DOM so a keyboard user is not tabbed through
- * the whole rail on every navigation. The mesh is a fixed decorative layer
+ * the whole rail on every navigation. The light is a fixed decorative layer
  * behind everything, not a background on `main`: as a background it would
- * repeat down a long report.
+ * repeat down a long report, and it would repaint on every scroll.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="relative flex min-h-dvh">
-      <div className="mesh pointer-events-none fixed inset-0 -z-10" aria-hidden />
+      <AppBackdrop />
 
       <a
         href="#main"

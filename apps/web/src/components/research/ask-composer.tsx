@@ -4,6 +4,7 @@ import type { ResearchMode } from '@aether/shared-types';
 import { ArrowRight, ArrowUpRight, LoaderCircle, Search, Telescope, Zap } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { BeamRing, Spotlight } from '@/components/common/light';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError } from '@/lib/api/client';
@@ -101,13 +102,18 @@ export function AskComposer({
     <div className={className}>
       <form
         onSubmit={onSubmit}
+        // The sign-in card's surface: the same glass, the same arc of light
+        // round its edge and the same light under the pointer, so the first
+        // thing after signing in is the thing that was just signed in on.
         className={cn(
-          'rounded-2xl border border-border bg-card/80 p-2 shadow-e2 backdrop-blur-sm',
-          'transition-[border-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out-soft)]',
-          'focus-within:border-primary/45 focus-within:shadow-glow',
+          'surface-hero p-2',
+          'transition-[box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out-soft)]',
+          'focus-within:shadow-glow',
         )}
         noValidate
       >
+        <BeamRing />
+        <Spotlight />
         <label htmlFor="ask" className="sr-only">
           Research question
         </label>

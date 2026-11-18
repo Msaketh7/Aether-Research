@@ -4,6 +4,9 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
+ * The primary variant is the sign-in stage's button (`.btn-beam`): electric
+ * blue, lit along its top edge, with a sheen that crosses it on hover.
+ *
  * Press feedback is a scale, not a colour change.
  *
  * A button that only changes colour on `:active` gives no feedback at all on a
@@ -14,7 +17,7 @@ import { cn } from '@/lib/utils';
 const buttonVariants = cva(
   [
     'relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium',
-    'transition-[background-color,border-color,color,box-shadow,transform,opacity]',
+    'transition-[background-color,background-position,border-color,color,box-shadow,transform,opacity]',
     'duration-[var(--duration-fast)] ease-[var(--ease-out-soft)]',
     'active:scale-[0.97] active:duration-[var(--duration-instant)]',
     'disabled:pointer-events-none disabled:opacity-50',
@@ -24,8 +27,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          'bg-primary text-primary-foreground shadow-e1 hover:shadow-glow hover:brightness-110',
+        default: 'btn-beam font-semibold',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-accent hover:shadow-e1',
         outline:
           'border border-border bg-card/60 shadow-e1 hover:border-primary/45 hover:bg-accent hover:text-accent-foreground hover:shadow-e2',

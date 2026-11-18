@@ -72,12 +72,14 @@ export function PipelineTicker({ className }: { className?: string }) {
           <li key={name} className="h-1 overflow-hidden rounded-full bg-foreground/10">
             <span
               className={cn(
-                'auth-segment block h-full origin-left rounded-full',
+                'bar-beam block h-full origin-left rounded-full',
                 'transition-transform duration-[var(--duration-slower)] ease-[var(--ease-out-soft)]',
                 index <= active ? 'scale-x-100' : 'scale-x-0',
                 index === active && ambient && 'auth-segment-live',
               )}
-            />
+            >
+              {index === active && ambient ? <span className="auth-segment-shine" /> : null}
+            </span>
           </li>
         ))}
       </ol>

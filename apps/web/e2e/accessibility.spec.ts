@@ -20,7 +20,15 @@ function historyLink(page: Page, name: string) {
   return page.getByRole('region', { name: 'Research history' }).getByRole('link', { name });
 }
 
-const PAGES = ['/', '/dashboard', '/research/new', '/evaluations', '/settings'] as const;
+const PAGES = [
+  '/',
+  '/dashboard',
+  '/research/new',
+  '/evaluations',
+  '/settings',
+  '/login',
+  '/register',
+] as const;
 
 for (const path of PAGES) {
   test(`${path} has exactly one level-1 heading`, async ({ page }) => {
@@ -47,6 +55,22 @@ test('the form is operable by keyboard alone', async ({ page }) => {
 
   await expect(page.getByTestId('mode-quick')).toHaveAttribute('aria-checked', 'true');
 });
+
+for (const [path, submit] of [
+  ['/login', 'login-submit'],
+  ['/register', 'register-submit'],
+] as const) {
+  test(`${path} does not scroll horizontally on a phone`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(path);
+    await expect(page.getByTestId(submit)).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(2);
+  });
+}
 
 for (const path of ['/', '/dashboard'] as const) {
   test(`${path} does not scroll horizontally on a phone`, async ({ page }) => {

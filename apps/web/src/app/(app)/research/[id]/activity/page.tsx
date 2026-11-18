@@ -101,7 +101,7 @@ function AgentRow({ agent, tools }: { agent: AgentRunRecord; tools: ToolCallReco
         </ul>
       ) : null}
 
-      <p className="mt-2.5 font-mono text-[11px] text-muted-foreground/70">
+      <p className="mt-2.5 font-mono text-[11px] text-muted-foreground/85">
         trace {agent.trace_id ?? 'none'}, started {formatDateTime(agent.started_at)}
       </p>
     </Card>

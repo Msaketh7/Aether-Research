@@ -8,10 +8,9 @@ import { AuthCard, AuthSubmit } from '@/components/auth/auth-card';
 import { AuthField, PasswordField } from '@/components/auth/auth-field';
 import { AuthShell } from '@/components/auth/auth-shell';
 import { ConfirmationBanner, ResendButton } from '@/components/auth/confirmation';
-import { SsoButtons } from '@/components/auth/sso-buttons';
+import { SsoButtons, SsoButtonsSkeleton } from '@/components/auth/sso-buttons';
 import { SsoError } from '@/components/auth/sso-error';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api/client';
 import { API_MODE } from '@/lib/api/config';
 import { useLogin, useSsoOptions } from '@/lib/api/queries';
@@ -28,41 +27,40 @@ import { shake } from '@/lib/motion';
  * holding the same `HttpOnly` cookie pair and the app above this page cannot
  * tell which was used.
  *
- * `useSearchParams` needs a Suspense boundary: without one Next cannot
- * statically render the shell, and the whole route is forced dynamic. The
- * card and its heading sit outside the boundary, so the stage, the glass and
- * the page's `h1` are all in the first HTML and only the form waits.
+ * The form is in the first HTML. `useSearchParams` would put it behind a
+ * Suspense boundary, and a prerendered page ships that boundary's fallback
+ * and swaps the real form in after hydration - a skeleton flash and a layout
+ * shift on the one page everybody sees, which it did until this was changed.
+ * Only two things need `?next=`: the redirect after a password sign-in, which
+ * reads it when it happens, and the SSO links, which carry it in their `href`
+ * and are client-rendered anyway because they wait on a query.
  */
 export default function LoginPage() {
   return (
     <AuthShell>
       <AuthCard title="Welcome back" description="Sign in to pick up where your research left off.">
-        <Suspense fallback={<FormSkeleton />}>
-          <SignInForm />
-        </Suspense>
+        <SignInForm />
       </AuthCard>
     </AuthShell>
   );
 }
 
-function FormSkeleton() {
-  return (
-    <div className="flex flex-col gap-5" aria-hidden>
-      <Skeleton className="h-[4.5rem] w-full" />
-      <Skeleton className="h-[4.5rem] w-full" />
-      <Skeleton className="h-11 w-full" />
-    </div>
-  );
+/** Where to go once signed in, read at the moment it is needed. */
+function currentDestination() {
+  return safeDestination(new URLSearchParams(window.location.search).get('next'));
+}
+
+function SsoForDestination() {
+  const params = useSearchParams();
+  return <SsoButtons next={safeDestination(params.get('next'))} />;
 }
 
 function SignInForm() {
   const router = useRouter();
-  const params = useSearchParams();
   const login = useLogin();
   const sso = useSsoOptions();
   const form = useRef<HTMLFormElement>(null);
 
-  const destination = safeDestination(params.get('next'));
   const [email, setEmail] = useState(API_MODE === 'mock' ? 'analyst@aether.dev' : '');
   const [password, setPassword] = useState(API_MODE === 'mock' ? 'demo-password' : '');
 
@@ -84,7 +82,7 @@ function SignInForm() {
     login.mutate(
       { email, password },
       {
-        onSuccess: () => router.push(destination),
+        onSuccess: () => router.push(currentDestination()),
         // The card, not the form: the whole surface refusing reads as "no",
         // where a shaking form reads as a broken layout.
         onError: () => shake(form.current?.closest<HTMLElement>('[data-auth-card]') ?? null),
@@ -150,7 +148,9 @@ function SignInForm() {
         </form>
       ) : null}
 
-      <SsoButtons next={destination} />
+      <Suspense fallback={<SsoButtonsSkeleton />}>
+        <SsoForDestination />
+      </Suspense>
 
       {passwordEnabled && registrationEnabled ? (
         <p className="text-center text-sm text-muted-foreground">

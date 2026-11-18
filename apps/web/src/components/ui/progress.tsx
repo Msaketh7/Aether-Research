@@ -32,7 +32,7 @@ export function Progress({
     >
       {indeterminate ? (
         <div
-          className="h-full w-full origin-left rounded-full bg-primary"
+          className="bar-beam h-full w-full origin-left rounded-full"
           style={{ animation: 'indeterminate 1.4s var(--ease-out-soft) infinite' }}
           data-motion="loop"
           aria-hidden
@@ -40,7 +40,7 @@ export function Progress({
       ) : (
         <ProgressPrimitive.Indicator
           className={cn(
-            'relative h-full w-full flex-1 overflow-hidden rounded-full bg-primary',
+            'bar-beam relative h-full w-full flex-1 overflow-hidden rounded-full',
             'transition-transform duration-[var(--duration-slower)] ease-[var(--ease-out-soft)]',
           )}
           style={{ transform: `translateX(-${100 - pct}%)` }}

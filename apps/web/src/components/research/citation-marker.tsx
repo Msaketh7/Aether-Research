@@ -45,7 +45,7 @@ export function CitationMarker({
           aria-label={`Citation ${ordinal}: ${citation.source_title}`}
           className={cn(
             'mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-[5px] px-1 align-super',
-            'bg-primary/12 font-mono text-[10px] font-medium text-primary',
+            'bg-primary/12 font-mono text-[10px] font-medium text-primary-strong',
             'transition-[background-color,transform,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-soft)]',
             'hover:-translate-y-px hover:bg-primary/22 hover:shadow-e1 active:translate-y-0',
             'data-[state=open]:bg-primary data-[state=open]:text-primary-foreground',

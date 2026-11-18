@@ -69,7 +69,7 @@ export function AuthField({
           aria-invalid={Boolean(error?.length)}
           aria-describedby={describedBy}
           className={cn(
-            'auth-input h-11 pl-10 text-[0.9375rem] placeholder:text-muted-foreground/60',
+            'auth-input h-11 pl-10 text-base placeholder:text-muted-foreground/60 sm:text-[0.9375rem]',
             trailing && 'pr-12',
             className,
           )}
