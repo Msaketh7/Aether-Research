@@ -3,6 +3,7 @@
 import { ArrowUp, LoaderCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { BeamRing } from '@/components/common/light';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError } from '@/lib/api/client';
@@ -88,12 +89,13 @@ export function FollowUpComposer({
       noValidate
       data-testid="follow-up-composer"
       className={cn(
-        'rounded-2xl border border-border bg-card/80 p-2 shadow-e2 backdrop-blur-sm',
-        'transition-[border-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out-soft)]',
-        'focus-within:border-primary/45 focus-within:shadow-glow',
+        'surface-hero p-2',
+        'transition-[box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out-soft)]',
+        'focus-within:shadow-glow',
         className,
       )}
     >
+      <BeamRing />
       <label htmlFor={`follow-up-${runId}`} className="sr-only">
         Ask a follow-up question
       </label>

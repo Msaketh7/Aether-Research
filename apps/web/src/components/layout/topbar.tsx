@@ -15,7 +15,6 @@ import {
 import { useCurrentUser, useLogout } from '@/lib/api/queries';
 import { Brand } from './brand';
 import { MobileNav } from './mobile-nav';
-import { ThemeToggle } from './theme-toggle';
 
 export function Topbar() {
   const { data: user } = useCurrentUser();
@@ -45,8 +44,6 @@ export function Topbar() {
           New
         </Link>
       </Button>
-
-      <ThemeToggle />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

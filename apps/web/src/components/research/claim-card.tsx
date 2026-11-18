@@ -42,7 +42,7 @@ function EvidenceRow({ evidence, source }: { evidence: Evidence; source: Source 
         ) : (
           'Source unavailable'
         )}
-        <span className="ml-2 opacity-70">via {evidence.extractor_model}</span>
+        <span className="ml-2 opacity-80">via {evidence.extractor_model}</span>
       </p>
     </li>
   );
@@ -79,7 +79,7 @@ export function ClaimCard({
             {claim.task_external_id}
           </span>
         ) : null}
-        <span className="font-mono text-[11px] text-muted-foreground/70">
+        <span className="font-mono text-[11px] text-muted-foreground/85">
           {claim.normalized_key}
         </span>
       </div>

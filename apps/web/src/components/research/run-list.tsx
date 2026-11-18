@@ -43,7 +43,7 @@ export function RunList({ runs }: { runs: ResearchRunSummary[] }) {
             key={run.id}
             data-testid="run-row"
             className={cn(
-              'group relative rounded-xl border border-border bg-card p-4 shadow-e1',
+              'surface group relative rounded-xl border border-border p-4 shadow-e1',
               'transition-[transform,box-shadow,border-color] duration-[var(--duration-base)] ease-[var(--ease-out-soft)]',
               'hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-e2',
               'focus-within:border-primary/45 focus-within:shadow-glow',

@@ -16,6 +16,11 @@ import { useResearchList } from '@/lib/api/queries';
  * recent work to pick something up again.
  */
 
+/** The heading, a word at a time, the last one catching the light - the sign-in
+ * headline's entrance, so the page after signing in continues the one before. */
+const HEADING = ['What', 'would', 'you', 'like'];
+const HEADING_ACCENT = 'researched?';
+
 /** Starting points, so an empty product is not a blank page. */
 const SUGGESTIONS = [
   {
@@ -46,18 +51,40 @@ export default function HomePage() {
        * on a short laptop it collides with the suggestions underneath it.
        */}
       <section aria-labelledby="ask-heading" className="pt-6 sm:pt-12">
+        {/* Each word is its own span so it can arrive on its own beat. The
+            heading is still one string to a screen reader - the spans carry no
+            semantics and the spaces between them are real text. */}
         <h1
           id="ask-heading"
-          className="font-display text-balance text-center text-[2rem] font-semibold leading-[1.1] sm:text-[2.6rem]"
+          className="font-display text-balance text-center text-[2rem] font-medium leading-[1.1] sm:text-[2.75rem]"
         >
-          What would you like researched?
+          {HEADING.map((word, index) => (
+            <span key={word}>
+              <span
+                className="enter-word"
+                style={{ ['--enter-delay' as string]: `${index * 60}ms` }}
+              >
+                {word}
+              </span>{' '}
+            </span>
+          ))}
+          <span
+            className="enter-word text-beam"
+            style={{ ['--enter-delay' as string]: `${HEADING.length * 60}ms` }}
+          >
+            {HEADING_ACCENT}
+          </span>
         </h1>
-        <p className="mx-auto mt-2 max-w-xl text-balance text-center text-sm leading-relaxed text-muted-foreground">
+        <p className="enter mx-auto mt-3 max-w-xl text-balance text-center text-sm leading-relaxed text-muted-foreground [--enter-delay:240ms]">
           Ask a complex question. Aether decomposes it, researches the parts in parallel, extracts
           evidence with verbatim spans and writes a report where every claim carries a citation.
         </p>
 
-        <AskComposer className="mt-6" suggestions={SUGGESTIONS} autoFocus />
+        <AskComposer
+          className="enter mt-7 [--enter-delay:320ms]"
+          suggestions={SUGGESTIONS}
+          autoFocus
+        />
       </section>
 
       <section aria-label="Recent research" className="mt-12">

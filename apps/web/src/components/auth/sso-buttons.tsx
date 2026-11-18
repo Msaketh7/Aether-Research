@@ -29,14 +29,7 @@ import { CONNECTION_ICONS } from './provider-icons';
 export function SsoButtons({ next }: { next?: string }) {
   const { data, isPending, isError } = useSsoOptions();
 
-  if (isPending) {
-    return (
-      <div className="flex flex-col gap-2" aria-hidden>
-        <Skeleton className="h-11 w-full" />
-        <Skeleton className="h-11 w-full" />
-      </div>
-    );
-  }
+  if (isPending) return <SsoButtonsSkeleton />;
 
   // Deliberately silent. If the deployment cannot say which providers it has,
   // the honest fallback is the password form that is already on the page - an
@@ -70,6 +63,28 @@ export function SsoButtons({ next }: { next?: string }) {
         {data.options.map((option) => (
           <SsoButton key={`${option.provider}:${option.connection}`} option={option} next={next} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What stands in for the buttons while the deployment says which it has.
+ *
+ * The same height as what usually replaces it, divider row included: the card
+ * is centred, so every pixel it grows by moves the whole page, and two
+ * buttons without their divider measured as a 14px jump. The row is left
+ * blank rather than drawn, because a deployment with no single sign-on has
+ * no divider either. Exported so a Suspense boundary around the buttons can
+ * show the same thing.
+ */
+export function SsoButtonsSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" aria-hidden>
+      <div className="h-4" />
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-11 w-full" />
+        <Skeleton className="h-11 w-full" />
       </div>
     </div>
   );

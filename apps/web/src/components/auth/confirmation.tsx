@@ -149,7 +149,7 @@ export function CheckInbox({ email, onStartAgain }: { email: string; onStartAgai
   return (
     <div className="reveal flex flex-col gap-5" data-testid="check-inbox">
       <div className="flex flex-col items-center gap-3 text-center">
-        <span className="auth-feature-icon auth-pop size-12 rounded-2xl">
+        <span className="icon-tile pop size-12 rounded-2xl">
           <MailCheck className="size-6" aria-hidden />
         </span>
         <h2 className="font-display text-xl font-medium text-foreground">Check your inbox</h2>
@@ -160,7 +160,7 @@ export function CheckInbox({ email, onStartAgain }: { email: string; onStartAgai
         </p>
       </div>
 
-      <Link href="/login" className="auth-cta group gap-2">
+      <Link href="/login" className="auth-cta btn-beam group gap-2">
         <ArrowLeft
           aria-hidden
           className="relative z-[1] size-4 transition-transform duration-[var(--duration-base)] ease-[var(--ease-spring)] group-hover:-translate-x-1"

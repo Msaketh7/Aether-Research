@@ -1,7 +1,7 @@
 'use client';
 
 import { Pause, Play } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAmbientMotion } from '@/lib/motion';
 
 /**
@@ -30,12 +30,39 @@ export const AUTH_BACKDROP_VIDEO =
  *
  * WCAG 2.2.2 requires a way to stop anything that moves for more than five
  * seconds alongside other content, hence the pause control.
+ *
+ * The pointer drives a slight parallax on the light (a few pixels, coalesced
+ * to one write per frame). The position is written onto the parallax layer
+ * itself: it used to go onto the page's root, and because custom properties
+ * inherit, every pointer move recalculated the style of every element on the
+ * page.
  */
 export function AuthBackdrop() {
   const ambient = useAmbientMotion();
   const video = useRef<HTMLVideoElement>(null);
+  const parallax = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    const layer = parallax.current;
+    if (!ambient || !layer) return;
+    let frame = 0;
+    const move = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse') return;
+      const { clientX, clientY } = event;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        layer.style.setProperty('--px', (clientX / window.innerWidth - 0.5).toFixed(3));
+        layer.style.setProperty('--py', (clientY / window.innerHeight - 0.5).toFixed(3));
+      });
+    };
+    window.addEventListener('pointermove', move, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', move);
+    };
+  }, [ambient]);
 
   const toggle = () => {
     const element = video.current;
@@ -51,9 +78,9 @@ export function AuthBackdrop() {
 
   return (
     <>
-      <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>
-        <div className="auth-parallax absolute inset-0">
-          <div className="auth-still absolute inset-0" />
+      <div className="pointer-events-none fixed inset-0 isolate overflow-hidden" aria-hidden>
+        <div ref={parallax} className="auth-parallax absolute inset-0">
+          <div className="backdrop-light absolute inset-0" />
           {ambient ? (
             <video
               ref={video}
@@ -74,7 +101,7 @@ export function AuthBackdrop() {
           ) : null}
         </div>
         <div className="auth-scrim absolute inset-0" />
-        <div className="auth-grain absolute inset-0" />
+        <div className="grain absolute inset-0" />
       </div>
 
       {ambient ? (
@@ -84,7 +111,7 @@ export function AuthBackdrop() {
           aria-pressed={paused}
           aria-label="Pause background animation"
           title={paused ? 'Play background animation' : 'Pause background animation'}
-          className="auth-chip auth-enter fixed right-4 bottom-4 z-20 grid size-10 place-items-center rounded-full text-foreground/80 hover:text-foreground [--enter-delay:900ms] sm:right-6 sm:bottom-6"
+          className="auth-chip enter fixed right-4 bottom-4 z-20 grid size-10 place-items-center rounded-full text-foreground/80 hover:text-foreground [--enter-delay:900ms] sm:right-6 sm:bottom-6"
         >
           {paused ? (
             <Play className="size-4" aria-hidden />

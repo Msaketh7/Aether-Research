@@ -3,6 +3,7 @@
 import { LoaderCircle } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
+import { AppBackdrop } from '@/components/layout/app-backdrop';
 import { AetherMark } from '@/components/layout/brand';
 import { Button } from '@/components/ui/button';
 import { refreshSession } from '@/lib/auth/refresh';
@@ -25,6 +26,7 @@ import { safeDestination } from '@/lib/auth/redirect';
 export default function ResumePage() {
   return (
     <main className="flex min-h-dvh items-center justify-center px-4 py-12">
+      <AppBackdrop />
       <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">
         <AetherMark className="size-8" />
         <Suspense fallback={<Checking />}>
