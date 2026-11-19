@@ -71,7 +71,15 @@ def fetch(url: str, *, timeout: float) -> Response:
         with urllib.request.urlopen(request, timeout=timeout) as answer:  # noqa: S310
             return Response(answer.status, dict(answer.headers), answer.read())
     except urllib.error.HTTPError as error:
-        return Response(error.code, dict(error.headers), error.read())
+        # HTTPError *is* the response, not just a report of one: through
+        # `addbase` it carries a temp file holding the body, so it has to be
+        # closed like the success path's answer. Reading it and dropping it
+        # leaves the handle to the collector, which Python 3.14 reports as a
+        # ResourceWarning from `_TemporaryFileCloser.__del__` - and under
+        # `filterwarnings = error` that fails whichever test happens to be
+        # running when the collector gets to it, rather than this one.
+        with error:
+            return Response(error.code, dict(error.headers), error.read())
 
 
 @dataclass(frozen=True)

@@ -205,3 +205,39 @@ def test_a_base_url_without_a_scheme_is_refused():
     read a failing smoke test as a failing deployment.
     """
     assert smoke.main(["--base-url", "aether.example.com"]) == 2
+
+
+def test_an_error_response_is_closed_rather_than_left_to_the_collector(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """`fetch` must close an HTTPError, because an HTTPError is a response.
+
+    Asserted on the body's own handle rather than on a ResourceWarning, so it
+    states the property on every Python rather than only on the one whose
+    collector happens to complain. The leak was invisible until 3.14, where it
+    surfaced as an unraisable warning inside whichever test the collector
+    interrupted - four failures in this module, none of them near the cause.
+    """
+    import email.message
+    import io
+    import urllib.error
+
+    headers = email.message.Message()
+    headers["Content-Type"] = "application/json"
+    body = io.BytesIO(b'{"error": {"code": "unauthorized"}}')
+    refusal = urllib.error.HTTPError(
+        "http://deployment.invalid/api/v1/research", 401, "Unauthorized", headers, body
+    )
+
+    def refuse(request: object, timeout: float | None = None) -> object:
+        raise refusal
+
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", refuse)
+
+    answer = smoke.fetch("http://deployment.invalid/api/v1/research", timeout=1.0)
+
+    # The body still has to arrive: closing it early would make every refusal
+    # read as an empty one, and the checks that matter here are all 4xx.
+    assert answer.status == 401
+    assert answer.json() == {"error": {"code": "unauthorized"}}
+    assert body.closed, "fetch read the error response but never closed it"
